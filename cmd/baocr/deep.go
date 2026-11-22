@@ -346,10 +346,10 @@ func greenInk(c color.RGBA) bool {
 // whiteInk accepts near-white glyphs (e.g. the bond number inside the pink heart).
 func whiteInk(c color.RGBA) bool { return c.R > 225 && c.G > 225 && c.B > 225 }
 
-// readHeartNumber reads the bond rank drawn in dark ink inside the pink heart.
+// heartInkImage isolates the bond number drawn in dark ink inside the pink heart.
 // Only dark pixels with pink on both sides of the same row count as glyphs, so
 // the blue panel around the heart can never leak into the read.
-func readHeartNumber(img image.Image, tess, data string) (string, error) {
+func heartInkImage(img image.Image) *image.Gray {
 	r := image.Rect(34, 794, 84, 832)
 	pink := func(c color.RGBA) bool {
 		return c.R > 225 && c.G > 150 && c.G < 235 && c.B > 180 && int(c.R)-int(c.G) > 15
@@ -375,6 +375,12 @@ func readHeartNumber(img image.Image, tess, data string) (string, error) {
 			bw.SetGray(x, y, color.Gray{Y: v})
 		}
 	}
+	return bw
+}
+
+// readHeartNumber reads the bond rank with Tesseract from the isolated ink image.
+func readHeartNumber(img image.Image, tess, data string) (string, error) {
+	bw := heartInkImage(img)
 	return recognizePNG(tess, data, resizeNearest(bw, bw.Bounds().Dx()*6, bw.Bounds().Dy()*6), "eng", 7, "-c", "tessedit_char_whitelist=0123456789")
 }
 

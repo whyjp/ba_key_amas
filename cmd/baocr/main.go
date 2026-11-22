@@ -645,6 +645,8 @@ func mainRun() error {
 	arrows := flag.Bool("scan-arrows", false, "HCU: scan sequential student profiles using the right arrow")
 	verifyFixed := flag.Bool("verify-fixed", false, "also read fixed meta (role/type/terrain) from pixels and warn when it disagrees with the dictionary; for audits after a patch")
 	workers := flag.Int("workers", 3, "concurrent extraction workers (OCR runs asynchronously while the scan continues)")
+	compareDir := flag.String("compare-ocr", "", "compare Tesseract values saved in this output dir with the PP-OCR sidecar on the same saved frames (no game input)")
+	sidecarURL := flag.String("ocr-sidecar", "http://127.0.0.1:47321", "PP-OCR sidecar base URL (see tools/ocr-sidecar)")
 	reextractDir := flag.String("reextract", "", "re-run extraction from the saved frames in this output dir (no game input); retries failed students, or --ids")
 	idsFlag := flag.String("ids", "", "with --reextract: comma-separated student ids (e.g. 003,007)")
 	fast := flag.Bool("fast", false, "scan-arrows: skip the menu pass (상세 popup, 레벨 업, 신비 해방 tabs)")
@@ -687,8 +689,11 @@ func mainRun() error {
 	if *reextractDir != "" {
 		modes++
 	}
+	if *compareDir != "" {
+		modes++
+	}
 	if modes != 1 {
-		return errors.New("choose exactly one of --live-one, --scan-live, --scan-arrows, --roster-preview, --detail-current, --grab, --watch, --reextract or --image")
+		return errors.New("choose exactly one of --live-one, --scan-live, --scan-arrows, --roster-preview, --detail-current, --grab, --watch, --reextract, --compare-ocr or --image")
 	}
 	if *fromFirst && !*arrows {
 		return errors.New("--from-first requires --scan-arrows")
@@ -715,6 +720,14 @@ func mainRun() error {
 	tessdata := filepath.Join(base, "vendor", "ocr", "tessdata")
 	if v := os.Getenv("TESSDATA_DIR"); v != "" {
 		tessdata = v
+	}
+	if *compareDir != "" {
+		sum, err := compareEngines(*compareDir, newSidecarRecognizer(*sidecarURL))
+		if err != nil {
+			return err
+		}
+		fmt.Print(sum)
+		return nil
 	}
 	if *reextractDir != "" {
 		// Offline: no HCU, no clicks. Menu frames present in the index are re-parsed too.
