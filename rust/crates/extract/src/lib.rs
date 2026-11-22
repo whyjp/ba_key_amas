@@ -6,6 +6,8 @@
 //! with the recogniser's own CTC probabilities. Nothing is guessed: a read whose
 //! best candidate is not clearly ahead stays empty and carries a warning.
 use anyhow::Result;
+mod deep;
+pub use deep::{apply_cell, match_label};
 use baocr_core::model::*;
 use baocr_core::ocr_api::{text_in, Ocr, TextBox};
 use baocr_ocr::ink_to_line;
@@ -13,6 +15,33 @@ use baocr_pixels as px;
 use image::RgbImage;
 use once_cell::sync::Lazy;
 use regex::Regex;
+
+/// Names of the frames a student's capture is stored as (`<name>.png` in details/NNN/).
+pub const FRAME_DETAIL: &str = "detail";
+pub const FRAME_POPUP_TOP: &str = "popup-top";
+pub const FRAME_POPUP_BOTTOM: &str = "popup-bottom";
+pub const FRAME_LEVEL_UP: &str = "tab-levelup";
+pub const FRAME_MYSTIC: &str = "tab-mystic";
+
+/// The four menu frames captured by the menu pass (상세 popup top/bottom,
+/// 레벨 업 tab, 신비 해방 tab).
+#[derive(Clone)]
+pub struct DeepFrames {
+    pub popup_top: RgbImage,
+    pub popup_bottom: RgbImage,
+    pub level_up: RgbImage,
+    pub mystic: RgbImage,
+}
+
+/// Fewest ink pixels a name strip / bond heart must show before it is read at all.
+/// A blank or off-layout frame would otherwise still yield the "most likely"
+/// dictionary entry, which is a guess, not a reading.
+const MIN_NAME_INK: usize = 40;
+const MIN_BOND_INK: usize = 8;
+
+fn ink_pixels(g: &image::GrayImage) -> usize {
+    g.pixels().filter(|p| p[0] < 128).count()
+}
 
 /// Log-probability lead the best candidate needs over the best *different* one.
 const MIN_MARGIN: f32 = 1.0;
@@ -61,9 +90,28 @@ impl<'a> Extractor<'a> {
         Self { ocr }
     }
 
+    /// Resolved student name of a frame, or "" when it cannot be read.
+    pub fn name_only(&self, img: &RgbImage) -> String {
+        let mut s = Student::default();
+        match self.read_name(img, &mut s) {
+            Ok(()) => s.name,
+            Err(_) => String::new(),
+        }
+    }
+
+    /// Parse the menu-pass frames into `s.deep` and cross-check them with the panel.
+    pub fn deep(&self, s: &mut Student, f: &DeepFrames) -> Result<()> {
+        deep::extract_deep(self.ocr, s, f)
+    }
+
     /// Read the name strip closed-set against the dictionary.
     fn read_name(&self, img: &RgbImage, s: &mut Student) -> Result<()> {
-        let line = ink_to_line(&px::name_ink_image(img));
+        let ink = px::name_ink_image(img);
+        if ink_pixels(&ink) < MIN_NAME_INK {
+            s.name_match = Some(NameMatch { status: "empty".into(), ..Default::default() });
+            return Ok(());
+        }
+        let line = ink_to_line(&ink);
         let (raw, _) = self.ocr.line(&line)?;
         s.raw_ocr.insert("name_line".into(), raw.clone());
         let (best, scores) = self.ocr.choose(&line, &UNIQUE_NAMES)?;
@@ -85,7 +133,11 @@ impl<'a> Extractor<'a> {
 
     /// Read the bond number inside the heart closed-set over 1..=100.
     fn read_bond(&self, img: &RgbImage, s: &mut Student) -> Result<()> {
-        let line = ink_to_line(&px::heart_ink_image(img));
+        let ink = px::heart_ink_image(img);
+        if ink_pixels(&ink) < MIN_BOND_INK {
+            return Ok(());
+        }
+        let line = ink_to_line(&ink);
         let (raw, _) = self.ocr.line(&line)?;
         s.raw_ocr.insert("bond".into(), raw);
         let (_, scores) = self.ocr.choose(&line, &BOND_CANDIDATES)?;

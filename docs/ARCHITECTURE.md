@@ -114,3 +114,20 @@ as an implausible read.
   anti-cheat. Keep the watcher screenshot-only, never touch game memory or
   files, and review the terms before shipping an overlay.
 - Layout is calibrated for 4:3 windowed only (see README "Screen setup").
+
+## Outcome: engine replaced, Rust port
+
+The OCR engine decision above was acted on. The Go+Tesseract extractor was
+ported to Rust (`rust/`) with PP-OCRv5 in process (oar-ocr for detection+
+recognition, `ort` directly for the closed-set CTC reads).
+
+- Names: 11/11 labelled screens and 106/106 saved frames, with no tuning tricks:
+  ink-isolated line + all-dictionary CTC scoring. Syllables outside the model's
+  vocabulary (e.g. 슌) are spelled with the nearest known syllable by likelihood.
+- Bond (1..=100): 106/106 saved frames.
+- Level: 105/105 against the exp table (the Tesseract path could not read it).
+- ~0.9 s per profile frame including the closed-set reads, in process.
+- Blank/off-layout frames are not "read": no ink means no name and no bond.
+- Remaining gaps: equipment icons beyond tier 4, 3-digit bond sample, ability
+  unlock (능력개방), 16:9/fullscreen, and live verification of the Rust scan and
+  `--watch` against the game (the unit tests use a fake HCU runner).

@@ -1,4 +1,42 @@
-# Blue Archive OCR prototypes
+# Blue Archive student data extractor
+
+## Rust implementation (current)
+
+`rust/` is a Cargo workspace that replaces the Go program. One binary, no Python,
+no C compiler, no Tesseract: PP-OCRv5 (Korean) runs in process through ONNX Runtime.
+
+```text
+# one-time: put the OCR models in models/ (see models/README.md), then
+cd rust
+cargo build --release
+target/release/baocr --image ../fixtures/detail-shun.png --out out-one        # parse a saved screenshot
+target/release/baocr --scan-arrows --from-first --out scan                    # scan the roster (HCU drives the game)
+target/release/baocr --scan-arrows --from-first --fast --out scan             # skip the menu pass
+target/release/baocr --reextract scan [--ids 003,007]                         # retry from saved frames, no game input
+target/release/baocr --watch --out db                                         # passive background updater
+cargo run -p baocr-namedict                                                   # refresh the dictionary after a patch
+```
+
+Build output goes to `CARGO_TARGET_DIR` (use a drive with space; C: was nearly full).
+
+How names and the bond number are read: the ink-isolated line is scored against
+every dictionary name (or 1..=100) with the recogniser's own CTC probabilities
+and the most probable candidate wins, so the result can only be a student; a
+read that is not clearly ahead stays empty. On the 106 saved frames the Rust
+extractor matches the Go scan on name, bond, the four stats, skills, rarity,
+pin, role and weapon stars (all 106), and reads the level of the 67 students
+the Go/Tesseract path left empty. Known gap: equipment item names are only
+verified for tier 4 (icon catalog); Go and Rust disagree on tier 5/6 slots.
+
+Workspace crates: `core` (schema, OCR trait), `names`, `pixels`, `equipment`,
+`export` (CSV/HTML/store/index), `ocr` (engine), `extract` (profile + menu pass),
+`pipeline` (async workers, re-extraction), `hcu` (game control, scan loop, watcher),
+`cli`, `namedict`. Module contracts: `rust/PORTING.md`.
+
+The Go program below is kept only until the Rust scan and watcher have been
+verified live against the game; it is superseded.
+
+# Blue Archive OCR prototypes (legacy Go/Python)
 
 ## Portable Go detail extractor (current)
 

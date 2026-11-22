@@ -1,0 +1,14 @@
+[package]
+name = "baocr-hcu"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+baocr-core.workspace = true
+baocr-pixels = { path = "../pixels" }
+baocr-extract = { path = "../extract" }
+image.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+regex.workspace = true

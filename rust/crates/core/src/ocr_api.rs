@@ -12,7 +12,7 @@ pub struct TextBox {
     pub score: f32,
 }
 
-pub trait Ocr {
+pub trait Ocr: Send + Sync {
     /// Detect and recognise all text on a frame (detection + recognition).
     fn boxes(&self, img: &RgbImage) -> anyhow::Result<Vec<TextBox>>;
     /// Recognise one pre-cropped text line (no detection).
@@ -34,4 +34,20 @@ pub fn text_in(boxes: &[TextBox], roi: (i32, i32, i32, i32)) -> String {
         .collect();
     hits.sort_by(|a, b| a.x0.partial_cmp(&b.x0).unwrap());
     hits.iter().map(|b| b.text.as_str()).collect()
+}
+
+/// Where a scan loop hands captured frames. The async pipeline implements it;
+/// the capture code (HCU) only sees this trait, so neither depends on the other.
+pub trait ScanSink {
+    /// Queue student `i`'s frames (keys are the FRAME_* names, e.g. "detail", "popup-top").
+    fn submit(&self, i: usize, frames: std::collections::BTreeMap<String, RgbImage>);
+    /// Resolved name of student `i` once extracted (blocks); empty if unreadable.
+    fn name_of(&self, i: usize) -> String;
+    /// Resolved name of a frame that was NOT submitted (empty if unreadable). Used to
+    /// confirm a repeat or a wrap-around by name, not by fingerprint alone.
+    fn peek_name(&self, img: &RgbImage) -> String;
+    /// The extracted first student (blocks). Used for the layout sanity check.
+    fn first_student(&self) -> anyhow::Result<crate::model::Student>;
+    /// (reason, message) when a worker asked the scan to stop (e.g. two unreadable names).
+    fn aborted(&self) -> Option<(String, String)>;
 }

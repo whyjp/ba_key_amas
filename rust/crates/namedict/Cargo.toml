@@ -1,0 +1,14 @@
+[package]
+name = "baocr-namedict"
+edition.workspace = true
+version.workspace = true
+
+[[bin]]
+name = "namedict"
+path = "src/main.rs"
+
+[dependencies]
+serde_json.workspace = true
+anyhow.workspace = true
+chrono.workspace = true
+ureq = { version = "2", features = ["json"] }

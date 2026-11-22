@@ -3,7 +3,20 @@ name = "baocr"
 edition.workspace = true
 version.workspace = true
 
+[[bin]]
+name = "baocr"
+path = "src/main.rs"
+
 [dependencies]
-baocr-core = { path = "../core" }
+baocr-core.workspace = true
+baocr-extract = { path = "../extract" }
+baocr-export = { path = "../export" }
 baocr-ocr = { path = "../ocr" }
-anyhow = "1"
+baocr-hcu = { path = "../hcu" }
+baocr-pipeline = { path = "../pipeline" }
+chrono.workspace = true
+ctrlc = "3"
+anyhow.workspace = true
+serde_json.workspace = true
+image.workspace = true
+clap = { version = "4", features = ["derive"] }
