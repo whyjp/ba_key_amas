@@ -1,0 +1,9 @@
+[package]
+name = "baocr-overlay"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+image.workspace = true
+anyhow.workspace = true
+ab_glyph = "0.2"

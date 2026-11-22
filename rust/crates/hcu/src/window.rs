@@ -3,7 +3,7 @@
 //! HCU's screenshot is the whole virtual desktop scaled into one image. The game
 //! window's client rectangle (Win32, physical pixels) is mapped into that image,
 //! so no `--region` has to be typed and moving the window does not break reading.
-use anyhow::{anyhow, bail, Result};
+use anyhow::{bail, Result};
 
 /// Pure mapping: a client rectangle in screen pixels -> HCU frame coordinates.
 ///
@@ -72,7 +72,7 @@ pub fn game_client_and_desktop(title: &str) -> Result<((i32, i32, i32, i32), (i3
 
 #[cfg(not(windows))]
 pub fn game_client_and_desktop(_title: &str) -> Result<((i32, i32, i32, i32), (i32, i32, i32, i32))> {
-    Err(anyhow!("automatic window detection is only implemented for Windows; pass --region"))
+    Err(anyhow::anyhow!("automatic window detection is only implemented for Windows; pass --region"))
 }
 
 /// The game's client rectangle in HCU frame coordinates, found automatically.

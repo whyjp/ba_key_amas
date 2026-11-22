@@ -13,6 +13,7 @@ baocr-extract = { path = "../extract" }
 baocr-export = { path = "../export" }
 baocr-ocr = { path = "../ocr" }
 baocr-hcu = { path = "../hcu" }
+baocr-overlay = { path = "../overlay" }
 baocr-pipeline = { path = "../pipeline" }
 chrono.workspace = true
 ctrlc = "3"

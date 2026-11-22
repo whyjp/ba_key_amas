@@ -230,6 +230,7 @@ dependencies = [
  "baocr-extract",
  "baocr-hcu",
  "baocr-ocr",
+ "baocr-overlay",
  "baocr-pipeline",
  "chrono",
  "clap",
@@ -346,6 +347,15 @@ dependencies = [
  "image",
  "oar-ocr",
  "ort",
+]
+
+[[package]]
+name = "baocr-overlay"
+version = "0.1.0"
+dependencies = [
+ "ab_glyph",
+ "anyhow",
+ "image",
 ]
 
 [[package]]

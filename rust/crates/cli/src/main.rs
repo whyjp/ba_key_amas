@@ -8,13 +8,15 @@
 //!   --grab <png>         save the current game region (no input)
 use anyhow::{bail, Context, Result};
 use baocr_core::model::RosterReport;
-use baocr_core::ocr_api::Ocr;
+use baocr_core::ocr_api::{Ocr, ScanSink};
 use baocr_export::{Index, Store};
 use baocr_extract::{Extractor, Options, FRAME_MYSTIC};
-use baocr_hcu::{check_aspect, detect_region, game_capture, new_capture, parse_frame_region, scan_arrows, Hcu, HcuSource, Watcher};
+use baocr_hcu::{check_aspect, detect_region, ensure_profile, prepare_scan, game_capture, new_capture, parse_frame_region, scan_arrows, Hcu, HcuSource, Watcher};
 use baocr_ocr::PpOcr;
+use baocr_overlay::Overlay;
 use baocr_pipeline::{reextract, Pipeline};
 use clap::Parser;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -51,6 +53,9 @@ struct Args {
     grab: Option<PathBuf>,
     #[arg(long, default_value_t = 300)]
     max_students: usize,
+    /// Do not show the progress banner over the game while scanning.
+    #[arg(long)]
+    no_overlay: bool,
     /// Concurrent extraction workers.
     #[arg(long, default_value_t = 3)]
     workers: usize,
@@ -135,13 +140,88 @@ fn run_image(args: &Args, path: &PathBuf, opts: &Options) -> Result<()> {
     Ok(())
 }
 
+/// Forwards frames to the pipeline and moves the banner's n/m forward.
+struct ProgressSink<'a> {
+    inner: &'a Pipeline,
+    overlay: Option<&'a Overlay>,
+    total: Option<usize>,
+}
+
+impl ScanSink for ProgressSink<'_> {
+    fn submit(&self, i: usize, frames: BTreeMap<String, image::RgbImage>) {
+        self.inner.submit(i, frames);
+        if let Some(o) = self.overlay {
+            o.scanning(i + 1, self.total);
+        }
+    }
+    fn name_of(&self, i: usize) -> String {
+        self.inner.name_of(i)
+    }
+    fn peek_name(&self, img: &image::RgbImage) -> String {
+        self.inner.peek_name(img)
+    }
+    fn first_student(&self) -> Result<baocr_core::model::Student> {
+        self.inner.first_student()
+    }
+    fn aborted(&self) -> Option<(String, String)> {
+        self.inner.aborted()
+    }
+}
+
+/// Plain-language reason shown on the banner when a scan stops early.
+fn stop_note(reason: &str) -> String {
+    match reason {
+        "focus_lost" => "게임 창이 활성 상태가 아니어서 중단했습니다".into(),
+        "layout_mismatch" => "4:3 창모드 화면이 아니어서 중단했습니다".into(),
+        "two_empty_names" => "학생 이름을 읽지 못해 중단했습니다".into(),
+        "deep_failed" => "메뉴 화면 캡처에 실패해 중단했습니다".into(),
+        "repeated_profile" => "같은 학생이 반복되어 중단했습니다".into(),
+        other => format!("중단됨: {other}"),
+    }
+}
+
 fn run_scan(args: &Args, hcu: &Hcu, region: [f64; 4], opts: Options) -> Result<()> {
     let deep = !args.fast;
+    let overlay = (!args.no_overlay).then(Overlay::start);
+    let ov = overlay.as_ref();
+
+    // Learn the total first (scroll through the roster once) so progress reads n/m,
+    // and start from the first student.
+    if let Some(o) = ov {
+        o.counting();
+    }
+    let total = match prepare_scan(hcu, region, |n| {
+        if let Some(o) = ov {
+            o.counting_n(n);
+        }
+    }) {
+        Ok(t) => {
+            println!("students in the roster: {t}");
+            Some(t)
+        }
+        Err(e) => {
+            eprintln!("could not count the roster ({e:#}); scanning from the open profile without a total");
+            if let Err(e2) = ensure_profile(hcu, region) {
+                if let Some(o) = ov {
+                    o.failed(0, None, "학생 목록이나 학생 프로필 화면을 먼저 열어 주세요");
+                    std::thread::sleep(std::time::Duration::from_secs(4));
+                }
+                return Err(e2);
+            }
+            None
+        }
+    };
+    let from_first = args.from_first || total.is_some();
+    if let Some(o) = ov {
+        o.scanning(0, total);
+    }
+
     let ocr: Arc<dyn Ocr> = Arc::new(load_ocr(args)?);
     let pipeline = Pipeline::new(&args.out, ocr, opts, deep, args.workers)?;
-    let outcome = scan_arrows(hcu, region, &args.out, args.max_students, args.from_first, deep, &pipeline)?;
+    let sink = ProgressSink { inner: &pipeline, overlay: ov, total };
+    let outcome = scan_arrows(hcu, region, &args.out, args.max_students, from_first, deep, &sink)?;
     let base = RosterReport { schema_version: 3, capture: Some(new_capture(region)), ..Default::default() };
-    let rep = pipeline.finish(base, &outcome.stop_reason, outcome.wrapped, args.from_first)?;
+    let rep = pipeline.finish(base, &outcome.stop_reason, outcome.wrapped, from_first)?;
     println!(
         "arrows: entries={} complete={} reason={} unresolved={}",
         rep.entries.len(),
@@ -149,6 +229,15 @@ fn run_scan(args: &Args, hcu: &Hcu, region: [f64; 4], opts: Options) -> Result<(
         rep.stop_reason,
         rep.unresolved.len()
     );
+    if let Some(o) = ov {
+        let n = rep.entries.len();
+        if outcome.error.is_none() || matches!(outcome.stop_reason.as_str(), "wrapped_to_first" | "max_students") {
+            o.finished(n, total.or(Some(n)));
+        } else {
+            o.failed(n, total, &stop_note(&outcome.stop_reason));
+        }
+        std::thread::sleep(std::time::Duration::from_secs(3)); // let the final state be read
+    }
     if let Some(e) = outcome.error {
         bail!(e);
     }
