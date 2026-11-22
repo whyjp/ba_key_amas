@@ -1,0 +1,19 @@
+.venv/
+__pycache__/
+.pytest_cache/
+build/
+dist/
+output/
+output-exe/
+*.spec
+ocr_probe.py
+
+# generated scan output and evidence (contain account screenshots)
+output-*/
+output-*.log
+# native dependencies and binaries (HCU, Tesseract, models) are supplied separately
+vendor/
+dist-go/
+*.zip
+*.exe
+.hermes_transcript.txt
