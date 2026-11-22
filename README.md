@@ -53,7 +53,6 @@ verified live against the game; it is superseded.
 ## History
 
 The first implementation was Go + Tesseract (commit `2847447`) with Python
-prototypes before it; the legacy Python files in the repo root are kept only for
-reference. The Rust port replaced the Go program after it matched it on all 106
+prototypes before it (both removed; see git history). The Rust port replaced the Go program after it matched it on all 106
 saved frames and in a live full scan (names, bond, stats, skills, rarity, pin,
 role identical; levels the Go version could not read are now read).
