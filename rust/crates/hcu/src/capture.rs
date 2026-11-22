@@ -63,7 +63,25 @@ pub fn to_frame(region: [f64; 4], x: i32, y: i32) -> (f64, f64) {
 /// Grab the game client as a 1280x960 frame. A screenshot leases the HCU GUI
 /// frame coordinates; two zooms (top and bottom half, native detail) are cropped
 /// to the region and stitched.
+/// Capture the game region as a 1280x960 frame. HCU answers `gui_frame_stale` when
+/// the screen changed between the screenshot and the zoom; that only means "take a
+/// new screenshot", so it is retried a few times before it is reported.
 pub fn game_capture(h: &Hcu, region: [f64; 4]) -> Result<RgbImage> {
+    let mut last = None;
+    for _ in 0..4 {
+        match capture_once(h, region) {
+            Ok(img) => return Ok(img),
+            Err(e) if format!("{e:#}").contains("gui_frame_stale") => {
+                last = Some(e);
+                std::thread::sleep(std::time::Duration::from_millis(150));
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    Err(last.unwrap())
+}
+
+fn capture_once(h: &Hcu, region: [f64; 4]) -> Result<RgbImage> {
     let frame = h.screenshot()?;
     if frame.screen.width == 0 {
         bail!("HCU screenshot has no frame");

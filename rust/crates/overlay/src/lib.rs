@@ -8,7 +8,7 @@ mod render;
 #[cfg(windows)]
 mod win;
 
-pub use render::{banner_layout, load_fonts, render, BannerState, Fonts, Phase, BASE_H, BASE_W};
+pub use render::{banner_layout, banner_origin, Ltrb, load_fonts, render, BannerState, Fonts, Phase, BASE_H, BASE_W};
 
 use std::sync::{Arc, Mutex};
 

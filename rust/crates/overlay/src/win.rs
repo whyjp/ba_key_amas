@@ -4,7 +4,7 @@
 //! (clicks pass through), WS_EX_NOACTIVATE (never takes focus), WS_EX_TOPMOST,
 //! WS_EX_TOOLWINDOW (no taskbar button). WDA_EXCLUDEFROMCAPTURE keeps it out of
 //! screenshots where the OS supports it.
-use crate::render::{banner_layout, load_fonts, render, BannerState, Fonts};
+use crate::render::{banner_layout, banner_origin, load_fonts, render, BannerState, Fonts, Ltrb};
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -27,6 +27,13 @@ struct Rect {
     top: i32,
     right: i32,
     bottom: i32,
+}
+#[repr(C)]
+struct MonitorInfo {
+    size: u32,
+    monitor: Rect,
+    work: Rect,
+    flags: u32,
 }
 #[repr(C)]
 struct Msg {
@@ -97,6 +104,9 @@ extern "system" {
     fn ReleaseDC(h: isize, dc: isize) -> i32;
     fn FindWindowW(class: *const u16, title: *const u16) -> isize;
     fn GetClientRect(h: isize, r: *mut Rect) -> i32;
+    fn GetWindowRect(h: isize, r: *mut Rect) -> i32;
+    fn MonitorFromWindow(h: isize, flags: u32) -> isize;
+    fn GetMonitorInfoW(m: isize, info: *mut MonitorInfo) -> i32;
     fn ClientToScreen(h: isize, p: *mut Point) -> i32;
     fn IsIconic(h: isize) -> i32;
 }
@@ -133,21 +143,33 @@ unsafe extern "system" fn wnd_proc(h: isize, m: u32, w: usize, l: isize) -> isiz
     DefWindowProcW(h, m, w, l)
 }
 
-/// The game's client rectangle in screen pixels (x, y, w, h), if it is visible.
-fn game_client() -> Option<(i32, i32, i32, i32)> {
+/// Where the game is: client area and whole window (both left/top/right/bottom, screen
+/// pixels) and the work area of the monitor it is on. None if hidden or minimised.
+fn game_geometry() -> Option<(Ltrb, Ltrb, Ltrb)> {
     unsafe {
         let title = std::env::var("BAOCR_OVERLAY_TITLE").unwrap_or_else(|_| "Blue Archive".into()); // override: demos/tests only
         let hwnd = FindWindowW(std::ptr::null(), wide(&title).as_ptr());
         if hwnd == 0 || IsIconic(hwnd) != 0 {
             return None;
         }
-        let mut r = Rect { left: 0, top: 0, right: 0, bottom: 0 };
+        let mut c = Rect { left: 0, top: 0, right: 0, bottom: 0 };
+        let mut o = Rect { left: 0, top: 0, right: 0, bottom: 0 };
         let mut p = Point { x: 0, y: 0 };
-        if GetClientRect(hwnd, &mut r) == 0 || ClientToScreen(hwnd, &mut p) == 0 {
+        if GetClientRect(hwnd, &mut c) == 0 || ClientToScreen(hwnd, &mut p) == 0 || GetWindowRect(hwnd, &mut o) == 0 {
             return None;
         }
-        let (w, h) = (r.right - r.left, r.bottom - r.top);
-        (w > 100 && h > 100).then_some((p.x, p.y, w, h))
+        let (cw, ch) = (c.right - c.left, c.bottom - c.top);
+        if cw <= 100 || ch <= 100 {
+            return None;
+        }
+        let mut mi = MonitorInfo { size: std::mem::size_of::<MonitorInfo>() as u32, monitor: Rect { left: 0, top: 0, right: 0, bottom: 0 }, work: Rect { left: 0, top: 0, right: 0, bottom: 0 }, flags: 0 };
+        let hmon = MonitorFromWindow(hwnd, 2); // MONITOR_DEFAULTTONEAREST
+        let work = if hmon != 0 && GetMonitorInfoW(hmon, &mut mi) != 0 {
+            (mi.work.left, mi.work.top, mi.work.right, mi.work.bottom)
+        } else {
+            (i32::MIN / 2, i32::MIN / 2, i32::MAX / 2, i32::MAX / 2)
+        };
+        Some(((p.x, p.y, p.x + cw, p.y + ch), (o.left, o.top, o.right, o.bottom), work))
     }
 }
 
@@ -273,7 +295,11 @@ fn run(state: Arc<Mutex<BannerState>>, stop: Arc<AtomicBool>, fonts: Fonts) {
         // Keep the banner out of the screenshots the scanner reads (Windows 10 2004+).
         let capturable = std::env::var_os("BAOCR_OVERLAY_CAPTURABLE").is_some(); // tests only
         if !capturable && SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE) == 0 {
-            eprintln!("overlay: capture exclusion unavailable; the banner sits where no field is read");
+            // Without capture exclusion the banner would appear in the frames being read
+            // and hide fields: reading the game matters more than showing progress.
+            eprintln!("overlay: this Windows version cannot hide the banner from screen capture; running without it");
+            DestroyWindow(hwnd);
+            return;
         }
         let screen_dc = GetDC(0);
         let mut canvas: Option<Canvas> = None;
@@ -287,7 +313,7 @@ fn run(state: Arc<Mutex<BannerState>>, stop: Arc<AtomicBool>, fonts: Fonts) {
                 DispatchMessageW(&msg);
             }
             if tick % 8 == 0 {
-                rect = game_client(); // follow the window if it moves
+                rect = game_geometry(); // follow the window if it moves
             }
             match rect {
                 None => {
@@ -296,9 +322,10 @@ fn run(state: Arc<Mutex<BannerState>>, stop: Arc<AtomicBool>, fonts: Fonts) {
                         visible = false;
                     }
                 }
-                Some((cx, cy, cw, ch)) => {
+                Some((client, outer, work)) => {
+                    let (cw, ch) = (client.2 - client.0, client.3 - client.1);
                     let s = state.lock().map(|g| g.clone()).unwrap_or_default();
-                    let (bx, by, bw, _) = banner_layout(cw, ch); // proportional to this window
+                    let (_, _, bw, _) = banner_layout(cw, ch); // proportional to this window
                     let img = render(bw, &s, tick, &fonts);
                     let (w, h) = (img.width() as i32, img.height() as i32);
                     if canvas.as_ref().map(|c| (c.w, c.h)) != Some((w, h)) {
@@ -306,7 +333,9 @@ fn run(state: Arc<Mutex<BannerState>>, stop: Arc<AtomicBool>, fonts: Fonts) {
                     }
                     if let Some(c) = canvas.as_mut() {
                         c.blit(&img);
-                        let pos = Point { x: cx + bx, y: cy + by };
+                        // off the game: above its window, else below it (see banner_origin)
+                        let (px, py) = banner_origin(client, outer, work, (w, h));
+                        let pos = Point { x: px, y: py };
                         let size = Size { cx: w, cy: h };
                         let src = Point { x: 0, y: 0 };
                         let blend = BlendFunction { op: 0, flags: 0, alpha: 255, format: 1 };

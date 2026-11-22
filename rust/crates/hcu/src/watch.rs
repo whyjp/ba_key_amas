@@ -151,7 +151,14 @@ mod tests {
     }
 
     fn profile(r: u8, g: u8, b: u8) -> RgbImage {
-        RgbImage::from_pixel(1280, 960, Rgb([r, g, b])) // navy band colour everywhere => detail_visible
+        // navy band colour everywhere, plus the white stat rows a real profile has
+        let mut img = RgbImage::from_pixel(1280, 960, Rgb([r, g, b]));
+        for y in 345..372 {
+            for x in 700..1060 {
+                img.put_pixel(x, y, Rgb([240, 244, 248]));
+            }
+        }
+        img
     }
 
     fn student(name: &str, level: Option<i32>) -> Student {

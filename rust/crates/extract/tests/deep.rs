@@ -57,3 +57,16 @@ fn blank_frame_yields_nothing() {
     assert!(s.name.is_empty(), "name {:?}", s.name);
     assert!(s.bond_rank.is_none());
 }
+
+/// The main menu is recognised by its bottom labels and the 학생 button is found;
+/// no other screen is taken for it.
+#[test]
+fn lobby_is_recognised_and_student_button_found() {
+    let Some(ocr) = engine() else { return };
+    let (x, y) = baocr_extract::lobby_student_button(&ocr, &fx("lobby-main-menu.png")).expect("lobby not recognised");
+    // 학생 icon sits around (325, 890) on the 1280x960 layout
+    assert!((x - 325).abs() <= 25 && (y - 890).abs() <= 30, "button at ({x},{y})");
+    for other in ["roster-top.png", "detail-shun.png", "popup-stats-top.png", "tab-mystic.png"] {
+        assert!(baocr_extract::lobby_student_button(&ocr, &fx(other)).is_none(), "{other} taken for the lobby");
+    }
+}

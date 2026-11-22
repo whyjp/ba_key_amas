@@ -23,6 +23,33 @@ pub fn banner_layout(client_w: i32, client_h: i32) -> (i32, i32, u32, u32) {
     ((client_w - w) / 2, (client_h as f32 * TOP_SHARE).round() as i32, w as u32, h as u32)
 }
 
+/// Rectangle as (left, top, right, bottom) in screen pixels.
+pub type Ltrb = (i32, i32, i32, i32);
+
+/// Top-left of the banner in screen coordinates, chosen so it does not sit on the
+/// game: directly above the game window, else directly below it, and only when
+/// the monitor has no room on either side, inside the window in the band between
+/// the game header and its info panel.
+///
+/// `client` and `outer` are the game's client area and whole window (with title
+/// bar), `work` the monitor's work area (taskbar excluded), `size` the banner.
+pub fn banner_origin(client: Ltrb, outer: Ltrb, work: Ltrb, size: (i32, i32)) -> (i32, i32) {
+    let (cw, ch) = (client.2 - client.0, client.3 - client.1);
+    let (bw, bh) = size;
+    let gap = ((ch as f32 * 0.01).round() as i32).max(4);
+    // centred on the window, but never pushed off the monitor
+    let x = (client.0 + (cw - bw) / 2).clamp(work.0, (work.2 - bw).max(work.0));
+    let above = outer.1 - bh - gap;
+    if above >= work.1 {
+        return (x, above);
+    }
+    let below = outer.3 + gap;
+    if below + bh <= work.3 {
+        return (x, below);
+    }
+    (x, client.1 + (ch as f32 * TOP_SHARE).round() as i32)
+}
+
 // Palette (Blue Archive UI): header navy, panel navy, cyan accent, light text.
 const NAVY_TOP: [u8; 3] = [44, 74, 116];
 const NAVY_BOTTOM: [u8; 3] = [27, 47, 80];
@@ -279,6 +306,29 @@ mod tests {
             assert_eq!(x, (cw - w as i32) / 2, "{cw}: centred");
             assert!((y + h as i32) as f32 / (ch as f32) < 0.245, "{cw}: stays above the info panel");
         }
+    }
+
+    #[test]
+    fn banner_stays_off_the_game_when_it_can() {
+        let work = (0, 0, 1920, 1040);
+        let size = (490, 102);
+        // a window in the middle of the screen: the banner sits above it
+        let client = (400, 300, 1310, 982);
+        let outer = (392, 270, 1318, 990);
+        let (x, y) = banner_origin(client, outer, work, size);
+        assert!(y + size.1 <= outer.1, "above the window, not on it: y={y}");
+        assert_eq!(x, 400 + (910 - 490) / 2);
+        // a window at the very top: below it
+        let outer_top = (392, 0, 1318, 720);
+        let (_, y) = banner_origin((400, 30, 1310, 712), outer_top, work, size);
+        assert!(y >= outer_top.3, "below the window: y={y}");
+        // a window filling the work area: only then inside, in the header/panel band
+        let full = (0, 0, 1920, 1040);
+        let (_, y) = banner_origin((0, 31, 1920, 1040), full, work, size);
+        assert!(y > 31 && y < 31 + (1009.0 * 0.245) as i32, "inside band: y={y}");
+        // never off the monitor horizontally
+        let (x, _) = banner_origin((0, 300, 300, 600), (0, 270, 300, 610), work, size);
+        assert!(x >= 0);
     }
 
     #[test]

@@ -33,6 +33,27 @@ pub struct DeepFrames {
     pub mystic: RgbImage,
 }
 
+/// The bottom navigation labels of the main menu (lobby), left to right.
+const LOBBY_LABELS: [&str; 8] = ["카페", "스케줄", "학생", "편성", "소설", "제조", "상점", "모집"];
+
+/// Recognise the main menu by its bottom navigation labels and return where to
+/// click to enter the student menu (frame pixels of the 1280x960 layout).
+///
+/// At least four of the eight labels must be read along the bottom bar, so a
+/// student list, a profile or the account page is never mistaken for the lobby,
+/// whatever the lobby wallpaper looks like. The click lands on the 학생 icon,
+/// just above its label.
+pub fn lobby_student_button(ocr: &dyn Ocr, img: &RgbImage) -> Option<(i32, i32)> {
+    let boxes = ocr.boxes(img).ok()?;
+    let bar: Vec<&TextBox> = boxes.iter().filter(|b| b.y0 > 880.0 && b.y1 < 958.0).collect();
+    let found = LOBBY_LABELS.iter().filter(|l| bar.iter().any(|b| b.text.trim() == **l)).count();
+    if found < 4 {
+        return None;
+    }
+    let b = bar.iter().find(|b| b.text.trim() == "학생")?;
+    Some((((b.x0 + b.x1) / 2.0).round() as i32, (b.y0 - 14.0).round() as i32))
+}
+
 /// Fewest ink pixels a name strip / bond heart must show before it is read at all.
 /// A blank or off-layout frame would otherwise still yield the "most likely"
 /// dictionary entry, which is a guess, not a reading.
@@ -155,8 +176,14 @@ impl<'a> Extractor<'a> {
         let at = |roi: px::Rect| text_in(&boxes, roi);
         let mut s = Student { source: source.into(), ..Default::default() };
 
-        self.read_name(img, &mut s)?;
-        self.read_bond(img, &mut s)?;
+        // Names and bond are read closed-set, which always has a "most likely" answer:
+        // only do it on a frame that really is a profile.
+        if px::detail_visible(img) {
+            self.read_name(img, &mut s)?;
+            self.read_bond(img, &mut s)?;
+        } else {
+            s.warnings.push("not_a_profile_frame".into());
+        }
 
         // basic stats
         let stat_rois = [(684, 350, 860, 374), (890, 350, 1060, 374), (684, 386, 860, 410), (890, 386, 1060, 410)];

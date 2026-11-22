@@ -190,7 +190,10 @@ fn run_scan(args: &Args, hcu: &Hcu, region: [f64; 4], opts: Options) -> Result<(
     if let Some(o) = ov {
         o.counting();
     }
-    let total = match prepare_scan(hcu, region, |n| {
+    let ocr: Arc<dyn Ocr> = Arc::new(load_ocr(args)?);
+    // The main menu is recognised by its bottom labels, and 학생 is found there.
+    let student_button = |img: &image::RgbImage| baocr_extract::lobby_student_button(&*ocr, img);
+    let total = match prepare_scan(hcu, region, &student_button, |n| {
         if let Some(o) = ov {
             o.counting_n(n);
         }
@@ -201,9 +204,9 @@ fn run_scan(args: &Args, hcu: &Hcu, region: [f64; 4], opts: Options) -> Result<(
         }
         Err(e) => {
             eprintln!("could not count the roster ({e:#}); scanning from the open profile without a total");
-            if let Err(e2) = ensure_profile(hcu, region) {
+            if let Err(e2) = ensure_profile(hcu, region, &student_button) {
                 if let Some(o) = ov {
-                    o.failed(0, None, "학생 목록이나 학생 프로필 화면을 먼저 열어 주세요");
+                    o.failed(0, None, "학생 목록, 학생 프로필 또는 메인 메뉴 화면을 먼저 열어 주세요");
                     std::thread::sleep(std::time::Duration::from_secs(4));
                 }
                 return Err(e2);
@@ -216,8 +219,7 @@ fn run_scan(args: &Args, hcu: &Hcu, region: [f64; 4], opts: Options) -> Result<(
         o.scanning(0, total);
     }
 
-    let ocr: Arc<dyn Ocr> = Arc::new(load_ocr(args)?);
-    let pipeline = Pipeline::new(&args.out, ocr, opts, deep, args.workers)?;
+    let pipeline = Pipeline::new(&args.out, ocr.clone(), opts, deep, args.workers)?;
     let sink = ProgressSink { inner: &pipeline, overlay: ov, total };
     let outcome = scan_arrows(hcu, region, &args.out, args.max_students, from_first, deep, &sink)?;
     let base = RosterReport { schema_version: 3, capture: Some(new_capture(region)), ..Default::default() };

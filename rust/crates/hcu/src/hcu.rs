@@ -174,9 +174,17 @@ impl Hcu {
 
     /// Scroll the wheel at frame coordinates.
     pub fn scroll(&self, x: f64, y: f64, delta: i32) -> Result<()> {
-        let payload = format!(r#"{{"actions":[{{"type":"scroll","x":{x:.2},"y":{y:.2},"scroll_y":{delta}}}]}}"#);
+        self.scroll_n(x, y, delta, 1)
+    }
+
+    /// `count` wheel movements in a single HCU call. One call moves the list only a
+    /// fixed distance whatever its delta, but extra movements in the same call cost
+    /// almost nothing, so this is how a longer scroll is made.
+    pub fn scroll_n(&self, x: f64, y: f64, delta: i32, count: usize) -> Result<()> {
+        let action = format!(r#"{{"type":"scroll","x":{x:.2},"y":{y:.2},"scroll_y":{delta}}}"#);
+        let payload = format!(r#"{{"actions":[{}]}}"#, vec![action; count.max(1)].join(","));
         let r = self.call(&["gui", "--json", &payload, "--records"])?;
-        if !r.input_emitted || r.completed != 1 {
+        if !r.input_emitted || r.completed != count.max(1) as i64 {
             bail!("HCU scroll dispatch unconfirmed: {r:?}");
         }
         Ok(())

@@ -349,8 +349,15 @@ pub fn read_skill_locks(img: &RgbImage) -> SkillLocked {
 
 /// Profile layout recognised by the dark-navy 능력치 header band.
 pub fn detail_visible(img: &RgbImage) -> bool {
-    fraction(img, DETAIL_BAND_ROI, |[r, g, b]| r < 75 && g > 50 && g < 105 && b > 85 && b < 150) > 0.6
+    // Dark-navy 능력치 header band...
+    let band = fraction(img, DETAIL_BAND_ROI, |[r, g, b]| r < 75 && g > 50 && g < 105 && b > 85 && b < 150) > 0.6;
+    // ...above the panel's light body. The band colour alone also matches dark blue
+    // wallpapers (the main menu), so the white stat rows under it must be there too.
+    band && fraction(img, DETAIL_BODY_ROI, |[r, g, b]| r > 190 && g > 190 && b > 190) > 0.5
 }
+
+/// The stat rows right under the header band: white panel background with text.
+pub const DETAIL_BODY_ROI: Rect = (700, 345, 1060, 372);
 
 /// Whether white name glyphs reach the right edge of `r` (strip cut the text off).
 pub fn text_touches_right_edge(img: &RgbImage, r: Rect) -> bool {
@@ -524,6 +531,107 @@ pub fn roster_cards(img: &RgbImage) -> Vec<Card> {
         }
     }
     cards
+}
+
+/// The dark-blue "미보유" (not owned) banner that separates the owned students from
+/// the rest of the list: a full-width navy band inside the card area. Returns its
+/// centre row, or None while it is not on screen.
+pub fn unowned_banner(img: &RgbImage) -> Option<i32> {
+    if img.width() != FRAME_W || img.height() != FRAME_H {
+        return None;
+    }
+    let navy = |y: i32| {
+        let xs: Vec<i32> = (70..1190).step_by(8).collect();
+        let hits = xs.iter().filter(|&&x| matches!(px(img, x, y), [r, g, b] if r < 70 && g > 50 && g < 110 && b > 80 && b < 150)).count();
+        hits as f64 / xs.len() as f64 > 0.8
+    };
+    let mut best: Option<(i32, i32)> = None;
+    let mut start: Option<i32> = None;
+    for y in 170..=946 {
+        let on = y <= 945 && navy(y);
+        match (on, start) {
+            (true, None) => start = Some(y),
+            (false, Some(s)) => {
+                let end = y - 1;
+                if end - s >= 20 && best.map_or(true, |(a, b)| end - s > b - a) {
+                    best = Some((s, end));
+                }
+                start = None;
+            }
+            _ => {}
+        }
+    }
+    best.map(|(a, b)| (a + b) / 2)
+}
+
+/// How far the roster moved up between two pages, in frame pixels.
+///
+/// Rows of sampled gray values are matched between the pages; the shift with the
+/// smallest difference wins, and only if it is clearly better than any other (a
+/// repeating grid must not be mistaken for a shift of one line). None if the pages
+/// do not overlap enough, so a scroll that went too far cannot be counted as
+/// progress. Card positions depend on where the list is scrolled to; this is how
+/// they are tied to one absolute coordinate.
+pub fn list_shift(before: &RgbImage, after: &RgbImage, max_shift: i32) -> Option<i32> {
+    const TOP: i32 = 185;
+    const BOTTOM: i32 = 935;
+    const COLS: usize = 24;
+    if before.dimensions() != (FRAME_W, FRAME_H) || after.dimensions() != (FRAME_W, FRAME_H) {
+        return None;
+    }
+    let profile = |img: &RgbImage| -> Vec<[u8; COLS]> {
+        (TOP..BOTTOM)
+            .map(|y| {
+                let mut row = [0u8; COLS];
+                for (i, v) in row.iter_mut().enumerate() {
+                    let [r, g, b] = px(img, 70 + i as i32 * 47, y);
+                    *v = ((r as u32 * 3 + g as u32 * 6 + b as u32) / 10) as u8;
+                }
+                row
+            })
+            .collect()
+    };
+    let (a, b) = (profile(before), profile(after));
+    let height = (BOTTOM - TOP) as usize;
+    let cost = |d: usize| -> f64 {
+        let n = height - d;
+        let mut sum = 0u64;
+        let mut cnt = 0u64;
+        for y in (0..n).step_by(2) {
+            for i in 0..COLS {
+                sum += (a[y + d][i] as i32 - b[y][i] as i32).unsigned_abs() as u64;
+                cnt += 1;
+            }
+        }
+        sum as f64 / cnt as f64
+    };
+    let max_shift = (max_shift.max(0) as usize).min(height - 120);
+    let costs: Vec<(usize, f64)> = (4..=max_shift).map(|d| (d, cost(d))).collect();
+    let (best_d, best) = costs.iter().copied().min_by(|x, y| x.1.partial_cmp(&y.1).unwrap())?;
+    let second = costs.iter().filter(|(d, _)| d.abs_diff(best_d) > 24).map(|c| c.1).fold(f64::MAX, f64::min);
+    // a good match, clearly better than every unrelated shift
+    (best < 14.0 && best * 1.8 < second).then_some(best_d as i32)
+}
+
+/// Whether a card slot (centre x, y of its portrait) holds a student, or is the
+/// empty panel at the end of the last row.
+pub fn slot_occupied(img: &RgbImage, x: i32, y: i32) -> bool {
+    let (mut n, mut ink) = (0, 0);
+    for dy in (-60..=40).step_by(10) {
+        for dx in (-70..=70).step_by(10) {
+            // the list is clipped by its header and the screen edge; the row's own position
+            // varies with the scroll, so only look at what is really inside the list
+            if y + dy < 185 || y + dy > 935 {
+                continue;
+            }
+            let [r, g, b] = px(img, x + dx, y + dy);
+            n += 1;
+            if !(r > 225 && g > 235 && b > 238) {
+                ink += 1;
+            }
+        }
+    }
+    n > 0 && ink as f64 / n as f64 > 0.4
 }
 
 pub fn same_cards(a: &[Card], b: &[Card]) -> bool {

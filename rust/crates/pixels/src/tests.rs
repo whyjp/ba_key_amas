@@ -139,3 +139,45 @@ fn stars_and_ink_images() {
     assert_eq!(heart.dimensions(), (50, 38));
     assert!(heart.pixels().any(|p| p.0[0] == 0), "heart ink empty");
 }
+
+/// The main menu has a dark-blue wallpaper that matches the header-band colour; it
+/// must still not be taken for a profile (nor for the roster).
+#[test]
+fn main_menu_is_not_a_profile_or_roster() {
+    let lobby = load("lobby-main-menu.png");
+    assert!(!detail_visible(&lobby), "lobby taken for a profile");
+    assert!(!roster_visible_pixels(&lobby), "lobby taken for the roster");
+}
+
+#[test]
+fn unowned_banner_is_found_only_when_shown() {
+    let shown = load("roster-unowned-banner.png");
+    let y = unowned_banner(&shown).expect("banner not found");
+    assert!((500..=530).contains(&y), "banner at {y}");
+    assert!(unowned_banner(&load("roster-top.png")).is_none());
+    assert!(unowned_banner(&load("roster-scroll1.png")).is_none());
+}
+
+#[test]
+fn last_owned_row_has_four_students() {
+    let img = load("roster-unowned-banner.png");
+    let by = unowned_banner(&img).unwrap();
+    let cards = roster_cards(&img);
+    let rows: Vec<&[Card]> = cards.chunks(6).filter(|r| r[0].y < by).collect();
+    assert_eq!(rows.len(), 1, "one complete owned row is above the banner");
+    let n = rows[0].iter().filter(|c| slot_occupied(&img, c.x, c.y)).count();
+    assert_eq!(n, 4);
+    let full = load("roster-top.png");
+    assert!(roster_cards(&full).chunks(6).all(|r| r.iter().all(|c| slot_occupied(&full, c.x, c.y))));
+}
+
+#[test]
+fn list_shift_measures_the_scroll() {
+    let (a, b) = (load("roster-top.png"), load("roster-scroll1.png"));
+    let d = list_shift(&a, &b, 700).expect("overlapping pages");
+    assert!(d > 20 && d < 700, "shift {d}");
+    // the same page has not moved: nothing to measure
+    assert_eq!(list_shift(&a, &a, 700), None);
+    // unrelated pages do not overlap
+    assert_eq!(list_shift(&a, &load("roster-unowned-banner.png"), 700), None);
+}
