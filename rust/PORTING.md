@@ -1,5 +1,8 @@
 # Go -> Rust port: module contracts
 
+**Status: done.** The Go program was removed after the Rust port matched it live; the Go
+sources referenced below are in git history (commit `2847447`, `cmd/baocr/`).
+
 Goal: the Rust workspace replaces `cmd/baocr` (Go). Behaviour must match the Go
 code (it is the reference: `../cmd/baocr/*.go`, tests `*_test.go`). Schema =
 `crates/core/src/model.rs` (matches Go JSON). Fixtures: `../fixtures/*.png`

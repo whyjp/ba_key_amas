@@ -1,6 +1,6 @@
 """OCR engine comparison on labelled fixture crops (dev tool, not product code).
 
-Tesseract numbers came from the Go pipeline of commit d3c5178 (cmd/baocr, test BenchDump; the Go code
+Tesseract numbers came from the Go pipeline of commit 2847447 (cmd/baocr, test BenchDump; the Go code
 has since been removed). Kept as the record of the engine comparison in docs/ARCHITECTURE.md.
 Usage:  python bench.py tess.json [rec|detrec|recpad]
 Needs: pip install rapidocr onnxruntime. Ground truth was read off the fixtures by eye.

@@ -11,7 +11,7 @@ use baocr_core::model::RosterReport;
 use baocr_core::ocr_api::Ocr;
 use baocr_export::{Index, Store};
 use baocr_extract::{Extractor, Options, FRAME_MYSTIC};
-use baocr_hcu::{check_aspect, game_capture, new_capture, parse_frame_region, scan_arrows, Hcu, HcuSource, Watcher};
+use baocr_hcu::{check_aspect, detect_region, game_capture, new_capture, parse_frame_region, scan_arrows, Hcu, HcuSource, Watcher};
 use baocr_ocr::PpOcr;
 use baocr_pipeline::{reextract, Pipeline};
 use clap::Parser;
@@ -57,8 +57,8 @@ struct Args {
     /// Output directory.
     #[arg(long, default_value = "output-rs")]
     out: PathBuf,
-    /// HCU frame rectangle of the Blue Archive client: x0,y0,x1,y1.
-    #[arg(long, default_value = "230.36,91.73,685.39,433.07")]
+    /// HCU frame rectangle of the Blue Archive client "x0,y0,x1,y1", or "auto" to find the game window.
+    #[arg(long, default_value = "auto")]
     region: String,
     /// Also read fixed meta (role/type/terrain) from pixels and warn on disagreement with the dictionary.
     #[arg(long)]
@@ -97,9 +97,15 @@ fn main() -> Result<()> {
     }
 
     // Everything below drives or watches the game.
-    let region = parse_frame_region(&args.region)?;
-    check_aspect(region)?;
     let hcu = Hcu::from_env();
+    let region = if args.region == "auto" {
+        let r = detect_region(&hcu)?;
+        println!("game window found: --region {:.2},{:.2},{:.2},{:.2}", r[0], r[1], r[2], r[3]);
+        r
+    } else {
+        parse_frame_region(&args.region)?
+    };
+    check_aspect(region)?;
 
     if let Some(path) = &args.grab {
         hcu.activate()?;
