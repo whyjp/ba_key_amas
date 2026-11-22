@@ -1,0 +1,18 @@
+[package]
+name = "baocr-extract"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+baocr-core.workspace = true
+baocr-names = { path = "../names" }
+baocr-pixels = { path = "../pixels" }
+baocr-equipment = { path = "../equipment" }
+baocr-ocr = { path = "../ocr" }
+image.workspace = true
+anyhow.workspace = true
+regex.workspace = true
+once_cell.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

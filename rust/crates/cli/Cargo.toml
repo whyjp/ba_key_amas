@@ -1,0 +1,9 @@
+[package]
+name = "baocr"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+baocr-core = { path = "../core" }
+baocr-ocr = { path = "../ocr" }
+anyhow = "1"

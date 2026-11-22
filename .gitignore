@@ -17,3 +17,7 @@ dist-go/
 *.zip
 *.exe
 .hermes_transcript.txt
+
+models/
+rust/target/
+rust/Cargo.lock.bak

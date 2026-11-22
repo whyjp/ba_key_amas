@@ -1,0 +1,16 @@
+[package]
+name = "baocr-export"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+baocr-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+image.workspace = true
+anyhow.workspace = true
+regex.workspace = true
+once_cell.workspace = true
+csv.workspace = true
+sha1.workspace = true
+chrono.workspace = true
