@@ -30,8 +30,10 @@ fn outcome(reason: &str, wrapped: bool, error: Option<String>) -> Result<ScanOut
 pub fn wait_stable_next(h: &Hcu, region: [f64; 4], prev: &DetailKey) -> Result<Option<RgbImage>> {
     let mut last: Option<(RgbImage, [u8; 3072])> = None;
     let mut changed = false;
-    for _ in 0..12 {
-        h.nap(350);
+    for k in 0..12 {
+        if k > 0 {
+            h.nap(100);
+        }
         let cur = game_capture(h, region)?;
         if roster_visible_pixels(&cur) {
             return Err(anyhow!("left_detail_screen"));

@@ -96,6 +96,9 @@ pub struct Hcu {
     runner: Box<dyn Runner>,
     /// Tests only: skip the real sleeps.
     no_sleep: bool,
+    stats: std::sync::Mutex<std::collections::BTreeMap<String, (u64, f64)>>,
+    /// Size of the GUI frame last reported by HCU (screenshots and input results both carry it).
+    frame: std::sync::Mutex<(i64, i64)>,
 }
 
 impl Hcu {
@@ -104,7 +107,7 @@ impl Hcu {
     }
 
     pub fn with_runner(runner: Box<dyn Runner>) -> Self {
-        Self { runner, no_sleep: false }
+        Self { runner, no_sleep: false, stats: Default::default(), frame: Default::default() }
     }
 
     /// Binary from `$HCU_BIN`, else `vendor/hcu/computer-use[.exe]` beside the
@@ -145,7 +148,57 @@ impl Hcu {
     }
 
     /// Run an HCU subcommand and require an `ok` record.
+    /// Calls and seconds spent per kind of HCU command since the last reset
+    /// (screenshot, zoom, click, scroll, ...), for finding where a scan's time goes.
+    pub fn stats_report(&self) -> String {
+        let g = self.stats.lock().unwrap();
+        let mut total = 0.0;
+        let mut lines: Vec<String> = Vec::new();
+        for (k, (n, secs)) in g.iter() {
+            total += secs;
+            lines.push(format!("  {k:<12} {n:>5} calls {secs:>8.1}s  ({:.2}s each)", secs / *n as f64));
+        }
+        lines.push(format!("  {:<12} {:>5}       {total:>8.1}s", "total", ""));
+        lines.join("\n")
+    }
+
+    /// The GUI frame size, if HCU has reported one yet.
+    pub fn frame_size(&self) -> Option<(i64, i64)> {
+        let f = *self.frame.lock().unwrap();
+        (f.0 > 0).then_some(f)
+    }
+
+    pub fn stats_reset(&self) {
+        self.stats.lock().unwrap().clear();
+    }
+
     pub fn call(&self, args: &[&str]) -> Result<Record> {
+        let started = std::time::Instant::now();
+        let r = self.call_inner(args);
+        if let Ok(rec) = &r {
+            if rec.screen.width > 0 {
+                *self.frame.lock().unwrap() = (rec.screen.width, rec.screen.height);
+            }
+        }
+        let kind = match args.get(1) {
+            Some(&"--json") => {
+                if args[2].contains("scroll") {
+                    "scroll"
+                } else {
+                    "batch"
+                }
+            }
+            Some(k) => k,
+            None => "?",
+        };
+        let mut g = self.stats.lock().unwrap();
+        let e = g.entry(kind.to_string()).or_insert((0, 0.0));
+        e.0 += 1;
+        e.1 += started.elapsed().as_secs_f64();
+        r
+    }
+
+    fn call_inner(&self, args: &[&str]) -> Result<Record> {
         let out = self.run_args(args)?;
         let r: Record = serde_json::from_str(out.trim()).map_err(|e| anyhow!("HCU {:?}: {} ({})", args, e, out))?;
         if !r.ok {

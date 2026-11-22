@@ -221,7 +221,12 @@ fn run_scan(args: &Args, hcu: &Hcu, region: [f64; 4], opts: Options) -> Result<(
 
     let pipeline = Pipeline::new(&args.out, ocr.clone(), opts, deep, args.workers)?;
     let sink = ProgressSink { inner: &pipeline, overlay: ov, total };
+    hcu.stats_reset();
+    let scan_started = std::time::Instant::now();
     let outcome = scan_arrows(hcu, region, &args.out, args.max_students, from_first, deep, &sink)?;
+    if std::env::var_os("BAOCR_HCU_STATS").is_some() {
+        eprintln!("scan loop {:.1}s; HCU time by command:\n{}", scan_started.elapsed().as_secs_f64(), hcu.stats_report());
+    }
     let base = RosterReport { schema_version: 3, capture: Some(new_capture(region)), ..Default::default() };
     let rep = pipeline.finish(base, &outcome.stop_reason, outcome.wrapped, from_first)?;
     println!(

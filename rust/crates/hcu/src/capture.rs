@@ -1,4 +1,4 @@
-use crate::hcu::Hcu;
+use crate::hcu::{Hcu, Record};
 use anyhow::{anyhow, bail, Result};
 use baocr_core::model::{Capture, Student};
 use image::{imageops, RgbImage};
@@ -60,16 +60,17 @@ pub fn to_frame(region: [f64; 4], x: i32, y: i32) -> (f64, f64) {
     (region[0] + x as f64 * (region[2] - region[0]) / 1280.0, region[1] + y as f64 * (region[3] - region[1]) / 960.0)
 }
 
-/// Grab the game client as a 1280x960 frame. A screenshot leases the HCU GUI
-/// frame coordinates; two zooms (top and bottom half, native detail) are cropped
-/// to the region and stitched.
-/// Capture the game region as a 1280x960 frame. HCU answers `gui_frame_stale` when
-/// the screen changed between the screenshot and the zoom; that only means "take a
-/// new screenshot", so it is retried a few times before it is reported.
+/// Capture the game client as a 1280x960 frame: two zooms (top and bottom half, at
+/// native detail) cropped to the region and stitched.
+///
+/// `zoom` looks at the live screen, so no screenshot is needed per capture: the
+/// frame size comes from the last result HCU returned (every input call returns a
+/// fresh frame). A screenshot is taken only when none is known yet, or when HCU
+/// answers `gui_frame_stale` (the screen's layout changed) and a retry follows.
 pub fn game_capture(h: &Hcu, region: [f64; 4]) -> Result<RgbImage> {
     let mut last = None;
-    for _ in 0..4 {
-        match capture_once(h, region) {
+    for attempt in 0..4 {
+        match capture_once(h, region, attempt > 0) {
             Ok(img) => return Ok(img),
             Err(e) if format!("{e:#}").contains("gui_frame_stale") => {
                 last = Some(e);
@@ -81,37 +82,50 @@ pub fn game_capture(h: &Hcu, region: [f64; 4]) -> Result<RgbImage> {
     Err(last.unwrap())
 }
 
-fn capture_once(h: &Hcu, region: [f64; 4]) -> Result<RgbImage> {
-    let frame = h.screenshot()?;
-    if frame.screen.width == 0 {
-        bail!("HCU screenshot has no frame");
+/// One zoomed half, cropped to the game region and brought to 1280x480.
+fn crop_half(h: &Hcu, z: &Record, region: [f64; 4], ya: f64, yb: f64) -> Result<RgbImage> {
+    let [x0, _, x1, _] = region;
+    if z.images.is_empty() || z.evidence.zoom.region.len() != 4 {
+        bail!("HCU zoom missing image/mapping");
     }
+    let src = h.load_image(&z.images[0])?;
+    let zr = &z.evidence.zoom.region;
+    let (sx, sy) = (z.evidence.zoom.scale_x, z.evidence.zoom.scale_y);
+    // Go: image.Rect(round((x0-zr0)*sx), round((ya-zr1)*sy), round((x1-zr0)*sx), round((yb-zr1)*sy)), intersected with the image.
+    let rx0 = (((x0 - zr[0]) * sx).round() as i64).clamp(0, src.width() as i64) as u32;
+    let ry0 = (((ya - zr[1]) * sy).round() as i64).clamp(0, src.height() as i64) as u32;
+    let rx1 = (((x1 - zr[0]) * sx).round() as i64).clamp(0, src.width() as i64) as u32;
+    let ry1 = (((yb - zr[1]) * sy).round() as i64).clamp(0, src.height() as i64) as u32;
+    if rx1 <= rx0 || ry1 <= ry0 {
+        bail!("HCU zoom crop is empty");
+    }
+    let crop = imageops::crop_imm(&src, rx0, ry0, rx1 - rx0, ry1 - ry0).to_image();
+    Ok(if crop.dimensions() == (1280, 480) { crop } else { imageops::resize(&crop, 1280, 480, imageops::FilterType::CatmullRom) })
+}
+
+fn capture_once(h: &Hcu, region: [f64; 4], fresh_frame: bool) -> Result<RgbImage> {
+    if fresh_frame || h.frame_size().is_none() {
+        h.screenshot()?;
+    }
+    let (fw, fh) = h.frame_size().ok_or_else(|| anyhow!("HCU reported no frame size"))?;
     let [x0, y0, x1, y1] = region;
-    if x0 < 0.0 || y0 < 0.0 || x1 > frame.screen.width as f64 || y1 > frame.screen.height as f64 {
+    if x0 < 0.0 || y0 < 0.0 || x1 > fw as f64 || y1 > fh as f64 {
         bail!("game region outside HCU frame");
     }
-    let mut result = RgbImage::new(1280, 960);
     let mid = (y0 + y1) / 2.0;
-    for (i, (ya, yb)) in [(y0, mid), (mid, y1)].into_iter().enumerate() {
-        let z = h.zoom(x0.floor() as i32 - 2, ya.floor() as i32 - 2, x1.ceil() as i32 + 2, yb.ceil() as i32 + 2)?;
-        if z.images.is_empty() || z.evidence.zoom.region.len() != 4 {
-            bail!("HCU zoom missing image/mapping");
-        }
-        let src = h.load_image(&z.images[0])?;
-        let zr = &z.evidence.zoom.region;
-        let (sx, sy) = (z.evidence.zoom.scale_x, z.evidence.zoom.scale_y);
-        // Go: image.Rect(round((x0-zr0)*sx), round((ya-zr1)*sy), round((x1-zr0)*sx), round((yb-zr1)*sy)), intersected with the image.
-        let rx0 = (((x0 - zr[0]) * sx).round() as i64).clamp(0, src.width() as i64) as u32;
-        let ry0 = (((ya - zr[1]) * sy).round() as i64).clamp(0, src.height() as i64) as u32;
-        let rx1 = (((x1 - zr[0]) * sx).round() as i64).clamp(0, src.width() as i64) as u32;
-        let ry1 = (((yb - zr[1]) * sy).round() as i64).clamp(0, src.height() as i64) as u32;
-        if rx1 <= rx0 || ry1 <= ry0 {
-            bail!("HCU zoom crop is empty");
-        }
-        let crop = imageops::crop_imm(&src, rx0, ry0, rx1 - rx0, ry1 - ry0).to_image();
-        let part = if crop.dimensions() == (1280, 480) { crop } else { imageops::resize(&crop, 1280, 480, imageops::FilterType::CatmullRom) };
-        imageops::replace(&mut result, &part, 0, (i * 480) as i64);
-    }
+    let zoom = |ya: f64, yb: f64| h.zoom(x0.floor() as i32 - 2, ya.floor() as i32 - 2, x1.ceil() as i32 + 2, yb.ceil() as i32 + 2);
+    let top = zoom(y0, mid)?;
+    // Decoding the top half overlaps the second zoom call (HCU runs in its own process).
+    let (top_img, bottom_img) = std::thread::scope(|s| -> Result<(RgbImage, RgbImage)> {
+        let top_job = s.spawn(|| crop_half(h, &top, region, y0, mid));
+        let bottom = zoom(mid, y1)?;
+        let bottom_img = crop_half(h, &bottom, region, mid, y1)?;
+        let top_img = top_job.join().map_err(|_| anyhow!("decoding the top half panicked"))??;
+        Ok((top_img, bottom_img))
+    })?;
+    let mut result = RgbImage::new(1280, 960);
+    imageops::replace(&mut result, &top_img, 0, 0);
+    imageops::replace(&mut result, &bottom_img, 0, 480);
     Ok(result)
 }
 
@@ -224,12 +238,16 @@ mod tests {
         let log = geo.log.clone();
         let h = Hcu::with_runner(Box::new(geo));
         game_capture(&h, [100.4, 50.0, 500.2, 350.0]).unwrap();
+        game_capture(&h, [100.4, 50.0, 500.2, 350.0]).unwrap();
         let log = log.lock().unwrap();
         let cmds: Vec<String> = log.iter().map(|a| a.join(" ")).collect();
+        // only the first capture needs a screenshot (to learn the frame size); zooms look at the live screen
         assert_eq!(
             cmds,
             vec![
                 "gui screenshot --records",
+                "gui zoom 98 48 503 202 --records",
+                "gui zoom 98 198 503 352 --records",
                 "gui zoom 98 48 503 202 --records",
                 "gui zoom 98 198 503 352 --records"
             ]

@@ -19,6 +19,7 @@ struct St {
     apps_calls: usize,
     active_calls: usize,
     animate_to: usize,
+    zooms: usize,
 }
 
 /// A fake game window: `frame(screen)` is the grey level shown on that screen,
@@ -38,7 +39,7 @@ impl World {
         on_scroll: impl Fn(&mut usize, i32) + Send + Sync + 'static,
     ) -> Self {
         World {
-            st: Arc::new(Mutex::new(St { screen: 0, leased: 0, inputs: vec![], apps_calls: 0, active_calls: usize::MAX, animate_to: 0 })),
+            st: Arc::new(Mutex::new(St { screen: 0, leased: 0, inputs: vec![], apps_calls: 0, active_calls: usize::MAX, animate_to: 0, zooms: 0 })),
             frame: Arc::new(frame),
             on_click: Arc::new(on_click),
             on_scroll: Arc::new(on_scroll),
@@ -89,9 +90,19 @@ impl Runner for World {
                 st.leased = st.screen;
                 r#"{"ok":true,"screen":{"width":1280,"height":960}}"#.to_string()
             }
-            ["gui", "zoom", x0, y0, x1, y1, "--records"] => format!(
+            ["gui", "zoom", x0, y0, x1, y1, "--records"] => {
+                // zoom looks at the live screen; a capture is two zooms, the first one sets what both show
+                st.zooms += 1;
+                if st.zooms % 2 == 1 {
+                    st.leased = st.screen;
+                    if st.animate_to > 0 && st.screen > 0 && st.screen < st.animate_to {
+                        st.screen += 1;
+                    }
+                }
+                format!(
                 r#"{{"ok":true,"images":["z:{x0}:{y0}:{x1}:{y1}"],"evidence":{{"zoom":{{"region":[{x0},{y0},{x1},{y1}],"scale_x":1.0,"scale_y":1.0}}}}}}"#
-            ),
+                )
+            }
             ["gui", "click", x, y, "--records"] => {
                 assert!(st.leased < usize::MAX);
                 st.inputs.push(format!("click {x} {y}"));

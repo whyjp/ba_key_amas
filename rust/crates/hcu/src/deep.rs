@@ -17,8 +17,10 @@ pub fn click_game(h: &Hcu, region: [f64; 4], x: i32, y: i32) -> Result<()> {
 pub fn settle(h: &Hcu, region: [f64; 4], from: &RgbImage) -> Result<RgbImage> {
     let mut last: Option<RgbImage> = None;
     let mut changed = false;
-    for _ in 0..16 {
-        h.nap(150);
+    for k in 0..16 {
+        if k > 0 {
+            h.nap(100);
+        }
         let cur = game_capture(h, region)?;
         if panel_delta(from, &cur) > 0.004 {
             changed = true;
@@ -35,8 +37,10 @@ pub fn settle(h: &Hcu, region: [f64; 4], from: &RgbImage) -> Result<RgbImage> {
 /// (used after a scroll that may already be at its limit).
 pub fn settle_quiet(h: &Hcu, region: [f64; 4]) -> Result<RgbImage> {
     let mut last: Option<RgbImage> = None;
-    for _ in 0..12 {
-        h.nap(200);
+    for k in 0..12 {
+        if k > 0 {
+            h.nap(100);
+        }
         let cur = game_capture(h, region)?;
         if last.as_ref().is_some_and(|l| panel_delta(l, &cur) < 0.0008) {
             return Ok(cur);
