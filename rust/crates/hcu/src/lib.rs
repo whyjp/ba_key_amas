@@ -22,7 +22,7 @@ mod window;
 #[cfg(test)]
 mod fake;
 
-pub use capture::{check_aspect, game_capture, layout_looks_calibrated, new_capture, parse_frame_region, to_frame};
+pub use capture::{check_aspect, detect_layout, game_capture, Layout, layout_looks_calibrated, new_capture, parse_frame_region, to_frame};
 pub use deep::{capture_deep, click_game, settle, settle_quiet};
 pub use doctor::{evaluate as evaluate_doctor, run as run_doctor, Facts, Report};
 pub use audit::{AuditSink, FileSink};

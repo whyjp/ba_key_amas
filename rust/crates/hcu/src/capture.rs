@@ -3,9 +3,51 @@ use anyhow::{anyhow, bail, Result};
 use baocr_core::model::{Capture, Student};
 use image::{imageops, RgbImage};
 
-/// Every ROI was calibrated on the game's 4:3 layout (a 1280x960 client).
-const REQUIRED_ASPECT: f64 = 4.0 / 3.0;
+/// The two screen ratios the game offers. Both are read as a frame 1280 pixels wide.
+const ASPECT_43: f64 = 4.0 / 3.0;
+const ASPECT_169: f64 = 16.0 / 9.0;
 const ASPECT_TOL: f64 = 0.03;
+
+/// The game's screen ratio setting, told from the shape of its client area.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Layout {
+    /// 4:3, a 1280x960 frame: the layout every pixel constant was first calibrated on.
+    Ratio43,
+    /// 16:9, a 1280x720 frame.
+    Ratio169,
+}
+
+impl Layout {
+    /// Height of the frame (its width is always 1280).
+    pub fn frame_height(self) -> u32 {
+        match self {
+            Layout::Ratio43 => 960,
+            Layout::Ratio169 => 720,
+        }
+    }
+
+    /// The layout of a frame of this height, if it is one of the two.
+    pub fn from_frame_height(height: u32) -> Option<Layout> {
+        [Layout::Ratio43, Layout::Ratio169].into_iter().find(|l| l.frame_height() == height)
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Layout::Ratio43 => "4:3",
+            Layout::Ratio169 => "16:9",
+        }
+    }
+}
+
+/// The layout a capture region has, or `None` when it is neither 4:3 nor 16:9.
+pub fn detect_layout(region: [f64; 4]) -> Option<Layout> {
+    let (w, h) = (region[2] - region[0], region[3] - region[1]);
+    if w <= 0.0 || h <= 0.0 {
+        return None;
+    }
+    let r = w / h;
+    [(ASPECT_43, Layout::Ratio43), (ASPECT_169, Layout::Ratio169)].into_iter().find(|(a, _)| (r - a).abs() <= ASPECT_TOL * a / ASPECT_43).map(|(_, l)| l)
+}
 
 /// Records the conditions a result was collected under.
 pub fn new_capture(region: [f64; 4]) -> Capture {
@@ -17,20 +59,18 @@ pub fn new_capture(region: [f64; 4]) -> Capture {
     }
 }
 
-/// Rejects capture regions that are not 4:3.
-pub fn check_aspect(region: [f64; 4]) -> Result<()> {
+/// Rejects capture regions that are neither 4:3 nor 16:9.
+pub fn check_aspect(region: [f64; 4]) -> Result<Layout> {
     let (w, h) = (region[2] - region[0], region[3] - region[1]);
     if w <= 0.0 || h <= 0.0 {
         bail!("empty capture region {:?}", region);
     }
-    let r = w / h;
-    if (r - REQUIRED_ASPECT).abs() > ASPECT_TOL {
-        bail!(
-            "capture region is {r:.3}:1 but this scanner only supports the game's 4:3 setting (1.333:1). \
-             Set Blue Archive to a 4:3 screen ratio in windowed mode, then pass its client rectangle with --region"
-        );
-    }
-    Ok(())
+    detect_layout(region).ok_or_else(|| {
+        anyhow!(
+            "capture region is {:.3}:1 but the game offers 4:3 (1.333:1) and 16:9 (1.778:1) only. Set the screen ratio in the game's options (그래픽), in windowed mode, then pass its client rectangle with --region",
+            w / h
+        )
+    })
 }
 
 /// Cheap anchor test on the first profile: unreadable panel text means the
@@ -57,7 +97,8 @@ pub fn parse_frame_region(text: &str) -> Result<[f64; 4]> {
 
 /// Map a 1280x960 client coordinate to HCU frame coordinates.
 pub fn to_frame(region: [f64; 4], x: i32, y: i32) -> (f64, f64) {
-    (region[0] + x as f64 * (region[2] - region[0]) / 1280.0, region[1] + y as f64 * (region[3] - region[1]) / 960.0)
+    let rows = detect_layout(region).map_or(960, Layout::frame_height) as f64;
+    (region[0] + x as f64 * (region[2] - region[0]) / 1280.0, region[1] + y as f64 * (region[3] - region[1]) / rows)
 }
 
 /// Capture the game client as a 1280x960 frame: two zooms (top and bottom half, at
@@ -82,8 +123,8 @@ pub fn game_capture(h: &Hcu, region: [f64; 4]) -> Result<RgbImage> {
     Err(last.unwrap())
 }
 
-/// One zoomed half, cropped to the game region and brought to 1280x480.
-fn crop_half(h: &Hcu, z: &Record, region: [f64; 4], ya: f64, yb: f64) -> Result<RgbImage> {
+/// One zoomed half, cropped to the game region and brought to 1280 x `rows`.
+fn crop_half(h: &Hcu, z: &Record, region: [f64; 4], ya: f64, yb: f64, rows: u32) -> Result<RgbImage> {
     let [x0, _, x1, _] = region;
     if z.images.is_empty() || z.evidence.zoom.region.len() != 4 {
         bail!("HCU zoom missing image/mapping");
@@ -100,7 +141,7 @@ fn crop_half(h: &Hcu, z: &Record, region: [f64; 4], ya: f64, yb: f64) -> Result<
         bail!("HCU zoom crop is empty");
     }
     let crop = imageops::crop_imm(&src, rx0, ry0, rx1 - rx0, ry1 - ry0).to_image();
-    Ok(if crop.dimensions() == (1280, 480) { crop } else { imageops::resize(&crop, 1280, 480, imageops::FilterType::CatmullRom) })
+    Ok(if crop.dimensions() == (1280, rows) { crop } else { imageops::resize(&crop, 1280, rows, imageops::FilterType::CatmullRom) })
 }
 
 fn capture_once(h: &Hcu, region: [f64; 4], fresh_frame: bool) -> Result<RgbImage> {
@@ -112,20 +153,22 @@ fn capture_once(h: &Hcu, region: [f64; 4], fresh_frame: bool) -> Result<RgbImage
     if x0 < 0.0 || y0 < 0.0 || x1 > fw as f64 || y1 > fh as f64 {
         bail!("game region outside HCU frame");
     }
+    let layout = detect_layout(region).ok_or_else(|| anyhow!("the game region is neither 4:3 nor 16:9"))?;
+    let rows = layout.frame_height() / 2;
     let mid = (y0 + y1) / 2.0;
     let zoom = |ya: f64, yb: f64| h.zoom(x0.floor() as i32 - 2, ya.floor() as i32 - 2, x1.ceil() as i32 + 2, yb.ceil() as i32 + 2);
     let top = zoom(y0, mid)?;
     // Decoding the top half overlaps the second zoom call (HCU runs in its own process).
     let (top_img, bottom_img) = std::thread::scope(|s| -> Result<(RgbImage, RgbImage)> {
-        let top_job = s.spawn(|| crop_half(h, &top, region, y0, mid));
+        let top_job = s.spawn(|| crop_half(h, &top, region, y0, mid, rows));
         let bottom = zoom(mid, y1)?;
-        let bottom_img = crop_half(h, &bottom, region, mid, y1)?;
+        let bottom_img = crop_half(h, &bottom, region, mid, y1, rows)?;
         let top_img = top_job.join().map_err(|_| anyhow!("decoding the top half panicked"))??;
         Ok((top_img, bottom_img))
     })?;
-    let mut result = RgbImage::new(1280, 960);
+    let mut result = RgbImage::new(1280, layout.frame_height());
     imageops::replace(&mut result, &top_img, 0, 0);
-    imageops::replace(&mut result, &bottom_img, 0, 480);
+    imageops::replace(&mut result, &bottom_img, 0, rows as i64);
     Ok(result)
 }
 
@@ -140,7 +183,9 @@ mod tests {
     fn aspect_checks() {
         assert!(check_aspect([230.36, 91.73, 685.39, 433.07]).is_ok());
         assert!(check_aspect([0.0, 0.0, 1280.0, 960.0]).is_ok());
-        assert!(check_aspect([0.0, 0.0, 1920.0, 1080.0]).is_err());
+        assert_eq!(check_aspect([0.0, 0.0, 1920.0, 1080.0]).unwrap(), Layout::Ratio169);
+        assert_eq!(check_aspect([0.0, 0.0, 1280.0, 960.0]).unwrap(), Layout::Ratio43);
+        assert!(check_aspect([0.0, 0.0, 1920.0, 1200.0]).is_err(), "16:10 is neither");
         assert!(check_aspect([10.0, 10.0, 10.0, 50.0]).is_err());
         assert!(check_aspect([0.0, 0.0, 1280.0 * 1.02, 960.0]).is_ok());
         assert!(check_aspect([0.0, 0.0, 1280.0 * 1.04, 960.0]).is_err());

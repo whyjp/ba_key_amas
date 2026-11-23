@@ -10,7 +10,13 @@ fn main() -> anyhow::Result<()> {
     let session = HcuSession::default_backend();
     let hcu = session.view();
     let region = detect_region(hcu)?;
-    check_aspect(region)?;
+    if args.first().map(String::as_str) == Some("region") {
+        println!("region {region:?} size {:.0}x{:.0} ratio {:.3}", region[2] - region[0], region[3] - region[1], (region[2] - region[0]) / (region[3] - region[1]));
+        return Ok(());
+    }
+    if std::env::var_os("BAOCR_ANY_ASPECT").is_none() {
+        check_aspect(region)?;
+    }
     match args.first().map(String::as_str) {
         Some("grab") => {
             let out = args.get(1).ok_or_else(|| anyhow::anyhow!("grab OUT.png"))?;
