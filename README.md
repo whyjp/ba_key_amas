@@ -148,7 +148,8 @@ Every input call is also written to `%APPDATA%\baocr\input.log` (the selftest us
   with the menu pass), passive `--watch`, window auto-detection.
 - Guide card verified live for campaign 19-3 (임무 정보, 임무 지도, 편성) and a 현상수배
   stage popup; 특별의뢰 and 학원교류회 screens are recognised from recorded frames only.
-  Event missions, 총력전 and 종합전술시험 are not covered yet.
+  Event missions and 종합전술시험 are not covered yet; 총력전 (모의 총력전, 제약해제결전) screens are
+  recognised from recorded frames only, see `docs/raid-data.md` ("Raid screens").
 - Not verified: 3-digit bond rank (no sample), 능력개방 unlocked state, equipment
   icons beyond tier 4, a live level-up appearing in `--watch`.
 
