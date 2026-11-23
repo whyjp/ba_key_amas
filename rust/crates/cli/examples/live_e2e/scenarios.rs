@@ -9,7 +9,7 @@ fn arg(args: &[String], name: &str) -> Option<String> {
     args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned()
 }
 
-const REPO: &str = "D:/worktrees/bluearchive-ocr/e2e";
+const REPO: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../..");
 const WIKI: &str = "D:/work-github/bluearchive-ocr/wikidb/wiki.db";
 const BACK: (i32, i32) = (55, 38);
 const HOME: (i32, i32) = (1235, 22);
@@ -67,6 +67,15 @@ impl Addon {
         cmd.env("BAOCR_OVERLAY_CAPTURABLE", "1").env("BAOCR_STATE_DUMP", dump).env("BAOCR_MODELS", "D:/work-github/bluearchive-ocr/models");
         if device == "cpu" {
             cmd.env("BAOCR_OCR_DEVICE", "cpu");
+        }
+        // BAOCR_PROFILE=1 in the harness's environment passes stage timings of the add-on into addon.log
+        if std::env::var_os("BAOCR_PROFILE").is_some() {
+            cmd.env("BAOCR_PROFILE", "1");
+            if let Some(dir) = dump.parent() {
+                if let Ok(log) = std::fs::File::create(dir.join("addon.log")) {
+                    cmd.stdout(log.try_clone()?).stderr(log);
+                }
+            }
         }
         Ok(Addon { child: cmd.spawn()? })
     }
@@ -444,6 +453,24 @@ fn stale(rig: &mut Rig, wiki: &Wiki) -> Result<()> {
         if rep == 1 {
             rig.shot("quick-popup")?;
         }
+        // a second, read-only watcher samples the game while the popup closes: when does the screen first
+        // change, so the add-on's own share of the delay can be told from the game's animation
+        let base_key = baocr_pixels::frame_key(&rig.grab()?);
+        let watch_stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let watch = {
+            let stop = watch_stop.clone();
+            let region = rig.region;
+            std::thread::spawn(move || {
+                let session = baocr_hcu::HcuSession::default_backend();
+                let mut samples: Vec<(u128, f64)> = Vec::new();
+                while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    if let Ok(img) = baocr_hcu::game_capture(session.view(), region) {
+                        samples.push((unix_ms(), baocr_pixels::frame_distance(&base_key, &baocr_pixels::frame_key(&img))));
+                    }
+                }
+                samples
+            })
+        };
         let closed = rig.click(1243, 210, QUICK, "close 빠른 편성")?;
         let t0 = unix_ms();
         let mut zero = None;
@@ -454,6 +481,15 @@ fn stale(rig: &mut Rig, wiki: &Wiki) -> Result<()> {
                 break;
             }
             nap(8);
+        }
+        watch_stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        let samples = watch.join().unwrap_or_default();
+        if let Some((at, _)) = samples.iter().find(|(at, d)| *at >= closed && *d >= 1.5) {
+            let first = (*at - closed) as f64;
+            rig.add_latency("popup close click-to-first-change (game, sampled)", first);
+            if let Some(ms) = zero {
+                rig.add_latency("popup close add-on share (no icons minus first change)", ms - first);
+            }
         }
         match zero {
             Some(ms) => {
@@ -827,7 +863,7 @@ fn compare_students(prev: &Value, new: &Value) -> (usize, Vec<String>) {
 
 // ---------------------------------------------------------------- f. input guard
 
-const EXAMPLES: &str = "D:/cargo-target/baocr-e2e/release/examples";
+const EXAMPLES: &str = "D:/cargo-target/baocr/release/examples";
 
 fn guard(rig: &mut Rig, _wiki: &Wiki) -> Result<()> {
     let report = baocr_hcu::run_doctor();

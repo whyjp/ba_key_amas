@@ -45,10 +45,12 @@ const WAIT_PAUSE: Duration = Duration::from_millis(1000);
 const MAX_CAPTURE_FAILURES: u32 = 3;
 
 /// How long to wait before the next look at the game.
-fn pause_for(in_battle: bool, moving: bool, read: bool, still: u32) -> Duration {
+/// `icons_up`: icons are drawn over the game, so a change must take them down at once and the loop
+/// keeps looking at the short interval even when the view is read and still.
+fn pause_for(in_battle: bool, moving: bool, read: bool, still: u32, icons_up: bool) -> Duration {
     if in_battle {
         BATTLE_PAUSE
-    } else if !moving && read && still >= IDLE_AFTER {
+    } else if !moving && read && still >= IDLE_AFTER && !icons_up {
         IDLE_PAUSE
     } else {
         SETTLING_PAUSE
@@ -106,6 +108,7 @@ fn run_on<S: Surface>(surface: S, ocr: Arc<dyn Ocr>, session: &HcuSession, regio
     println!("add-on running (it only looks at the game, never sends input); settings: {}; Ctrl-C to stop", settings_path.display());
 
     let (mut region, mut prev, mut handled, mut still, mut loops, mut failures) = (None::<[f64; 4]>, None, None, 0u32, 0u32, 0u32);
+    let mut icons_up = false;
     let mut said_waiting = false;
     let mut prof = Profile::from_env();
     let mut gate = BattleGate::default();
@@ -229,10 +232,11 @@ fn run_on<S: Surface>(surface: S, ocr: Arc<dyn Ocr>, session: &HcuSession, regio
             });
             let scene = prof.time("observe+present", || assistant.on_frame(&img, &boxes, fallback));
             println!("screen: {scene:?}");
+            icons_up = scene == Scene::QuickFormation;
             handled = Some(key);
         }
         let read = handled.as_ref().is_some_and(|h| frame_distance(h, &key) <= STILL);
-        wait(&mut assistant, pause_for(false, moving, read, still));
+        wait(&mut assistant, pause_for(false, moving, read, still, icons_up));
     }
     Ok(())
 }
@@ -243,11 +247,12 @@ mod tests {
 
     #[test]
     fn the_pause_follows_what_there_is_to_do() {
-        assert_eq!(pause_for(true, true, false, 0), BATTLE_PAUSE, "a battle is watched slowly whatever moves");
-        assert_eq!(pause_for(false, true, false, 0), SETTLING_PAUSE, "a changing view is looked at soon again");
-        assert_eq!(pause_for(false, false, false, 5), SETTLING_PAUSE, "a view not read yet is not left waiting");
-        assert_eq!(pause_for(false, false, true, 1), SETTLING_PAUSE, "just settled: look again soon");
-        assert_eq!(pause_for(false, false, true, IDLE_AFTER), IDLE_PAUSE);
-        assert_eq!(pause_for(false, true, true, 9), SETTLING_PAUSE, "any movement ends the slow pause");
+        assert_eq!(pause_for(true, true, false, 0, false), BATTLE_PAUSE, "a battle is watched slowly whatever moves");
+        assert_eq!(pause_for(false, true, false, 0, false), SETTLING_PAUSE, "a changing view is looked at soon again");
+        assert_eq!(pause_for(false, false, false, 5, false), SETTLING_PAUSE, "a view not read yet is not left waiting");
+        assert_eq!(pause_for(false, false, true, 1, false), SETTLING_PAUSE, "just settled: look again soon");
+        assert_eq!(pause_for(false, false, true, IDLE_AFTER, false), IDLE_PAUSE);
+        assert_eq!(pause_for(false, false, true, IDLE_AFTER + 9, true), SETTLING_PAUSE, "icons over the game are watched at the short interval");
+        assert_eq!(pause_for(false, true, true, 9, false), SETTLING_PAUSE, "any movement ends the slow pause");
     }
 }

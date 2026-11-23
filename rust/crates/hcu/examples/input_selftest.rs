@@ -190,11 +190,11 @@ mod app {
         // a pixel of the virtual desktop that no monitor shows
         ask(&runner, &["gui", "screenshot"]);
         let (ox, oy, w, h) = desk.bounds();
-        let dead = (0..h as i32).step_by(20).flat_map(|y| (0..w as i32).step_by(20).map(move |x| (ox + x, oy + y))).find(|&(x, y)| !desk.monitor_contains(x, y));
+        let dead = (20..h as i32 - 20).step_by(20).flat_map(|y| (20..w as i32 - 20).step_by(20).map(move |x| (ox + x, oy + y))).find(|&(x, y)| !desk.monitor_contains(x, y));
         match dead {
             Some((x, y)) => {
                 let v = click(frame_point(&desk, x, y));
-                c.check(code(&v) == "target_off_monitor" && v["input_emitted"] == false, format!("point on no monitor ({x},{y}) refused ({})", code(&v)));
+                c.check(code(&v) == "target_off_monitor" && v["input_emitted"] == false, format!("point on no monitor ({x},{y}) refused ({} {})", code(&v), v["hint"]));
             }
             None => println!("SKIP no dead space in the virtual desktop on this machine"),
         }

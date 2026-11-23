@@ -253,24 +253,19 @@ impl<D: Desktop> NativeRunner<D> {
 
     fn zoom(&self, region: [f64; 4]) -> Result<String> {
         let native = self.native();
-        let Some(frame) = self.frame().filter(|f| f.native == native) else {
+        if self.frame().filter(|f| f.native == native).is_none() {
             return Ok(failure("gui_frame_stale", "the desktop's size changed since the last screenshot; take a new one"));
-        };
+        }
         let g = match zoom_geometry(region, native) {
             Ok(g) => g,
             Err(e) => return Ok(failure("invalid_zoom_region", &e.to_string())),
         };
         let (ox, oy, _, _) = self.desktop.bounds();
         let (left, top) = (ox + g.native.0, oy + g.native.1);
-        let area = [left, top, left + g.native.2, top + g.native.3];
-        let before = self.desktop.layout();
-        if !same_over(&frame.layout, &before, area) {
-            return Ok(failure("gui_frame_stale", "the windows over the zoom region changed since the frame its coordinates came from; take a new screenshot"));
-        }
+        // A zoom only looks: nothing is sent, so it does not compare window layouts (listing every window
+        // four times per capture cost about 250 ms of a 370 ms capture on a busy desktop). Input checks the
+        // layout over its own point against the frame, which is where staleness can do harm.
         let crop = self.desktop.grab(left, top, g.native.2 as u32, g.native.3 as u32)?;
-        if !same_over(&before, &self.desktop.layout(), area) {
-            return Ok(failure("gui_frame_stale", "the windows over the zoom region changed during the capture; take a new screenshot"));
-        }
         let img = if g.size == crop.dimensions() { crop } else { imageops::resize(&crop, g.size.0, g.size.1, imageops::FilterType::CatmullRom) };
         let id = self.store(img);
         let (sx, sy) = (g.size.0 as f64 / (g.region[2] - g.region[0]), g.size.1 as f64 / (g.region[3] - g.region[1]));
@@ -1026,16 +1021,17 @@ mod tests {
     }
 
     #[test]
-    fn zoom_applies_the_same_layout_check_to_its_region() {
+    fn zoom_looks_without_comparing_layouts_and_input_still_refuses_a_stale_frame() {
         let fake = Fake::new();
         let r = game_runner(&fake);
         ask(&r, &["gui", "screenshot"]);
-        // frame 1366x683: the region covers native x 0..1000; a window far to the right is irrelevant
-        fake.wins.lock().unwrap().insert(0, win(5, "Chrome", [1800, 0, 2000, 100]));
+        // a window stacked over the click point (native 1000,500) after the frame: the zoom still answers, it only looks
+        fake.wins.lock().unwrap().insert(0, win(6, "Chrome", [900, 400, 1100, 600]));
         assert_eq!(ask(&r, &["gui", "zoom", "100", "100", "300", "300"])["ok"].as_bool(), Some(true));
-        fake.wins.lock().unwrap().insert(0, win(6, "Chrome", [100, 100, 400, 400]));
-        let v = ask(&r, &["gui", "zoom", "100", "100", "300", "300"]);
-        assert_eq!((v["ok"].as_bool(), v["code"].as_str()), (Some(false), Some("gui_frame_stale")));
+        // but a click at that place is refused, because the frame does not describe the window layout any more
+        let v = ask(&r, CLICK);
+        assert_eq!(v["ok"].as_bool(), Some(false));
+        assert!(fake.sent().is_empty());
     }
 
     #[test]
