@@ -16,7 +16,7 @@ only desktop contact is read-only `BitBlt` captures.
 | `cargo run --release -p baocr --example speed_model` (env `CAPTURE KEY OCR OBSERVE GRID_OCR BAND_OCR DML_OCR CLICK_LAG`) | a model of the loop in `cli/src/assist.rs`: reaction time per policy for a click or a scroll stop, Monte Carlo over the loop's phase |
 | `cargo test -p baocr-ocr --release [--features directml] --test fixtures` | the engine reads the fixtures within the committed bound on CPU and on DirectML |
 
-## 1. Where the time goes (quick formation, today)
+## 1. Where the time goes (quick formation, before the changes marked done in section 7)
 
 Reaction = from the screen reaching its final state to the card being on screen. Stage costs, measured:
 
@@ -29,7 +29,7 @@ Reaction = from the screen reaching its final state to the card being on screen.
 | `ocr.boxes` (det + rec), quick-formation | 475 to 667 ms | see 2 |
 | `read_card_names` | 85 to 115 ms | recogniser 75 to 83 ms (about 6.5 ms per label), CTC scoring over 281 names 13 to 22 percent |
 | classify + `present` | under 1 ms | not a cost |
-| overlay thread's next poll | 0 to 90 ms, mean 45 | now removed, see commit list |
+| overlay thread's next poll | 0 to 90 ms, mean 45 | now removed, see section 5 |
 | draw (`UpdateLayeredWindow`) | a few ms | the render is cached |
 
 `thread::sleep` is exact on this machine (30 ms lasts 30.3 ms, 60 ms lasts 60.3 ms): the 30 ms wait slices cost nothing extra.
@@ -93,7 +93,7 @@ and DirectML already takes the detector to a few tens of milliseconds.
 
 Everything for quick formation is in `speed_quick` (fixtures `quick-formation*`, 4 frames, 12 cards each).
 
-1. Scroll stops. Today: settle wait about 175 ms + full-frame OCR 475 to 565 ms + `read_card_names` 85 to 115 ms.
+1. Scroll stops. At baseline, the settle wait is about 175 ms, full-frame OCR 475 to 565 ms and `read_card_names` 85 to 115 ms.
    * OCR only the grid and its tabs (crop x 560, y 300, 720x360): 231 to 358 ms instead of 476 to 565 ms; the cards read are
      identical on 4 of 4 frames (`read_card_names` 82 to 95 ms).
    * Free text per label band only (one recogniser call on each 92 px wide label band, 75 to 78 ms for 12 labels, no detector):
@@ -121,7 +121,7 @@ Everything for quick formation is in `speed_quick` (fixtures `quick-formation*`,
   threshold is tight, so an exact-hash revisit cache is not possible, and any key change must keep the distances. The block-mean key
   (`fast_frame_key`) gives 1.38 for that pair, 5.19 against 5.28, 75.85 against 76.09: within 0.3 on every pair tried, same side of 1.5
   on all 15 pairs in the unit test.
-* Pause lengths: settling 60 ms, idle 300 ms, battle 400 ms. A shorter idle pause cuts the wait for the first look (model: 150 ms
+* Pause lengths: settling 20 ms (60 ms when measured), idle 300 ms, battle 400 ms. A shorter idle pause cuts the wait for the first look (model: 150 ms
   saves about 75 ms for an instant cut, nothing for animated ones) and costs capture CPU all the time (about a quarter of a core now:
   125 ms every 410). Better: short idle only inside 빠른 편성, where the reaction matters. Not done (needs the scene in the loop's state).
 * Speculative OCR on the first changed frame, confirmed by the next matching frame: model saves up to 180 ms for an instant cut,
@@ -160,7 +160,7 @@ Hot zones need button positions for the screens that matter (none are known in t
 
 | # | idea | expected | measured | risk | effort | recommendation |
 |---|---|---|---|---|---|---|
-| 1 | OCR on the GPU (DirectML, rec batch 4) | 2 to 3x | 4750 -> 1710 ms over the fixtures, quick-formation 547 -> 187 ms, text identical on 15/15 | the game shares the GPU (a few tens of ms of load per read); `DirectML.dll` to ship; GPU-less machines fall back to CPU by probe (`BAOCR_OCR_DEVICE=cpu` forces it); not soaked for memory over hours | done: feature `directml` in `baocr-ocr` and `baocr` | **ship**, after one live check of the game's frame rate while reading |
+| 1 | OCR on the GPU (DirectML, rec batch 4) | 2 to 3x | 4750 -> 1710 ms over the fixtures, quick-formation 547 -> 187 ms, text identical on 15/15 | the game shares the GPU (a few tens of ms of load per read); `DirectML.dll` to ship; GPU-less machines fall back to CPU by probe (`BAOCR_OCR_DEVICE=cpu` forces it); not soaked for memory over hours | done: feature `directml` in `baocr-ocr` and `baocr` | shipped in the portable package (`scripts/package-portable.ps1`); the live check of the game's frame rate while reading is still open |
 | 2 | quick-formation free text from the label bands only, when the popup is known to be up | reaction -300 to -450 ms for scrolls | 620 ms -> 165 ms offline, cards identical on 4/4 frames | four fixture frames only; wrong band read could miss a card (the full-frame read is the fallback on any doubt) | about 60 lines in the observer/loop (the assistant files belong to another agent: proposal) | **do next**, validate on more live scrolls |
 | 3 | overlay woken on change | -45 ms mean | arithmetic (poll period 90 ms), unit-tested wake | none | done | shipped |
 | 4 | block-mean frame key in the loop | -7 to -9 ms per look | 6.4 -> 0.6 ms, distances within 0.3 | threshold sides equal on 15 fixture pairs; tight 1.5 threshold means a live check | done | shipped |
@@ -178,7 +178,7 @@ Hot zones need button positions for the screens that matter (none are known in t
 
 ## Top 3 recommendations
 
-1. Turn on DirectML OCR (`--features directml`), measured 2.7x with identical text on all 15 fixtures. Check the game's frame rate once while it reads.
+1. DirectML OCR (`--features directml`) is measured at 2.7x with identical text on all 15 fixtures, and the portable package is built with it (`scripts/package-portable.ps1`). The check of the game's frame rate while it reads is still open.
 2. In 빠른 편성, once the scene is known and the popup pixel test passes, read the free text per label band instead of the whole frame:
    reaction for scrolls from about 1.0 s to about 0.55 s with the CPU alone (model), and the same pixel test takes icons down at once when the popup closes.
 3. Try input hints as an experimental option; do it after 1 and 2, because the model shows the click and scroll look-times only pay off when OCR is cheap.

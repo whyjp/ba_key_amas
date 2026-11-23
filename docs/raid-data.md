@@ -73,7 +73,7 @@ All functions are on `Wiki`, pure over the DB, and take the clock as an argument
 - `raid_mission(kind, id, idx, season) -> Option<MissionBrief>`. The existing mission shape, so
   `formation::evaluate` is unchanged. `stage_id` is the raid id, `difficulty` the difficulty `idx`, `terrain` the
   season's (else the raid's only terrain, else unknown), `recommended_level` the enemy level.
-  The shape needed no extension: per-armor and per-attack counts carry what a raid has.
+  The shape needed no extension: per-armor and per-attack shares carry what a raid has.
 
 ## Known gaps
 
@@ -113,7 +113,7 @@ Rebuild the DB (`cargo run -p baocr-wikidb --release`) whenever `Wiki::open` rep
 What the add-on reads on screen and how it reaches the lookup above. Code: `extract/src/scene.rs` (screens),
 `extract/src/raid.rs` (encounter from screen text), `assist/src/raid_lookup.rs` (screen to `MissionBrief`),
 `assist/src/widgets.rs` (`RaidInfo` card, the formation verdict). All of it is read from fixtures in
-`fixtures/screens/` (`*.boxes.txt` OCR boxes, PNG for some); nothing here was driven live. 4:3 frames only.
+`fixtures/screens/` (`*.boxes.txt` OCR boxes, PNG for some); the live harness ([live-e2e.md](live-e2e.md), scenario `nav`) also visits the 총력전, 모의 boss list, 방 정보 and 모의 편성 screens in the game. 4:3 frames only.
 
 | Screen | Scene | What it yields | Evidence |
 | --- | --- | --- | --- |
@@ -142,9 +142,10 @@ What the add-on reads on screen and how it reaches the lookup above. Code: `extr
    difficulty word to `idx` by its position (Normal 0 .. Lunatic 7; the game writes `Hardcore`, the DB `HardCore`). It takes the
    terrain from the 총력전 season (only a `Raid` mode season; 대결전 seasons are ignored). Then it builds the brief with
    `raid_mission`.
-3. The screen is the truth for what the player sees. Where it names the boss's armor, attack type or level, those replace the
-   wiki's (`Wiki::with_screen_types` swaps the lead enemy's types in the tally and recomputes the best attack types), and a
-   difference is shown on the card ("화면 ... / 위키 ...").
+3. The wiki DB supplies the values, not the screen. Where the screen names the boss's armor, attack type or level,
+   `raid_lookup::cross_check` only compares them with the DB and changes nothing (the armor is reported only when the
+   screen shows one the wiki's mix lacks). A difference is shown on the card as a note ("화면 ... / 위키 ...", with the
+   numbers calculated from the wiki; see [ADR 0005](adr/0005-static-db-dynamic-screen.md)).
 4. Nothing is picked silently. Several raids of one name stay `Ambiguous` unless the on-screen armor tells them apart (the two
    세트의 분노 differ by armor: 경장갑 is id 1000001). A screen that names no difficulty (the boss lists) is not given Normal:
    the card says "선택 전", lists the attack type per difficulty range, and the formation card says which difficulty its verdict used.

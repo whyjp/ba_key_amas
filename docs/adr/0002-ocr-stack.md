@@ -16,7 +16,8 @@ profile. That was fine for scanning and too slow for a live overlay. The questio
   Syllables the model lacks (for example 슌) are spelled with the nearest known syllable by likelihood.
 - Acceleration: an optional DirectML build (`--features directml`, `DirectML.dll` beside the exe) runs the
   detector and recogniser on the GPU, with a probe that falls back to CPU. Recognition batch is fixed at 4.
-  `BAOCR_OCR_DEVICE=cpu` forces the CPU.
+  `BAOCR_OCR_DEVICE=cpu` forces the CPU. The portable package is built with the feature
+  (`scripts/package-portable.ps1`).
 - The closed-set session (`probs`, `choose`) still runs on the CPU.
 
 ## Alternatives (measured)

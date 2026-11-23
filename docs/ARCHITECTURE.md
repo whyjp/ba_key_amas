@@ -103,7 +103,7 @@ All four are excluded from screen capture, so the add-on never reads itself.
 | unit | pure logic: scenes, trackers, geometry, hover, weights, guards (fake desktop) | `cargo test --workspace` |
 | fixtures | real screenshots and OCR boxes | `fixtures/screens` |
 | measurement | timelines and OCR timing | `docs/speed-research.md`, `cli/examples/speed_*` |
-| live e2e | the add-on on the real game, state dump | [live-e2e.md](live-e2e.md) when present |
+| live e2e | the add-on on the real game, state dump | [live-e2e.md](live-e2e.md) |
 | human | taste, hardware ESC, tray menu, frame rate | listed in the release check |
 
 ## Decision records

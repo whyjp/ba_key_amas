@@ -14,7 +14,7 @@ Reference: Microsoft Hybrid Computer Use (MIT), revision `8ce82b310b014ab1133b28
 | `gui screenshot` | The whole virtual desktop, delivered at no more than 1366x768 and never enlarged (`delivered_size`). The runner reads the layout of the visible windows before and after the grab and repeats the grab (3 attempts, 25 ms apart) when the layout changed. The answer carries the delivered size. |
 | `gui zoom x0 y0 x1 y1` | Region in delivered-frame pixels, at least 8 px a side, inside the frame. It snaps outward to whole native pixels, is enlarged at most 4x and at most to 1366x768, and the answer carries the region actually covered with its scale (`zoom_geometry`). |
 | `gui click x y` and `gui --json` (click, scroll) | A frame point maps to the native pixel `(u + 0.5) * scale - 0.5` (clamped inside the desktop), is sent with `SendInput` as an absolute coordinate on the virtual desktop (`(p * 65536 + len - 1) / len`), then press and release of the left button. A scroll is moved-to, then wheel notches of 120 units, 12 ms apart. |
-| `apps`, `activate` | Visible top-level windows with a title (`wN "title" app=window [active]`); activation restores a minimised window and takes the foreground by attaching to the foreground thread's input queue. |
+| `apps`, `activate` | Visible top-level windows with a title (`wN "title" app=window [active]`); activation restores a minimised window and asks Windows for the foreground with a plain `SetForegroundWindow` (see "Activating the game window"). |
 
 Coordinates are physical pixels (the process calls `SetProcessDPIAware`). Frames are the whole desktop, so a
 point in the game's client area is converted with `to_frame_region`.

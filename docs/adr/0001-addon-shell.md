@@ -20,7 +20,7 @@ player, and is the only thing that sends input to the game. Output of the scan i
 - The loop must survive the game being absent, restarted or covered (`forget`, region re-detection).
 
 ## Evidence
-README add-on section; `cli/src/assist.rs`; started before and after the game in live runs.
+README sections "What it does" and "Card behaviour"; `cli/src/assist.rs`; started before and after the game in live runs.
 
 ## Revisit when
 The game offers an official overlay or API.
