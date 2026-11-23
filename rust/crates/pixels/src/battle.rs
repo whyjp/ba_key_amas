@@ -6,14 +6,16 @@
 //! one of them hidden by a window or an effect does not hide the battle.
 //!
 //! Limits, from the one real frame available and from how the marks are built:
-//! - the frame must be the 1280x960 game client (the add-on refuses any other aspect before it
-//!   gets here), so 16:9 layouts are not recognised;
+//! - the marks are placed for the 1280x960 (4:3) frame. No 16:9 combat frame has been recorded, so
+//!   the 16:9 positions are not known: a 1280x720 frame always reads as not battle (the HUD
+//!   shows no marks) instead of guessing where they moved;
 //! - the marks are drawn, not written, so the game's language does not matter, but a UI scale
 //!   or a stage type with another HUD (a raid with its own bar, say) may move or lack them;
 //! - a screen that darkens the HUD (pause dialog, a skill cut-in that hides it) reads as not
 //!   battle, which is wanted: whatever opens there is a menu worth reading;
 //! - a cut scene without the HUD reads as not battle.
 use crate::{fraction, Rect};
+use baocr_core::layout::Layout;
 use image::RgbImage;
 
 /// The navy plate with the stage name ("Normal 19-4"), inside its edges.
@@ -74,6 +76,9 @@ fn gauge_fraction(img: &RgbImage) -> f64 {
 }
 
 pub fn battle_hud(img: &RgbImage) -> BattleHud {
+    if Layout::of_frame(img.width(), img.height()) == Layout::Ratio169 {
+        return BattleHud { tag: 0.0, gauge: 0.0, auto: 0.0 };
+    }
     let gauge = gauge_fraction(img);
     BattleHud { tag: fraction(img, TAG_ROI, navy_plate), gauge, auto: fraction(img, AUTO_ROI, auto_yellow) }
 }

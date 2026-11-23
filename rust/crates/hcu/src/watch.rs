@@ -3,7 +3,7 @@
 //! (passive screenshot of the game window, a folder of files in tests).
 //! Extraction and storage are closures so this crate depends on neither the
 //! OCR engine nor the store.
-use crate::capture::{game_capture, layout_looks_calibrated};
+use crate::capture::{game_capture, layout_looks_calibrated, Layout};
 use crate::hcu::Hcu;
 use anyhow::Result;
 use baocr_core::model::Student;
@@ -13,7 +13,7 @@ use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-/// Supplies the current game frame (1280x960 client layout).
+/// Supplies the current game frame (1280x960 for 4:3; a 1280x720 frame is passed over, see `step`).
 pub trait FrameSource {
     fn frame(&mut self) -> Result<RgbImage>;
 }
@@ -84,7 +84,8 @@ where
     /// stored, `None` otherwise.
     pub fn step(&mut self) -> Result<Option<Update>> {
         let img = self.src.frame()?;
-        if !detail_visible(&img) {
+        // the profile readers are calibrated for the 4:3 frame: a 16:9 profile is not read (and no guess is stored)
+        if Layout::of_frame(img.width(), img.height()) != Layout::Ratio43 || !detail_visible(&img) {
             // not on a profile: forget the pending view
             self.candidate = None;
             self.candidate_n = 0;

@@ -1,4 +1,10 @@
-//! Pixel-only readers for the 1280x960 (4:3) Blue Archive profile / roster frame.
+//! Pixel-only readers for the Blue Archive profile / roster frame (1280x960 for 4:3, 1280x720 for 16:9).
+//!
+//! Every ROI constant below was measured on the 4:3 frame. The 16:9 frame keeps the same pixel sizes but
+//! moves things vertically: centred panels and popups sit 120 px higher (`CENTRED_DY`), the list areas
+//! end 240 px higher (the frame is that much shorter). The readers that are known in 16:9 (profile
+//! recognition, student list, quick formation) apply those shifts from the frame's height; the profile
+//! readers of the scan (badges, locks, stars, name strip ...) and the combat HUD are 4:3 only.
 //!
 //! Ports the no-OCR logic of the Go program (`meta.go`, `capture.go`,
 //! `roster_detect.go`, `arrow_scan.go`, `deep.go`, `ppocr.go`, `main.go`).
@@ -15,6 +21,7 @@
 //! Out-of-bounds reads behave like Go's `Image.At` (black), never panic.
 
 use baocr_core::model::{Badges, Locks, SkillLocked, Terrain};
+use baocr_core::layout::Layout;
 use image::{imageops, GrayImage, Luma, RgbImage};
 use once_cell::sync::Lazy;
 
@@ -56,6 +63,25 @@ pub const WEAPON_STAR_X: [i32; 4] = [1029, 1045, 1061, 1077];
 pub const SCROLL_COLUMN_X: i32 = 1230;
 
 // ---- pixel helpers -----------------------------------------------------------
+
+/// How much higher centred panels and popups sit in 16:9 than in 4:3 (the frame is 240 px shorter).
+const CENTRED_DY: i32 = -120;
+
+fn layout_of(img: &RgbImage) -> Layout {
+    Layout::of_frame(img.width(), img.height())
+}
+
+/// The vertical shift of centred panels (the profile's right panel, popups) in this frame.
+fn centred_dy(img: &RgbImage) -> i32 {
+    match layout_of(img) {
+        Layout::Ratio43 => 0,
+        Layout::Ratio169 => CENTRED_DY,
+    }
+}
+
+fn shifted(r: Rect, dy: i32) -> Rect {
+    (r.0, r.1 + dy, r.2, r.3 + dy)
+}
 
 #[inline]
 fn px(img: &RgbImage, x: i32, y: i32) -> [u8; 3] {
@@ -352,10 +378,11 @@ pub fn read_skill_locks(img: &RgbImage) -> SkillLocked {
 /// Profile layout recognised by the dark-navy 능력치 header band.
 pub fn detail_visible(img: &RgbImage) -> bool {
     // Dark-navy 능력치 header band...
-    let band = fraction(img, DETAIL_BAND_ROI, |[r, g, b]| r < 75 && g > 50 && g < 105 && b > 85 && b < 150) > 0.6;
+    let dy = centred_dy(img);
+    let band = fraction(img, shifted(DETAIL_BAND_ROI, dy), |[r, g, b]| r < 75 && g > 50 && g < 105 && b > 85 && b < 150) > 0.6;
     // ...above the panel's light body. The band colour alone also matches dark blue
     // wallpapers (the main menu), so the white stat rows under it must be there too.
-    band && fraction(img, DETAIL_BODY_ROI, |[r, g, b]| r > 190 && g > 190 && b > 190) > 0.5
+    band && fraction(img, shifted(DETAIL_BODY_ROI, dy), |[r, g, b]| r > 190 && g > 190 && b > 190) > 0.5
 }
 
 /// The stat rows right under the header band: white panel background with text.
@@ -439,17 +466,26 @@ pub struct Thumb {
     pub bottom: i32,
 }
 
+/// Last row of the student list's viewport (4:3: 945; 16:9: the frame is 240 px shorter).
+fn list_bottom(img: &RgbImage) -> i32 {
+    match layout_of(img) {
+        Layout::Ratio43 => 945,
+        Layout::Ratio169 => 705,
+    }
+}
+
 /// Scrollbar thumb on column x=1230; `{-1,-1}` when absent.
 pub fn scroll_thumb(img: &RgbImage) -> Thumb {
     let mut best = Thumb { top: -1, bottom: -1 };
     let mut start = -1;
-    for y in 175..=945 {
+    let bottom = list_bottom(img);
+    for y in 175..=bottom {
         let [r, g, b] = px(img, SCROLL_COLUMN_X, y);
         let hit = r < 180 && g < 200 && b < 210;
         if hit && start < 0 {
             start = y;
         }
-        if (!hit || y == 945) && start >= 0 {
+        if (!hit || y == bottom) && start >= 0 {
             let end = if hit { y } else { y - 1 };
             if end - start >= 20 && end - start > best.bottom - best.top {
                 best = Thumb { top: start, bottom: end };
@@ -491,18 +527,20 @@ pub fn signature_distance(a: &CardSignature, b: &CardSignature) -> f64 {
 }
 
 /// Card grid rows found by the left-edge colour variance scan; 6 cards per row.
-/// Empty unless the frame is exactly 1280x960.
+/// Empty unless the frame is exactly 1280x960 or 1280x720; the 16:9 list is the same grid in a shorter viewport.
 pub fn roster_cards(img: &RgbImage) -> Vec<Card> {
-    if img.width() != FRAME_W || img.height() != FRAME_H {
+    if img.width() != FRAME_W || !matches!(img.height(), 960 | 720) {
         return Vec::new();
     }
+    let shift = list_bottom(img) - 945; // 0, or -240 in 16:9
+    let (scan_to, end_max) = (930 + shift, 920 + shift);
     struct Group {
         start: i32,
         end: i32,
         count: i32,
     }
     let mut groups: Vec<Group> = Vec::new();
-    for y in 170..=930 {
+    for y in 170..=scan_to {
         let a = px(img, 50, y);
         let b = px(img, 58, y);
         let c = px(img, 65, y);
@@ -523,7 +561,7 @@ pub fn roster_cards(img: &RgbImage) -> Vec<Card> {
     }
     let mut cards = Vec::new();
     for g in &groups {
-        if g.count < 60 || g.end > 920 || g.end < 290 || g.end - g.start < 90 {
+        if g.count < 60 || g.end > end_max || g.end < 290 || g.end - g.start < 90 {
             continue;
         }
         let row = (cards.len() / 6) as i32;
@@ -536,7 +574,7 @@ pub fn roster_cards(img: &RgbImage) -> Vec<Card> {
 }
 
 /// The dark-blue "미보유" (not owned) banner that separates the owned students from
-/// the rest of the list: a full-width navy band inside the card area. Returns its
+/// the rest of the list (4:3 only, like the scan that uses it): a full-width navy band inside the card area. Returns its
 /// centre row, or None while it is not on screen.
 pub fn unowned_banner(img: &RgbImage) -> Option<i32> {
     if img.width() != FRAME_W || img.height() != FRAME_H {
@@ -573,7 +611,7 @@ pub fn unowned_banner(img: &RgbImage) -> Option<i32> {
 /// repeating grid must not be mistaken for a shift of one line). None if the pages
 /// do not overlap enough, so a scroll that went too far cannot be counted as
 /// progress. Card positions depend on where the list is scrolled to; this is how
-/// they are tied to one absolute coordinate.
+/// they are tied to one absolute coordinate. 4:3 only, like the student scan that uses it.
 pub fn list_shift(before: &RgbImage, after: &RgbImage, max_shift: i32) -> Option<i32> {
     const TOP: i32 = 185;
     const BOTTOM: i32 = 935;
@@ -659,6 +697,8 @@ const LABEL_WIDTH: i32 = 92;
 /// The grid's viewport: labels cut off by its top or bottom edge are not whole.
 const GRID_TOP: i32 = 318;
 const GRID_BOTTOM: i32 = 650;
+/// The tab row (STRIKER / SPECIAL) of the grid.
+const TAB_ROWS: (i32, i32) = (262, 296);
 const LABEL_MIN_HEIGHT: i32 = 28;
 
 fn is_label_color(p: [u8; 3]) -> bool {
@@ -668,6 +708,9 @@ fn is_label_color(p: [u8; 3]) -> bool {
 /// The whole name labels visible in the 빠른 편성 grid, wherever it has been scrolled to.
 pub fn quick_card_labels(img: &RgbImage) -> Vec<CardLabel> {
     let mut out = Vec::new();
+    // the popup is centred: in 16:9 it sits 120 px higher with the same size
+    let dy = centred_dy(img);
+    let (grid_top, grid_bottom) = (GRID_TOP + dy, GRID_BOTTOM + dy);
     for k in 0..LABEL_COLUMNS {
         let left = LABEL_LEFT + k * LABEL_PITCH;
         // a name can run from edge to edge: a row of the label counts when most of the
@@ -677,7 +720,7 @@ pub fn quick_card_labels(img: &RgbImage) -> Vec<CardLabel> {
             continue;
         }
         // rows that look like the label, then runs of them with the text's gaps closed
-        let on: Vec<i32> = (GRID_TOP..=GRID_BOTTOM.min(img.height() as i32 - 1))
+        let on: Vec<i32> = (grid_top..=grid_bottom.min(img.height() as i32 - 1))
             .filter(|y| xs.iter().filter(|x| is_label_color(img.get_pixel(**x as u32, *y as u32).0)).count() * 3 >= xs.len())
             .collect();
         let mut runs: Vec<(i32, i32)> = Vec::new();
@@ -689,7 +732,7 @@ pub fn quick_card_labels(img: &RgbImage) -> Vec<CardLabel> {
         }
         for (s, e) in runs {
             // a label touching the viewport's edge is cut off
-            let whole = s > GRID_TOP && e < GRID_BOTTOM;
+            let whole = s > grid_top && e < grid_bottom;
             if whole && e - s + 1 >= LABEL_MIN_HEIGHT {
                 out.push(CardLabel { cx: left + LABEL_WIDTH / 2, y0: s, y1: e + 1 });
             }
@@ -722,9 +765,10 @@ pub fn quick_label_ink(img: &RgbImage, l: &CardLabel) -> GrayImage {
 /// Which tab of the 빠른 편성 grid is active: `Some(true)` STRIKER, `Some(false)` SPECIAL (the
 /// active tab is filled red), None when neither is (the popup is not showing).
 pub fn quick_tab_is_striker(img: &RgbImage) -> Option<bool> {
+    let dy = centred_dy(img);
     let red = |x0: u32, x1: u32| {
         let (mut n, mut t) = (0u32, 0u32);
-        for y in 262..296 {
+        for y in ((TAB_ROWS.0 + dy) as u32)..((TAB_ROWS.1 + dy) as u32) {
             for x in x0..x1.min(img.width()) {
                 if y >= img.height() {
                     continue;
@@ -769,7 +813,12 @@ pub fn roster_visible_pixels(img: &RgbImage) -> bool {
         return false;
     }
     let t = scroll_thumb(img);
-    if t.top < 179 || t.bottom - t.top < 45 || t.bottom - t.top > 90 || t.bottom > 945 || roster_cards(img).len() < 6 {
+    // the thumb is shorter in the shorter 16:9 viewport (33 px on a 16:9 roster, 62 px on a 4:3 one)
+    let min_len = match layout_of(img) {
+        Layout::Ratio43 => 45,
+        Layout::Ratio169 => 25,
+    };
+    if t.top < 179 || t.bottom - t.top < min_len || t.bottom - t.top > 90 || t.bottom > list_bottom(img) || roster_cards(img).len() < 6 {
         return false;
     }
     let [r, g, b] = px(img, 395, 110);
@@ -844,10 +893,11 @@ pub fn frame_distance(a: &FrameKey, b: &FrameKey) -> f64 {
 /// Fraction of sampled (every 3rd) panel pixels whose summed channel delta exceeds 60.
 pub fn panel_delta(a: &RgbImage, b: &RgbImage) -> f64 {
     let (mut n, mut diff) = (0u32, 0u32);
-    let mut y = PANEL_ROI.1;
-    while y < PANEL_ROI.3 {
-        let mut x = PANEL_ROI.0;
-        while x < PANEL_ROI.2 {
+    let roi = shifted(PANEL_ROI, centred_dy(a));
+    let mut y = roi.1;
+    while y < roi.3 {
+        let mut x = roi.0;
+        while x < roi.2 {
             n += 1;
             let (ca, cb) = (px(a, x, y), px(b, x, y));
             if (0..3).map(|i| absd(ca[i] as i32, cb[i] as i32)).sum::<i32>() > 60 {

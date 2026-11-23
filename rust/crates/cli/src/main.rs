@@ -15,7 +15,7 @@ use anyhow::{bail, Context, Result};
 use baocr_core::ocr_api::Ocr;
 use baocr_export::{Index, Store};
 use baocr_extract::{Extractor, Options, FRAME_MYSTIC};
-use baocr_hcu::{check_aspect, detect_region, game_capture, parse_frame_region, Hcu, HcuSession, HcuSource, Watcher};
+use baocr_hcu::{check_aspect, require_ratio43, detect_region, game_capture, parse_frame_region, Hcu, HcuSession, HcuSource, Watcher};
 use baocr_ocr::PpOcr;
 use baocr_overlay::{BannerState, Overlay};
 use baocr_pipeline::reextract;
@@ -25,7 +25,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 #[derive(Parser)]
-#[command(name = "baocr", about = "Read Blue Archive student profile screens into data (4:3 layout, windowed)")]
+#[command(name = "baocr", about = "Read Blue Archive student profile screens into data (4:3 or 16:9, windowed; the student scan needs 4:3)")]
 struct Args {
     /// Parse an existing 1280x960 profile screenshot (no desktop input).
     #[arg(long)]
@@ -211,7 +211,8 @@ fn real_main() -> Result<()> {
     } else {
         parse_frame_region(&args.region)?
     };
-    check_aspect(region)?;
+    let layout = check_aspect(region)?;
+    println!("screen ratio {}", layout.label());
 
     if let Some(path) = &args.grab {
         session.exclusive().activate()?;
@@ -222,8 +223,13 @@ fn real_main() -> Result<()> {
         return run_learn(&args, hcu, region, dir);
     }
     if args.watch {
+        if layout == baocr_hcu::Layout::Ratio169 {
+            println!("16:9: profile screens are not read (the profile readers are calibrated for 4:3); the watcher stays idle");
+        }
         return run_watch(&args, hcu, region, opts);
     }
+    // the scan clicks at 4:3 frame coordinates: say so before anything is loaded or touched
+    require_ratio43(region)?;
     run_scan(&args, &session, region, opts)
 }
 

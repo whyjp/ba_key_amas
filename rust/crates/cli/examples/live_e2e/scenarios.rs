@@ -114,7 +114,11 @@ fn run(args: &[String], out: PathBuf, dump: PathBuf) -> Result<()> {
         let wiki = Wiki::open(Path::new(WIKI))?;
         let input_log = PathBuf::from(std::env::var("APPDATA")?).join("baocr").join("input.log");
         let log_lines_before = std::fs::read_to_string(&input_log).map(|t| t.lines().count()).unwrap_or(0);
-        if let Err(e) = start_position(&mut rig) {
+        // the scenarios click at 4:3 frame coordinates: in 16:9 only the ones that do not run, and the rest are recorded as skipped
+        let only_43 = rig.layout != baocr_hcu::Layout::Ratio43;
+        if only_43 {
+            println!("game is 16:9: running the layout independent scenarios only");
+        } else if let Err(e) = start_position(&mut rig) {
             rig.record("start", "the game is on the 업무 hub or the main menu", format!("{e:#}"), false);
             return Ok(rig);
         }
@@ -122,6 +126,10 @@ fn run(args: &[String], out: PathBuf, dump: PathBuf) -> Result<()> {
         let list: [Scenario; 6] = [("nav", nav), ("stale", stale), ("tour", tour), ("battle", battle), ("card", card), ("guard", guard)];
         for (name, f) in list {
             if !want(name) {
+                continue;
+            }
+            if only_43 && name != "guard" {
+                rig.record(name, "scenario ran", "skipped: 4:3 only", true);
                 continue;
             }
             println!("=== scenario {name}");
@@ -133,7 +141,9 @@ fn run(args: &[String], out: PathBuf, dump: PathBuf) -> Result<()> {
                 }
             }
         }
-        if want("scan") && label == "directml" {
+        if want("scan") && only_43 {
+            rig.record("scan", "scenario ran", "skipped: 4:3 only", true);
+        } else if want("scan") && label == "directml" {
             println!("=== scenario scan");
             if let Err(e) = scan(&mut rig, &mut addon, &exe, &dump, &label, &scan_out) {
                 rig.record("scan", "scenario ran to the end", format!("aborted: {e:#}"), false);
@@ -897,7 +907,7 @@ fn guard(rig: &mut Rig, _wiki: &Wiki) -> Result<()> {
         .map_err(|e| anyhow!("input_target.exe not found in {EXAMPLES} (build: cargo build --release -p baocr-hcu --examples): {e}"))?;
     nap(1500);
     // the point is client centre: under the cover. The click must be refused, and nothing may reach anything.
-    let (fx, fy) = baocr_hcu::to_frame(rig.region, 640, 480);
+    let (fx, fy) = baocr_hcu::to_frame(rig.region, 640, rig.layout.frame_height() as i32 / 2); // client centre
     let before = std::fs::read_to_string(&cover_log).unwrap_or_default().lines().count();
     let res = rig.session.exclusive().click(fx, fy);
     nap(500);

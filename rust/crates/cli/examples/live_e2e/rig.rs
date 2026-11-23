@@ -2,7 +2,7 @@
 //! input on the add-on's own card, screenshots and an independent OCR of them, and the result table.
 use anyhow::{bail, Result};
 use baocr_core::ocr_api::Ocr;
-use baocr_hcu::{check_aspect, detect_region, game_capture, to_frame, HcuSession};
+use baocr_hcu::{check_aspect, detect_region, game_capture, to_frame, HcuSession, Layout};
 use baocr_ocr::PpOcr;
 use baocr_pixels::{fast_frame_key, frame_distance, looks_like_battle, FrameKey};
 use image::RgbImage;
@@ -83,6 +83,8 @@ pub mod mouse {
 pub struct Rig {
     pub session: HcuSession,
     pub region: [f64; 4],
+    /// The game's screen ratio; the scenarios' click coordinates are 4:3 ones.
+    pub layout: Layout,
     pub dump_path: PathBuf,
     pub out: PathBuf,
     pub ocr: PpOcr,
@@ -99,9 +101,9 @@ impl Rig {
         std::fs::create_dir_all(out.join("shots"))?;
         let session = HcuSession::default_backend();
         let region = detect_region(session.view())?;
-        check_aspect(region)?;
+        let layout = check_aspect(region)?;
         let ocr = PpOcr::new(&PpOcr::default_models_dir())?;
-        Ok(Rig { session, region, dump_path, out, ocr, checks: Vec::new(), latency: BTreeMap::new(), refusals: Vec::new(), battle_frames_seen: 0, frames_seen: 0, shot_no: 0 })
+        Ok(Rig { session, region, layout, dump_path, out, ocr, checks: Vec::new(), latency: BTreeMap::new(), refusals: Vec::new(), battle_frames_seen: 0, frames_seen: 0, shot_no: 0 })
     }
 
     pub fn dump(&self) -> Result<Value> {
