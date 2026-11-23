@@ -1,0 +1,11 @@
+[package]
+name = "baocr-progress"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+baocr-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+image.workspace = true
+regex.workspace = true

@@ -407,6 +407,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "baocr-progress"
+version = "0.1.0"
+dependencies = [
+ "baocr-core",
+ "image",
+ "regex",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "baocr-wikidb"
 version = "0.1.0"
 dependencies = [

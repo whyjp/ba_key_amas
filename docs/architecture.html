@@ -72,16 +72,16 @@ code{background:var(--code);padding:1px 5px;border-radius:4px;font-size:13px}
 <h2>2. 크레이트 의존 그래프 <span class="note">(<code>scripts/gen_arch.py</code>가 <code>cargo metadata</code>에서 생성)</span></h2>
 <div class="diagram"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 894 614" role="img" aria-label="crate dependency graph" font-family="Pretendard, Segoe UI, sans-serif">
 <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#8b97a8"/></marker></defs>
-<path d="M338 85 C338 112 229 112 229 137" fill="none" stroke="#8b97a8" stroke-width="1.2" marker-end="url(#ah)" opacity="0.8"/>
-<path d="M338 85 C338 280 447 280 447 473" fill="none" stroke="#8b97a8" stroke-width="1.2" marker-end="url(#ah)" opacity="0.8"/>
-<path d="M338 85 C338 168 120 168 120 249" fill="none" stroke="#8b97a8" stroke-width="1.2" marker-end="url(#ah)" opacity="0.8"/>
-<path d="M338 85 C338 168 338 168 338 249" fill="none" stroke="#8b97a8" stroke-width="1.2" marker-end="url(#ah)" opacity="0.8"/>
-<path d="M338 85 C338 112 447 112 447 137" fill="none" stroke="#8b97a8" stroke-width="1.2" marker-end="url(#ah)" opacity="0.8"/>
-<path d="M338 85 C338 224 556 224 556 361" fill="none" stroke="#8b97a8" stroke-width="1.2" marker-end="url(#ah)" opacity="0.8"/>
-<path d="M338 85 C338 168 556 168 556 249" fill="none" stroke="#8b97a8" stroke-width="1.2" marker-end="url(#ah)" opacity="0.8"/>
-<path d="M338 85 C338 112 665 112 665 137" fill="none" stroke="#8b97a8" stroke-width="1.2" marker-end="url(#ah)" opacity="0.8"/>
-<path d="M338 85 C338 224 774 224 774 361" fill="none" stroke="#8b97a8" stroke-width="1.2" marker-end="url(#ah)" opacity="0.8"/>
-<path d="M338 85 C338 168 774 168 774 249" fill="none" stroke="#8b97a8" stroke-width="1.2" marker-end="url(#ah)" opacity="0.8"/>
+<path d="M229 85 C229 112 229 112 229 137" fill="none" stroke="#8b97a8" stroke-width="1.2" marker-end="url(#ah)" opacity="0.8"/>
+<path d="M229 85 C229 280 447 280 447 473" fill="none" stroke="#8b97a8" stroke-width="1.2" marker-end="url(#ah)" opacity="0.8"/>
+<path d="M229 85 C229 168 120 168 120 249" fill="none" stroke="#8b97a8" stroke-width="1.2" marker-end="url(#ah)" opacity="0.8"/>
+<path d="M229 85 C229 168 338 168 338 249" fill="none" stroke="#8b97a8" stroke-width="1.2" marker-end="url(#ah)" opacity="0.8"/>
+<path d="M229 85 C229 112 447 112 447 137" fill="none" stroke="#8b97a8" stroke-width="1.2" marker-end="url(#ah)" opacity="0.8"/>
+<path d="M229 85 C229 224 556 224 556 361" fill="none" stroke="#8b97a8" stroke-width="1.2" marker-end="url(#ah)" opacity="0.8"/>
+<path d="M229 85 C229 168 556 168 556 249" fill="none" stroke="#8b97a8" stroke-width="1.2" marker-end="url(#ah)" opacity="0.8"/>
+<path d="M229 85 C229 112 665 112 665 137" fill="none" stroke="#8b97a8" stroke-width="1.2" marker-end="url(#ah)" opacity="0.8"/>
+<path d="M229 85 C229 224 774 224 774 361" fill="none" stroke="#8b97a8" stroke-width="1.2" marker-end="url(#ah)" opacity="0.8"/>
+<path d="M229 85 C229 168 774 168 774 249" fill="none" stroke="#8b97a8" stroke-width="1.2" marker-end="url(#ah)" opacity="0.8"/>
 <path d="M229 197 C229 336 447 336 447 473" fill="none" stroke="#8b97a8" stroke-width="1.2" marker-end="url(#ah)" opacity="0.8"/>
 <path d="M229 197 C229 224 338 224 338 249" fill="none" stroke="#8b97a8" stroke-width="1.2" marker-end="url(#ah)" opacity="0.8"/>
 <path d="M229 197 C229 224 556 224 556 249" fill="none" stroke="#8b97a8" stroke-width="1.2" marker-end="url(#ah)" opacity="0.8"/>
@@ -104,14 +104,19 @@ code{background:var(--code);padding:1px 5px;border-radius:4px;font-size:13px}
 <path d="M665 197 C665 224 338 224 338 249" fill="none" stroke="#8b97a8" stroke-width="1.2" marker-end="url(#ah)" opacity="0.8"/>
 <path d="M665 197 C665 280 338 280 338 361" fill="none" stroke="#8b97a8" stroke-width="1.2" marker-end="url(#ah)" opacity="0.8"/>
 <path d="M774 421 C774 448 447 448 447 473" fill="none" stroke="#8b97a8" stroke-width="1.2" marker-end="url(#ah)" opacity="0.8"/>
-<g><rect x="240" y="27" width="196" height="58" rx="8" fill="#1f3a63"/>
-<text x="338" y="49" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">baocr</text>
-<text x="338" y="67" fill="#dbe4f0" font-size="10.5" text-anchor="middle">애드온 루프, 스캔, doctor (바이너리)</text>
-<text x="428" y="79" fill="#b7c4d6" font-size="9" text-anchor="end">990줄</text></g>
-<g><rect x="458" y="27" width="196" height="58" rx="8" fill="#777777"/>
-<text x="556" y="49" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">namedict</text>
-<text x="556" y="67" fill="#dbe4f0" font-size="10.5" text-anchor="middle">도구: 이름 사전을 만든다</text>
-<text x="646" y="79" fill="#b7c4d6" font-size="9" text-anchor="end">117줄</text></g>
+<path d="M665 85 C665 280 447 280 447 473" fill="none" stroke="#8b97a8" stroke-width="1.2" marker-end="url(#ah)" opacity="0.8"/>
+<g><rect x="131" y="27" width="196" height="58" rx="8" fill="#1f3a63"/>
+<text x="229" y="49" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">baocr</text>
+<text x="229" y="67" fill="#dbe4f0" font-size="10.5" text-anchor="middle">애드온 루프, 스캔, doctor (바이너리)</text>
+<text x="319" y="79" fill="#b7c4d6" font-size="9" text-anchor="end">990줄</text></g>
+<g><rect x="349" y="27" width="196" height="58" rx="8" fill="#777777"/>
+<text x="447" y="49" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">namedict</text>
+<text x="447" y="67" fill="#dbe4f0" font-size="10.5" text-anchor="middle">도구: 이름 사전을 만든다</text>
+<text x="537" y="79" fill="#b7c4d6" font-size="9" text-anchor="end">117줄</text></g>
+<g><rect x="567" y="27" width="196" height="58" rx="8" fill="#6b3f8f"/>
+<text x="665" y="49" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">progress</text>
+<text x="665" y="67" fill="#dbe4f0" font-size="10.5" text-anchor="middle">진행 상태 읽기와 BAReceipt 내보내기</text>
+<text x="755" y="79" fill="#b7c4d6" font-size="9" text-anchor="end">1452줄</text></g>
 <g><rect x="131" y="139" width="196" height="58" rx="8" fill="#2f6f9f"/>
 <text x="229" y="161" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">assist</text>
 <text x="229" y="179" fill="#dbe4f0" font-size="10.5" text-anchor="middle">옵저버, 위젯, 어시스턴트, 설정</text>
