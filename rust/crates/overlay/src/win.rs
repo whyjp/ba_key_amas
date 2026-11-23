@@ -4,10 +4,11 @@
 //! (clicks pass through), WS_EX_NOACTIVATE (never takes focus), WS_EX_TOPMOST,
 //! WS_EX_TOOLWINDOW (no taskbar button). WDA_EXCLUDEFROMCAPTURE keeps it out of
 //! screenshots where the OS supports it.
-use crate::dock::{dock_from_drop, dock_origin};
-use crate::panel::{ingame_origin, ingame_panel_width, panel_width, render_panel, render_panel_hits, render_tooltip, Hit, DRAG_HANDLE, PANEL_BASE_W};
+use crate::cache::{Memo, Tracker};
+use crate::dock::{dock_from_drop, dock_origin, Dock};
+use crate::panel::{ingame_origin, ingame_panel_width, panel_width, render_panel, render_panel_hits, render_tooltip, Hit, PanelState, DRAG_HANDLE, PANEL_BASE_W};
 use crate::render::{load_fonts, Fonts, Ltrb};
-use crate::marks::render_marks;
+use crate::marks::{render_marks, Mark};
 use crate::{Card, Shown};
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
@@ -24,17 +25,16 @@ mod prof {
         Geometry,
         Covered,
         RenderCard,
-        Hash,
         RenderIngame,
         RenderMarks,
         Blit,
         Update,
         Busy,
     }
-    const NAMES: [&str; 9] = ["game_geometry", "covered", "render_card", "state_hash", "render_ingame", "render_marks", "blit", "UpdateLayeredWindow", "tick busy"];
+    const NAMES: [&str; 8] = ["game_geometry", "covered", "render_card", "render_ingame", "render_marks", "blit", "UpdateLayeredWindow", "tick busy"];
     static ON: AtomicBool = AtomicBool::new(false);
-    static NS: [AtomicU64; 9] = [const { AtomicU64::new(0) }; 9];
-    static N: [AtomicU32; 9] = [const { AtomicU32::new(0) }; 9];
+    static NS: [AtomicU64; 8] = [const { AtomicU64::new(0) }; 8];
+    static N: [AtomicU32; 8] = [const { AtomicU32::new(0) }; 8];
 
     pub fn enable() {
         ON.store(std::env::var_os("BAOCR_PROFILE").is_some(), Ordering::Relaxed);
@@ -479,6 +479,13 @@ fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, stop: Arc<Atom
         // a drag of the card by its header: where in the card it was picked up, and where it is now
         let mut drag: Option<(i32, i32)> = None;
         let mut drag_at: Option<(i32, i32)> = None;
+        let (mut card_track, mut ingame_track, mut marks_track) = (Tracker::<Card>::new(), Tracker::<Option<PanelState>>::new(), Tracker::<Vec<Mark>>::new());
+        let (mut card_gen, mut ingame_gen, mut marks_gen, mut dock_now) = (0u64, 0u64, 0u64, Dock::default());
+        let mut card_memo: Memo<(u64, u32), (image::RgbaImage, Vec<Hit>)> = Memo::new();
+        let mut ingame_memo: Memo<(u64, u32), image::RgbaImage> = Memo::new();
+        let mut marks_memo: Memo<(u64, i32, i32), image::RgbaImage> = Memo::new();
+        let mut tip_memo: Memo<(String, i32), image::RgbaImage> = Memo::new();
+        let mut hits_gen = 0u64;
         prof::enable();
         let mut prof_since = Instant::now();
         while !stop.load(Ordering::Relaxed) {
@@ -526,17 +533,22 @@ fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, stop: Arc<Atom
                 continue;
             }
             let (cw, ch) = (client.2 - client.0, client.3 - client.1);
-            let shown = state.lock().map(|g| g.clone()).unwrap_or(Shown { card: Card::Hidden, ingame: None, marks: Vec::new(), dock: Default::default() });
+            // what changed since the last tick: nothing is drawn again unless it did
+            if let Ok(g) = state.lock() {
+                card_gen = card_track.update(&g.card);
+                ingame_gen = ingame_track.update(&g.ingame);
+                marks_gen = marks_track.update(&g.marks);
+                dock_now = g.dock;
+            }
             let mut card_rect: Option<((i32, i32), (i32, i32))> = None;
-            match &shown.card {
-                Card::Hidden => card.hide(),
-                Card::Panel(p) => {
-                    let (img, hits) = prof::time(prof::Part::RenderCard, || render_panel_hits(panel_width(cw) as u32, p, &fonts));
-                    let key = prof::time(prof::Part::Hash, || hash_of(&(format!("{p:?}"), cw, ch)));
+            match card_track.current() {
+                Some(Card::Panel(p)) => {
+                    let width = panel_width(cw) as u32;
+                    let ((img, hits), render_gen) = card_memo.get((card_gen, width), || prof::time(prof::Part::RenderCard, || render_panel_hits(width, p, &fonts)));
                     let size = (img.width() as i32, img.height() as i32);
                     // against the game on the docked side; with no room, inside it rather than nowhere
                     let docked = if game_present {
-                        dock_origin(client, outer, work, size, shown.dock).unwrap_or_else(|| ingame_origin(client, size))
+                        dock_origin(client, outer, work, size, dock_now).unwrap_or_else(|| ingame_origin(client, size))
                     } else {
                         // no game: wait at the top right of the screen
                         ((work.2 - size.0 - 12).max(work.0), work.1 + 12)
@@ -567,10 +579,14 @@ fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, stop: Arc<Atom
                         }
                         None => docked,
                     };
-                    card_hits = hits;
+                    if hits_gen != render_gen {
+                        card_hits.clone_from(hits);
+                        hits_gen = render_gen;
+                    }
                     card_rect = Some((at, size));
-                    card.show(screen_dc, &img, at, key ^ hash_of(&at));
+                    card.show(screen_dc, img, at, hash_of(&(render_gen, at)));
                 }
+                _ => card.hide(),
             }
             // a tooltip while the pointer rests on a row that has one
             let hovered = card_rect.filter(|_| drag.is_none()).and_then(|(at, size)| {
@@ -581,32 +597,30 @@ fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, stop: Arc<Atom
             match hovered {
                 Some((text, (cx, cy))) => {
                     let scale = panel_width(cw) as f32 / PANEL_BASE_W;
-                    let img = render_tooltip(scale, &text, &fonts);
+                    let (img, tip_gen) = tip_memo.get((text.clone(), panel_width(cw)), || render_tooltip(scale, &text, &fonts));
                     let at = ((cx + 14).min(work.2 - img.width() as i32).max(work.0), (cy + 22).min(work.3 - img.height() as i32).max(work.1));
-                    tip.show(screen_dc, &img, at, hash_of(&(&text, at)));
+                    tip.show(screen_dc, img, at, hash_of(&(tip_gen, at)));
                 }
                 None => tip.hide(),
             }
             if game_present {
                 // a card inside the game
-                match &shown.ingame {
-                    Some(p) => {
-                        let img = prof::time(prof::Part::RenderIngame, || render_panel(ingame_panel_width(cw) as u32, p, &fonts));
+                match ingame_track.current() {
+                    Some(Some(p)) => {
+                        let width = ingame_panel_width(cw) as u32;
+                        let (img, render_gen) = ingame_memo.get((ingame_gen, width), || prof::time(prof::Part::RenderIngame, || render_panel(width, p, &fonts)));
                         let at = ingame_origin(client, (img.width() as i32, img.height() as i32));
-                        let key = prof::time(prof::Part::Hash, || hash_of(&(format!("{p:?}"), cw, ch)) ^ hash_of(&at));
-                        ingame.show(screen_dc, &img, at, key);
+                        ingame.show(screen_dc, img, at, hash_of(&(render_gen, at)));
                     }
-                    None => ingame.hide(),
+                    _ => ingame.hide(),
                 }
                 // the icons over the portraits: the layer covers the game's client area
-                if shown.marks.is_empty() {
-                    marks.hide();
-                } else {
-                    let key = hash_of(&(&shown.marks, client.0, client.1, cw, ch));
-                    if !(marks.visible && marks.drawn == Some(key)) {
-                        let img = prof::time(prof::Part::RenderMarks, || render_marks(cw as u32, ch as u32, &shown.marks, &fonts));
-                        marks.show(screen_dc, &img, (client.0, client.1), key);
+                match marks_track.current() {
+                    Some(m) if !m.is_empty() => {
+                        let (img, render_gen) = marks_memo.get((marks_gen, cw, ch), || prof::time(prof::Part::RenderMarks, || render_marks(cw as u32, ch as u32, m, &fonts)));
+                        marks.show(screen_dc, img, (client.0, client.1), hash_of(&(render_gen, client.0, client.1)));
                     }
+                    _ => marks.hide(),
                 }
             } else {
                 ingame.hide();
