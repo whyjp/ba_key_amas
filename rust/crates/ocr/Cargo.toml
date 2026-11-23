@@ -3,6 +3,10 @@ name = "baocr-ocr"
 edition.workspace = true
 version.workspace = true
 
+[features]
+# GPU inference through DirectML (docs/speed-research.md): off by default
+directml = ["oar-ocr/directml"]
+
 [dependencies]
 baocr-core.workspace = true
 oar-ocr = "0.11"

@@ -150,7 +150,11 @@ fn main() {
 }
 
 fn load_ocr(args: &Args) -> Result<PpOcr> {
-    PpOcr::new(&args.models.clone().unwrap_or_else(PpOcr::default_models_dir))
+    let ocr = PpOcr::new(&args.models.clone().unwrap_or_else(PpOcr::default_models_dir))?;
+    if ocr.device() != "cpu" {
+        eprintln!("OCR runs on the GPU ({}); BAOCR_OCR_DEVICE=cpu turns that off", ocr.device());
+    }
+    Ok(ocr)
 }
 
 fn real_main() -> Result<()> {

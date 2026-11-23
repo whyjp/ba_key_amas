@@ -20,9 +20,14 @@ use std::sync::Mutex;
 const REC_HEIGHT: u32 = 48;
 const MIN_WIDTH: u32 = 16;
 const MAX_WIDTH: u32 = 1600;
+/// Text lines recognised per model run. What a line reads as depends a little on the lines padded
+/// beside it, so this is fixed at the CPU default the fixtures were read with (docs/speed-research.md):
+/// a GPU's own default of 64 changes 8 of 15 fixture frames.
+const REGION_BATCH: usize = 4;
 
 pub struct PpOcr {
     det_rec: OAROCR,
+    device: &'static str,
     rec: Mutex<Session>,
     /// class index -> character (index 0 is the CTC blank).
     classes: Vec<String>,
@@ -43,9 +48,17 @@ impl PpOcr {
                 return Err(anyhow!("model file missing: {} (see models/README.md)", p.display()));
             }
         }
-        let det_rec = OAROCRBuilder::new(det, rec.clone(), dict.clone())
-            .build()
-            .map_err(|e| anyhow!("building detection+recognition pipeline: {e}"))?;
+        let mut builder = OAROCRBuilder::new(det, rec.clone(), dict.clone()).region_batch_size(REGION_BATCH);
+        let mut device = "cpu";
+        if let Some(config) = gpu_session_config(std::env::var("BAOCR_OCR_DEVICE").ok().as_deref()) {
+            // the providers that survived the probe: DirectML is dropped when the machine has none
+            let config = config.resolve_auto();
+            if config.has_accelerator_provider() {
+                device = "directml";
+            }
+            builder = builder.ort_session(config);
+        }
+        let det_rec = builder.build().map_err(|e| anyhow!("building detection+recognition pipeline: {e}"))?;
         let session = oar_ocr::core::load_session(rec.as_path()).map_err(|e| anyhow!("loading recognition model: {e}"))?;
         let text = std::fs::read_to_string(&dict)?;
         // PaddleOCR layout: blank, every dictionary line, then the space char.
@@ -60,7 +73,12 @@ impl PpOcr {
             }
         }
         let syllables = char_to_class.keys().filter_map(|&c| jamo(c).map(|j| (c, j))).collect();
-        Ok(Self { det_rec, rec: Mutex::new(session), classes, char_to_class, syllables })
+        Ok(Self { det_rec, device, rec: Mutex::new(session), classes, char_to_class, syllables })
+    }
+
+    /// Where detection and recognition run: "cpu" or "directml".
+    pub fn device(&self) -> &'static str {
+        self.device
     }
 
     /// Default models dir: $BAOCR_MODELS, else ./models, else ../models.
@@ -222,6 +240,17 @@ impl PpOcr {
     }
 }
 
+/// The session configuration that lets ONNX Runtime use a GPU, or None for the CPU. Only a build
+/// with the `directml` feature has one; `BAOCR_OCR_DEVICE=cpu` turns it off at run time.
+#[cfg_attr(not(feature = "directml"), allow(unused_variables))]
+fn gpu_session_config(device_env: Option<&str>) -> Option<oar_ocr::core::config::OrtSessionConfig> {
+    #[cfg(feature = "directml")]
+    if !device_env.is_some_and(|d| d.eq_ignore_ascii_case("cpu")) {
+        return Some(oar_ocr::core::config::OrtSessionConfig::auto());
+    }
+    None
+}
+
 impl Ocr for PpOcr {
     fn boxes(&self, img: &RgbImage) -> Result<Vec<TextBox>> {
         let res = self.det_rec.predict(vec![img.clone()]).map_err(|e| anyhow!("OCR: {e}"))?;
@@ -322,4 +351,22 @@ pub fn ink_to_line(g: &image::GrayImage) -> RgbImage {
         out.put_pixel((x - x0 + MARGIN) as u32, (y - y0 + MARGIN) as u32, image::Rgb([0, 0, 0]));
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_cpu_can_always_be_asked_for() {
+        assert!(gpu_session_config(Some("cpu")).is_none());
+        assert!(gpu_session_config(Some("CPU")).is_none());
+    }
+
+    #[cfg(feature = "directml")]
+    #[test]
+    fn a_directml_build_prefers_the_gpu_unless_told_otherwise() {
+        assert!(gpu_session_config(None).is_some());
+        assert!(gpu_session_config(Some("gpu")).is_some());
+    }
 }

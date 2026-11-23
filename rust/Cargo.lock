@@ -230,6 +230,7 @@ dependencies = [
  "baocr-export",
  "baocr-extract",
  "baocr-hcu",
+ "baocr-names",
  "baocr-ocr",
  "baocr-overlay",
  "baocr-pipeline",

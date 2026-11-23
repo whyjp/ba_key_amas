@@ -7,12 +7,14 @@
 mod cache;
 mod dock;
 mod fold;
+mod hints;
 mod input_block;
 mod marks;
 mod panel;
 mod placement;
 mod tab;
 mod render;
+mod wake;
 #[cfg(windows)]
 mod tray;
 mod scan;
@@ -21,6 +23,9 @@ mod win;
 
 pub use marks::{render_marks, Frame, Icon, Mark};
 pub use dock::{Anchor, Corner, Dock, Presentation, Side};
+pub use hints::{inside, HintEvent, HintKind, HintScheduler, HotZone, Ms, Policy as HintPolicy, Reason as HintReason, Request as HintRequest};
+#[cfg(windows)]
+pub use hints::InputHints;
 pub use input_block::set_escape_target;
 pub use panel::{ingame_origin, ingame_panel_width, panel_origin, panel_width, render_panel, render_panel_hits, render_tooltip, Chip, FitEntry, Grade, Hit, MatrixRow, PanelState, Row, Tone, PANEL_BASE_W};
 
@@ -55,6 +60,8 @@ pub struct Overlay {
     state: Arc<Mutex<Shown>>,
     /// Ids of the card's buttons that were clicked, oldest first.
     events: Arc<Mutex<Vec<String>>>,
+    /// Tells the overlay thread there is something new to draw.
+    wake: Arc<wake::Wake>,
     #[cfg(windows)]
     worker: Option<win::Worker>,
     /// The hooks that keep the player's hands off the game while a scan runs.
@@ -80,13 +87,15 @@ impl Overlay {
     fn start_with(first: Card) -> Overlay {
         let state = Arc::new(Mutex::new(Shown { card: first, ingame: None, marks: Vec::new(), dock: Dock::default(), locked: false }));
         let events = Arc::new(Mutex::new(Vec::new()));
+        let wake = Arc::new(wake::Wake::default());
         #[cfg(windows)]
-        let worker = win::Worker::start(state.clone(), events.clone());
+        let worker = win::Worker::start(state.clone(), events.clone(), wake.clone());
         #[cfg(windows)]
         let tray = tray::Tray::start(events.clone());
         Overlay {
             state,
             events,
+            wake,
             #[cfg(windows)]
             worker,
             #[cfg(windows)]
@@ -100,6 +109,7 @@ impl Overlay {
         if let Ok(mut g) = self.state.lock() {
             g.card = c;
         }
+        self.wake.notify();
     }
 
     /// Block (or free) the player's mouse and keyboard; only the scan's own input gets through, and
@@ -129,6 +139,7 @@ impl Overlay {
         if let Ok(mut g) = self.state.lock() {
             g.dock = dock;
         }
+        self.wake.notify();
     }
 
     /// A card inside the game's window (None removes it).
@@ -136,6 +147,7 @@ impl Overlay {
         if let Ok(mut g) = self.state.lock() {
             g.ingame = p;
         }
+        self.wake.notify();
     }
 
     /// The ids of the buttons clicked since the last call.
@@ -148,6 +160,7 @@ impl Overlay {
         if let Ok(mut g) = self.state.lock() {
             g.marks = marks;
         }
+        self.wake.notify();
     }
 
     /// Replace the shown banner state.
@@ -197,6 +210,7 @@ impl Drop for Overlay {
     fn drop(&mut self) {
         #[cfg(windows)]
         if let Some(w) = self.worker.take() {
+            self.wake.notify();
             w.stop();
         }
     }
