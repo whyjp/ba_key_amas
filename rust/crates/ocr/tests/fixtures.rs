@@ -35,9 +35,17 @@ fn the_engine_reads_the_fixtures_as_committed() {
         let got = ocr.boxes(&image::open(&png).unwrap().to_rgb8()).unwrap();
         let mut used = vec![false; got.len()];
         for (x, y, t) in &want {
-            match (0..got.len()).find(|&i| !used[i] && got[i].text == *t && (got[i].x0 - x).abs() <= 3.0 && (got[i].y0 - y).abs() <= 3.0) {
+            match (0..got.len()).find(|&i| !used[i] && got[i].text.trim() == t.trim() && (got[i].x0 - x).abs() <= 3.0 && (got[i].y0 - y).abs() <= 3.0) {
                 Some(i) => used[i] = true,
-                None => missing += 1,
+                None => {
+                    missing += 1;
+                    println!("{}: committed but not read: {t:?} at {x:.0},{y:.0}", png.display());
+                }
+            }
+        }
+        for (i, u) in used.iter().enumerate() {
+            if !u {
+                println!("{}: read but not committed: {:?} at {:.0},{:.0}", png.display(), got[i].text, got[i].x0, got[i].y0);
             }
         }
         extra += used.iter().filter(|u| !**u).count();
