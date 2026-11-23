@@ -85,6 +85,9 @@ pub fn formation_rows(score: &FormationScore, terrain_known: bool) -> Vec<Row> {
     rows
 }
 
+/// Fewest recognised students before a verdict is given.
+const MIN_SQUAD_FOR_VERDICT: usize = 3;
+
 /// Whether the squad suits the mission: a verdict and bars.
 pub struct Formation;
 
@@ -103,7 +106,13 @@ impl Widget for Formation {
             return None;
         }
         let brief = cx.brief()?;
-        let score = evaluate(brief, cx.terrain(), &cx.team(), cx.students, cx.types)?;
+        let team = cx.team();
+        // one or two students read so far (the rest scrolled out of view, or the 편성 screen missed)
+        // would give a verdict about a squad that is not the player's
+        if team.len() < MIN_SQUAD_FOR_VERDICT {
+            return None;
+        }
+        let score = evaluate(brief, cx.terrain(), &team, cx.students, cx.types)?;
         Some(Output::Card { title: String::new(), rows: formation_rows(&score, cx.terrain().is_some()) })
     }
 }

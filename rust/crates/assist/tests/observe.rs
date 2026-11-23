@@ -50,3 +50,43 @@ fn preview_of_the_icon_placement_on_a_real_frame() {
         base.save(std::path::Path::new(&dir).join("placement.png")).unwrap();
     }
 }
+
+fn recorded_boxes(name: &str) -> Vec<baocr_core::ocr_api::TextBox> {
+    let path = format!("{}/../../../fixtures/screens/{name}.boxes.txt", env!("CARGO_MANIFEST_DIR"));
+    std::fs::read_to_string(path)
+        .unwrap()
+        .lines()
+        .filter_map(|l| {
+            let (pos, text) = l.split_once('\t')?;
+            let v: Vec<f32> = pos.split(',').filter_map(|n| n.parse().ok()).collect();
+            (v.len() == 4).then(|| baocr_core::ocr_api::TextBox { x0: v[0], y0: v[1], x1: v[2], y1: v[3], text: text.to_string(), score: 1.0 })
+        })
+        .collect()
+}
+
+#[test]
+fn the_squad_keeps_its_slot_order_through_the_popup_and_is_forgotten_on_leaving() {
+    let wiki_path = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../wikidb/wiki.db"));
+    let (Some(ocr), true) = (engine(), wiki_path.exists()) else { return };
+    let students = Wiki::open(&wiki_path).unwrap().students().unwrap();
+    let img = image::open(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../fixtures/screens/quick-formation-live-a.png")).unwrap().to_rgb8();
+    let boxes = ocr.boxes(&img).unwrap();
+    let mut observer = Observer::new(&ocr, &students);
+    let name = |ids: &[i64]| ids.iter().map(|id| students.iter().find(|s| s.id == *id).unwrap().name.clone()).collect::<Vec<_>>();
+
+    // the 편성 screen gives the slot order
+    let on_squad = observer.observe(&img, &recorded_boxes("squad"), Scene::Unknown);
+    assert_eq!(on_squad.scene, Scene::Squad);
+    let order = name(&on_squad.squad);
+    assert_eq!(order, vec!["호시노(무장)", "하나코(수영복)", "시로코*테러", "사오리(드레스)", "아코", "키사키"]);
+    // the popup shows the same squad: the order must not change however often it is read
+    for _ in 0..2 {
+        let in_popup = observer.observe(&img, &boxes, Scene::Unknown);
+        assert_eq!(in_popup.scene, Scene::QuickFormation);
+        assert_eq!(name(&in_popup.squad), order, "selected cards in the grid do not reorder the squad");
+    }
+    // leaving for the main menu forgets it
+    let lobby = observer.observe(&img, &recorded_boxes("lobby"), Scene::Unknown);
+    assert_eq!(lobby.scene, Scene::Lobby);
+    assert!(lobby.squad.is_empty());
+}

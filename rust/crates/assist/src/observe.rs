@@ -56,6 +56,11 @@ impl<'a> Observer<'a> {
             scene = fallback;
         }
         let mission = self.tracker.update(scene, boxes).cloned();
+        // A squad belongs to the mission or edit session in progress: leaving for a screen that
+        // has nothing to do with one forgets it, so the next mission never inherits it.
+        if !matches!(scene, Scene::Squad | Scene::QuickFormation | Scene::MissionMap | Scene::MissionInfo | Scene::EnemyInfo | Scene::Unknown) {
+            self.squad.clear();
+        }
         let mut obs = Observation::new(scene);
         obs.mission = mission;
         match scene {
@@ -67,9 +72,14 @@ impl<'a> Observer<'a> {
                 obs.cards = read_card_names(self.ocr, img, boxes);
                 for c in &obs.cards {
                     if let Some(s) = Wiki::match_student_as(self.students, &c.text, obs.grid_kind) {
-                        self.squad.retain(|id| *id != s.id);
-                        if quick_card_selected(img, c.x.round() as i32, c.y0.round() as i32) {
-                            self.squad.push(s.id);
+                        // a student already in the squad keeps their slot; only changes move anyone
+                        let at = self.squad.iter().position(|id| *id == s.id);
+                        match (quick_card_selected(img, c.x.round() as i32, c.y0.round() as i32), at) {
+                            (true, None) => self.squad.push(s.id),
+                            (false, Some(i)) => {
+                                self.squad.remove(i);
+                            }
+                            _ => {}
                         }
                     }
                 }

@@ -64,6 +64,12 @@ impl<'a, S: Surface> Assistant<'a, S> {
         scene
     }
 
+    /// The screen is changing (a scroll, a popup closing): icons placed for the old view would sit
+    /// on the wrong things until the new one is read, so take them down.
+    pub fn transition(&self) {
+        self.surface.marks(Vec::new());
+    }
+
     /// Show what an observation calls for.
     pub fn show(&mut self, obs: Observation) {
         self.last = obs;
@@ -246,7 +252,7 @@ mod tests {
     }
 
     fn squad_obs(scene: Scene) -> Observation {
-        Observation { mission: mission(), squad: vec![1, 3], ..Observation::new(scene) }
+        Observation { mission: mission(), squad: vec![1, 2, 3], ..Observation::new(scene) }
     }
 
     fn assistant<'a>(r: &'a Rig, ocr: &'a NoOcr) -> Assistant<'a, Fake> {
@@ -312,14 +318,24 @@ mod tests {
         a.show(obs);
         {
             let shown = r.fake.0.borrow();
-            // one icon row on the grid card, one per squad member on the strip at the bottom
-            assert_eq!(shown.marks.len(), 3, "{:?}", shown.marks);
+            // one icon column on the grid card, one per squad member on the strip at the bottom
+            assert_eq!(shown.marks.len(), 4, "{:?}", shown.marks);
             assert!(shown.marks.iter().any(|m| m.cx == 111 && m.top() == 700), "first striker slot");
             assert!(shown.marks.iter().any(|m| m.cx == 490), "first special slot");
         }
         r.fake.0.borrow_mut().clicks.push("place:slot_stats".into());
         a.poll();
         assert_eq!(r.fake.0.borrow().marks.len(), 1, "only the grid card's icons are left");
+    }
+
+    #[test]
+    fn a_squad_of_one_or_two_gets_no_verdict_and_a_new_mission_does_not_inherit_the_old_squad() {
+        let (r, ocr) = (rig(), NoOcr);
+        let mut a = assistant(&r, &ocr);
+        a.show(Observation { mission: mission(), squad: vec![1, 3], ..Observation::new(Scene::Squad) });
+        assert!(!rows_of(r.fake.0.borrow().main.as_ref().unwrap()).contains("Verdict"), "two students are not a squad to judge");
+        a.show(squad_obs(Scene::Squad));
+        assert!(rows_of(r.fake.0.borrow().main.as_ref().unwrap()).contains("Verdict"));
     }
 
     #[test]

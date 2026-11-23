@@ -148,13 +148,15 @@ impl Wiki {
     /// Like `match_student`, with the kind of squad slot the name was read in ("Main" for
     /// a striker, "Support" for a special) to tell students that share a name apart.
     pub fn match_student_as(students: &[StudentBrief], ocr: &str, squad_type: Option<&str>) -> Option<StudentBrief> {
-        if let Some(kind) = squad_type {
-            let of_kind: Vec<StudentBrief> = students.iter().filter(|s| s.squad_type == kind).cloned().collect();
-            if let Some(found) = Wiki::closest(&of_kind, ocr) {
-                return Some(found);
+        // With the slot kind known the answer is a student of that kind or nobody: a misread
+        // that happens to be close to a student who cannot be there would show wrong icons.
+        match squad_type {
+            Some(kind) => {
+                let of_kind: Vec<StudentBrief> = students.iter().filter(|s| s.squad_type == kind).cloned().collect();
+                Wiki::closest(&of_kind, ocr)
             }
+            None => Wiki::closest(students, ocr),
         }
-        Wiki::closest(students, ocr)
     }
 
     fn closest(students: &[StudentBrief], ocr: &str) -> Option<StudentBrief> {

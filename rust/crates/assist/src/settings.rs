@@ -50,7 +50,7 @@ impl Default for Settings {
 impl Settings {
     /// Where the widget is configured to go, falling back to the default for one the file lacks.
     pub fn placement(&self, id: WidgetId) -> Placement {
-        self.placements.get(&id).copied().unwrap_or_else(|| Settings::default().placements[&id])
+        self.placements.get(&id).copied().or_else(|| Settings::default().placements.get(&id).copied()).unwrap_or(Placement::Off)
     }
 
     /// Where it really goes now: the master switch removes everything inside the game.
