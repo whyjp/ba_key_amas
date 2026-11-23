@@ -1,133 +1,115 @@
-# Architecture and decisions
+# Architecture
 
-## Goals
+The add-on is one Windows program (`baocr`, written in Rust) that sits beside the Blue Archive window,
+reads what the game shows with OCR and pixel tests, and answers with a card and icons drawn over the game.
+Reading the roster is a separate feature that the player starts by hand. Everything runs in one process.
 
-1. Collect what the player sees on the student screens without retyping it.
-2. View it as HTML.
-3. (Next) show extra stats as an overlay in other in-game menus (squad
-   composition etc.) without opening the student menu.
+An HTML version with the diagrams is in [architecture.html](architecture.html). Each decision has its own
+record in [adr/](adr/README.md). This page is the map.
 
-## Layers (extraction is independent of computer-use automation)
+## What it does
 
-```
- FrameSource ──► Extractor ──► Store ──► Views
-  (frames)       (pixels→data)  (JSON+history)  HTML now / overlay later
-```
-
-| Layer | Code | Notes |
+| Feature | Input to the game | Where it lives |
 |---|---|---|
-| Frame sources | `arrow_scan.go` + `deepcapture.go` (HCU clicks), `watch.go` `hcuSource` (passive screenshots, **no input**), saved frames (`--reextract`, tests) | Anything that yields a 1280x960 (4:3) frame can feed the rest. |
-| Extractor | `main.go extractWith`, `meta.go`, `deepcapture.go extractDeep`, `fixed.go` | Pure: image in, `Student` out. No game access. |
-| Async pipeline | `pipeline.go` | Capture never waits for OCR; `index.json` tracks captured/extracted/failed; `--reextract` retries from saved frames. |
-| Store | `store.go` | Latest record per student + `history.jsonl`; a field a blurry read could not determine never overwrites a known value. |
-| Autonomous updater | `watch.go` (`--watch`) | Reads a profile only after it holds still, stores only what changed. Works while the player plays; no scan needed. |
+| Passive guide: scene label, mission and raid card, squad verdict, portrait and slot icons | none (screenshots only) | `assist`, `overlay`, `extract` |
+| Student roster scan (JSON output) | clicks and scrolls, only after the player pressed the button | `hcu`, `cli` |
+| Screen learning (`probe`, `--learn`) for new fixtures | none or navigation clicks by the developer | `cli/examples` |
 
-Collection stages: **fixed meta** comes from the dictionary (only changes with
-patches), **variable** values are read from pixels, a **single update** re-reads
-one profile (see README "Collection stages").
+## Runtime flow
 
-## OCR engine decision (measured, not assumed)
+```
+ game window ──► capture ──► settle check ──► OCR / pixel tests ──► scene + keys ──► Observation
+   (Win32)       (hcu)       (frame key)       (ocr, extract,         (extract)         │
+                                                pixels)                                  ▼
+ overlay thread ◄── Surface ◄── Assistant ◄── widgets (wikidb lookups, matchup, weights)
+ (layered windows)  (trait)     (diffing)       static DB data
 
-Language does not change accuracy; the model does. So the question is
-Tesseract (LSTM, 2018) vs PP-OCRv5 (what oar-ocr/RapidOCR run), not Go vs Rust.
+ player ──► card buttons ──► events ──► Assistant ──► settings / commands (scan, quit)
+```
 
-Measured on 11 labelled screens / 68 fields (names, 4 stats, 4 skill levels,
-exp, level strip, bond number, 12 popup rows); `tools/ocr-bench/bench.py`:
+1. The loop (`cli/src/assist.rs`) captures the game client as a 1280x960 frame, tells whether the view is
+   moving or settled with a cheap frame key, and detects a battle from a few pixels.
+2. A settled, unseen view goes through OCR once. `extract` classifies the scene from header and anchor
+   words, and trackers (`MissionTracker`, `RaidTracker`) remember what the player picked, because the
+   later screens do not show it.
+3. The `Observer` turns the frame into an `Observation`: scene, mission or raid key, squad, grid cards.
+4. The `Assistant` asks every `Widget` what it would show, looks the facts up in the static wiki DB, and
+   sends only changed outputs to the `Surface`.
+5. The `Overlay` implements `Surface`. Its own thread draws the card, the in-game card, the icons and
+   tooltips as layered windows, and reports button clicks back as events.
 
-| Engine / setup | Correct |
-|---|---|
-| Tesseract, **heavily tuned** on these very screens (ink isolation, whitelists, dictionary snap) | 66/68 |
-| PP-OCRv5 Korean, detection+recognition, **untuned** (padding only) | 64/68 |
-| PP-OCRv5 Korean, recognition only on tight crops | 53/68 |
-| PP-OCRv5 Korean, recognition only on padded crops | 51/68 |
+## Static and dynamic data
 
-Reading the numbers honestly:
+The screen only supplies keys. Facts come from the database ([ADR 0005](adr/0005-static-db-dynamic-screen.md)).
 
-- The Tesseract score is optimistic (tuned on the test set). PP-OCRv5 reaches
-  parity with no tuning and reads the two cases Tesseract cannot: the thin
-  italic `Lv.1` (2/2) and the bond number in the heart (8/8, no special code).
-- Its misses were label bleed (`방어력 86` -> `886`) and `슌` -> `순`; both are
-  fixable by parsing and the existing dictionary snap.
-- Recognition-only is fragile (it wants a properly shaped text line);
-  detection+recognition is robust but ~0.5 s/crop in Python.
-- 68 fields on 11 screens is a small sample. A held-out comparison on the full
-  roster (the scan data) is the next step before any switch.
+| Data | Kind | Source |
+|---|---|---|
+| Which screen, which mission, stage, raid boss, difficulty, mode | dynamic | OCR and pixels |
+| Which students are in the squad, their slots | dynamic | OCR of names, closed-set reading |
+| Terrain tab, selection state | dynamic (when readable) | pixels |
+| Enemy armor and attack mix, levels, terrain of a stage | static | `wikidb/wiki.db` |
+| Student attack and armor type, terrain adaptation, role | static | `wikidb/wiki.db` |
+| Type effectiveness table, enemy weights | static | `wikidb/wiki.db` |
+| Settings, dock placement, fold state | user state | `%APPDATA%\baocr\overlay.json` |
+| Scan output | produced data | `%APPDATA%\baocr\students` |
 
-Recommendation:
+## Modules
 
-1. Keep Go. Rewriting in Rust buys no accuracy; Rust's advantage would be
-   oar-ocr already implementing detection/recognition, not speed or accuracy.
-2. Put a `Recognizer` seam behind `recognizePNG` (the single funnel every OCR
-   call goes through) and add a PP-OCRv5 backend (onnxruntime in-process, or an
-   OCR sidecar over local HTTP). Run both engines per field and use the
-   existing cross-checks (panel vs popup, dictionary, locks) to arbitrate.
-3. Decide the default engine on held-out data, field by field.
+![crate dependency graph](diagrams/crates.svg)
 
-### Correction and frame-level measurement
+The graph is generated from `cargo metadata` by `python scripts/gen_arch.py`. The Mermaid form is
+[diagrams/crates.mmd](diagrams/crates.mmd).
 
-What was actually measured (RapidOCR 1.32 / onnxruntime on CPU): detection
-**PP-OCRv6 det small** (RapidOCR default), recognition **korean PP-OCRv5
-mobile** (forced), angle classifier v2.0 mobile. The 64/68 above ran detection
-+ recognition *per crop* (~0.5 s each, ~13 s per profile), which is too slow
-for `--watch` or an overlay. Running detection once per frame/panel instead
-(`tools/ocr-bench/frame_bench.py`):
+| Crate | Responsibility | Notes |
+|---|---|---|
+| `baocr` (cli) | the add-on loop, the scan driver, `--doctor`, examples for learning and measuring | the only binary users run |
+| `assist` | `Observer`, `Widget`s, `Assistant`, settings, raid lookup, matchup words | no drawing, no game access; `Surface` is the output port |
+| `overlay` | layered windows, panel and icon rendering, placement and fold, tray, input hooks | Win32 only here and in `hcu` |
+| `hcu` | desktop control in process: capture, zoom, click, scroll, window list; guards; scan loops; doctor | [hcu-native.md](hcu-native.md) |
+| `extract` | profile reading, scene classification, mission and raid trackers, card names | pure functions over boxes and frames |
+| `ocr` | PP-OCR detection and recognition on ONNX Runtime, closed-set CTC scoring | [ADR 0002](adr/0002-ocr-stack.md) |
+| `pixels` | pixel classifiers, frame key, battle detector, icon tests | no OCR |
+| `wikidb` | SchaleDB collector, schema, lookups, formation evaluation, raid data | [raid-data.md](raid-data.md) |
+| `pipeline`, `export`, `names`, `equipment`, `core` | roster scan back end: async extraction, JSON store, name dictionary, equipment icons, shared model | |
 
-| Setup | numbers (stats, skills, exp, level strip: 37 fields) | names (11) | bond heart (8) | time per profile |
-|---|---|---|---|---|
-| whole frame, native | 37/37 | 7 | 0 | ~0.8 s |
-| whole frame, 2x | 37/37 | 8 | 1 | ~1.2 s |
-| two panels | 37/37 | 8 | 5 | ~1.0 s |
+Dependency rule: `cli → assist → overlay/extract/wikidb`, `hcu → extract`, `extract → ocr/pixels`.
+Nothing below `assist` knows about drawing, and `overlay` knows nothing about the game's data.
 
-All numeric fields (including the `Lv.N` strip Tesseract could not read) are
-perfect from one frame pass. Names and the heart are small overlaid text that
-frame-level detection mostly misses, so the design is a **hybrid**: one
-detection+recognition pass per frame for the panel numbers, plus recognition-only
-reads of two small crops (name strip, bond heart; ~40 ms each, first benchmark:
-names 10/11, heart 7/8) resolved by the dictionary.
+## Threads and windows
 
-Open items before the swap is final: held-out check on the 106 saved students
-(`--reextract`, scored without labels against the dictionary and `expToLevel`),
-model file hashes/sources/licences recorded before bundling, and the hosting
-choice (in-process vs sidecar below).
+| Thread | Job | Never does |
+|---|---|---|
+| main loop (`cli`) | capture, read, observe, present, run the scan | draw |
+| overlay worker (`overlay/win.rs`) | draws layers on change, polls the cursor for hover, reports clicks | read the screen |
+| tray (`overlay/tray.rs`) | notification icon and its 종료 menu on its own hidden window | depend on the other windows |
+| input block (`overlay/input_block.rs`) | low-level hooks while a scan runs, ESC aborts | run outside a scan |
+| input hints (`overlay/hints.rs`) | optional pass-through mouse hook (off by default, not wired) | block or forward input |
 
-Overlay implication (goal 3): Tesseract is spawned as a process per call
-(~20 calls per profile, 100-300 ms each) which is fine for scanning but too
-slow for a live overlay. An overlay needs an always-resident in-process model
-and a read-only data path: the Store (JSON/HTTP/WebSocket) serves a thin
-overlay window; screen reading and drawing stay separate processes.
+Layered windows: the card is interactive, the in-game card, the icons and the tooltip are click-through,
+all are excluded from screen capture so the add-on never reads itself.
 
-## Bond rank up to 100
+## Constraints that shape the design
 
-Bond is read from the pink heart by isolating dark glyphs inside the heart row
-by row, so it does not depend on digit count; values are capped at 100 and
-the 2-digit cases (2..13) are regression-tested. **No 3-digit sample exists
-yet**: a web search found only text (max bond 100 for 5-star students, 20 for
-3-star), no screenshots, and fan images are not safe to bundle. When the
-account reaches a 3-digit bond, add that screenshot as a fixture; the
-layout risk is the heart shrinking its font, which the guard below would show
-as an implausible read.
+- The game is read at 4:3 windowed only; ROIs are calibrated on a 1280x960 client.
+- Input is sent only for the scan, behind guards ([ADR 0004](adr/0004-input-policy.md)).
+- No game memory or file access; screenshots and public data only.
+- Builds are limited to protect RAM and disk ([ADR 0009](adr/0009-build-limits.md)).
 
-## Risks to keep in mind
+## Verification
 
-- Reading the screen is passive, but an overlay drawn over the game window and
-  any automated clicking may conflict with the game's terms of service or
-  anti-cheat. Keep the watcher screenshot-only, never touch game memory or
-  files, and review the terms before shipping an overlay.
-- Layout is calibrated for 4:3 windowed only (see README "Screen setup").
+| Level | What | Where |
+|---|---|---|
+| unit | pure logic: scenes, trackers, geometry, hover, weights, guards (fake desktop) | `cargo test --workspace` |
+| fixtures | real screenshots and OCR boxes | `fixtures/screens` |
+| measurement | timelines and OCR timing | `docs/speed-research.md`, `cli/examples/speed_*` |
+| live e2e | the add-on on the real game, state dump | [live-e2e.md](live-e2e.md) when present |
+| human | taste, hardware ESC, tray menu, frame rate | listed in the release check |
 
-## Outcome: engine replaced, Rust port
+## Decision records
 
-The OCR engine decision above was acted on. The Go+Tesseract extractor was
-ported to Rust (`rust/`) with PP-OCRv5 in process (oar-ocr for detection+
-recognition, `ort` directly for the closed-set CTC reads).
+The earlier extraction-era notes (Go and Tesseract, the OCR benchmark, bond rank, risks) are kept in
+[history/go-era-architecture.md](history/go-era-architecture.md).
 
-- Names: 11/11 labelled screens and 106/106 saved frames, with no tuning tricks:
-  ink-isolated line + all-dictionary CTC scoring. Syllables outside the model's
-  vocabulary (e.g. 슌) are spelled with the nearest known syllable by likelihood.
-- Bond (1..=100): 106/106 saved frames.
-- Level: 105/105 against the exp table (the Tesseract path could not read it).
-- ~0.9 s per profile frame including the closed-set reads, in process.
-- Blank/off-layout frames are not "read": no ink means no name and no bond.
-- Remaining gaps: equipment icons beyond tier 4, 3-digit bond sample, ability
-  unlock (능력개방), 16:9/fullscreen, and live verification of the Rust scan and
-  `--watch` against the game (the unit tests use a fake HCU runner).
+[adr/README.md](adr/README.md) lists them. Older notes: [hcu-native.md](hcu-native.md),
+[raid-data.md](raid-data.md), [card-dock.md](card-dock.md), [speed-research.md](speed-research.md),
+[enemy-weighting.md](enemy-weighting.md) (on the weights branch until merged).
