@@ -1,5 +1,5 @@
 use crate::capture::{game_capture, layout_looks_calibrated, to_frame};
-use crate::deep::{capture_deep, DeepState};
+use crate::deep::capture_deep;
 use crate::hcu::Hcu;
 use anyhow::{anyhow, bail, Result};
 use baocr_core::ocr_api::ScanSink;
@@ -77,7 +77,6 @@ pub fn scan_arrows(
     }
     let first = detail_key(&img);
     let mut seen: Vec<DetailKey> = Vec::new();
-    let mut deep_state = DeepState::default();
     for i in 0..max_students {
         if let Err(e) = h.foreground() {
             return outcome("focus_lost", false, Some(e.to_string()));
@@ -99,7 +98,7 @@ pub fn scan_arrows(
         let mut frames: BTreeMap<String, RgbImage> = BTreeMap::new();
         frames.insert(FRAME_DETAIL.to_string(), img.clone());
         if deep {
-            match capture_deep(h, region, &img, &mut deep_state) {
+            match capture_deep(h, region, &img) {
                 Ok(d) => {
                     frames.insert(FRAME_POPUP_TOP.to_string(), d.popup_top);
                     frames.insert(FRAME_POPUP_BOTTOM.to_string(), d.popup_bottom);
@@ -287,7 +286,8 @@ mod tests {
                 _ => {}
             },
             |s, d| {
-                if d > 0 {
+                // scrolling down moves the popup to its end once, however many movements are sent
+                if d > 0 && *s / 10 == 1 {
                     *s += 10
                 }
             },
