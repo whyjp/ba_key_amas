@@ -91,6 +91,13 @@ impl Runner for ProcessRunner {
     }
 }
 
+/// One input action, in HCU frame pixels.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Act {
+    Scroll { x: f64, y: f64, delta: i32 },
+    Click { x: f64, y: f64 },
+}
+
 /// Handle on the HCU CLI.
 pub struct Hcu {
     runner: Box<dyn Runner>,
@@ -182,10 +189,10 @@ impl Hcu {
         }
         let kind = match args.get(1) {
             Some(&"--json") => {
-                if args[2].contains("scroll") {
-                    "scroll"
-                } else {
+                if args[2].contains("click") {
                     "batch"
+                } else {
+                    "scroll"
                 }
             }
             Some(k) => k,
@@ -234,11 +241,24 @@ impl Hcu {
     /// fixed distance whatever its delta, but extra movements in the same call cost
     /// almost nothing, so this is how a longer scroll is made.
     pub fn scroll_n(&self, x: f64, y: f64, delta: i32, count: usize) -> Result<()> {
-        let action = format!(r#"{{"type":"scroll","x":{x:.2},"y":{y:.2},"scroll_y":{delta}}}"#);
-        let payload = format!(r#"{{"actions":[{}]}}"#, vec![action; count.max(1)].join(","));
+        self.actions(&vec![Act::Scroll { x, y, delta }; count.max(1)])
+    }
+
+    /// Several input actions in ONE HCU call. Every input call costs a fixed ~1.35 s
+    /// (HCU returns a final screenshot), however many actions it holds, so actions
+    /// that do not need to look at the screen in between belong in one call.
+    pub fn actions(&self, acts: &[Act]) -> Result<()> {
+        let list: Vec<String> = acts
+            .iter()
+            .map(|a| match a {
+                Act::Scroll { x, y, delta } => format!(r#"{{"type":"scroll","x":{x:.2},"y":{y:.2},"scroll_y":{delta}}}"#),
+                Act::Click { x, y } => format!(r#"{{"type":"click","x":{x:.2},"y":{y:.2}}}"#),
+            })
+            .collect();
+        let payload = format!(r#"{{"actions":[{}]}}"#, list.join(","));
         let r = self.call(&["gui", "--json", &payload, "--records"])?;
-        if !r.input_emitted || r.completed != count.max(1) as i64 {
-            bail!("HCU scroll dispatch unconfirmed: {r:?}");
+        if !r.input_emitted || r.completed != acts.len() as i64 {
+            bail!("HCU input dispatch unconfirmed: {r:?}");
         }
         Ok(())
     }

@@ -114,14 +114,25 @@ impl Runner for World {
             }
             ["gui", "--json", payload, "--records"] => {
                 let v: serde_json::Value = serde_json::from_str(payload).unwrap();
-                let act = &v["actions"][0];
-                assert_eq!(act["type"], "scroll");
-                let d = act["scroll_y"].as_i64().unwrap() as i32;
-                st.inputs.push(format!("scroll {:.2} {:.2} {d}", act["x"].as_f64().unwrap(), act["y"].as_f64().unwrap()));
-                let mut s = st.screen;
-                (self.on_scroll)(&mut s, d);
-                st.screen = s;
-                ok
+                let acts = v["actions"].as_array().unwrap();
+                for act in acts {
+                    let (xf, yf) = (act["x"].as_f64().unwrap(), act["y"].as_f64().unwrap());
+                    let mut s = st.screen;
+                    match act["type"].as_str().unwrap() {
+                        "scroll" => {
+                            let d = act["scroll_y"].as_i64().unwrap() as i32;
+                            st.inputs.push(format!("scroll {xf:.2} {yf:.2} {d}"));
+                            (self.on_scroll)(&mut s, d);
+                        }
+                        "click" => {
+                            st.inputs.push(format!("click {xf:.2} {yf:.2}"));
+                            (self.on_click)(&mut s, xf, yf);
+                        }
+                        other => panic!("unexpected action {other}"),
+                    }
+                    st.screen = s;
+                }
+                format!(r#"{{"ok":true,"input_emitted":true,"completed":{}}}"#, acts.len())
             }
             other => panic!("unexpected HCU call {other:?}"),
         })

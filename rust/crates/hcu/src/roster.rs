@@ -166,8 +166,8 @@ fn capture_pages(h: &Hcu, region: R4, first: RgbImage, lines: Option<i32>, tx: &
         if banner.is_some() || thumb.top < 0 || thumb.bottom >= THUMB_END {
             return Ok(moves);
         }
+        // the wheel call itself returns after ~1.3 s, so the list has stopped: no extra wait
         wheel(h, region, SCROLL_MAX, moves)?;
-        sleep(Duration::from_millis(450));
         let next = game_capture(h, region)?;
         let moved = list_shift(&img, &next, 760).ok_or_else(|| anyhow!("lost track of the scroll position"))?;
         if moved > max_shift {
