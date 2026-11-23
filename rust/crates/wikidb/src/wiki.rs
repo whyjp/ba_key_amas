@@ -141,7 +141,8 @@ impl Wiki {
 
     fn closest(students: &[StudentBrief], ocr: &str) -> Option<StudentBrief> {
         let want: Vec<char> = norm(ocr).chars().collect();
-        if want.len() < 2 {
+        // a one-letter name ("슌") can only be an exact match: the edit rule below needs 3 letters
+        if want.is_empty() {
             return None;
         }
         let mut best: Option<(usize, &StudentBrief)> = None;
@@ -324,6 +325,7 @@ mod tests {
         assert_eq!(id("호시노무장"), Some(3));
         assert_eq!(id("하나코(수영북)"), Some(6), "one wrong character");
         assert_eq!(id("순"), None, "too short to trust one wrong character");
+        assert_eq!(id("슌"), Some(5), "but a one-letter name matches exactly");
         assert_eq!(id("아무개"), None);
         assert_eq!(id(""), None);
         // two students equally close and different to the helpers: no answer

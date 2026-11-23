@@ -17,6 +17,7 @@ baocr-overlay = { path = "../overlay" }
 baocr-pipeline = { path = "../pipeline" }
 baocr-pixels = { path = "../pixels" }
 baocr-wikidb = { path = "../wikidb" }
+baocr-assist = { path = "../assist" }
 chrono.workspace = true
 ctrlc = "3"
 anyhow.workspace = true

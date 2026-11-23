@@ -80,6 +80,8 @@ pub enum Row {
     Meter { label: String, permille: i32, text: String },
     /// The verdict as a wide badge.
     Verdict { label: String, text: String, tone: Tone },
+    /// A clickable row; clicking it reports `id` through the overlay's events.
+    Button { id: String, label: String, value: String, on: bool },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -91,9 +93,41 @@ pub struct PanelState {
     pub rows: Vec<Row>,
 }
 
+/// A clickable area of a rendered panel, in the panel image's pixels.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Hit {
+    pub id: String,
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+}
+
+impl Hit {
+    pub fn contains(&self, px: i32, py: i32) -> bool {
+        let (px, py) = (px as f32, py as f32);
+        px >= self.x && px < self.x + self.w && py >= self.y && py < self.y + self.h
+    }
+}
+
 /// Panel width in screen pixels for a game client of `client_w` pixels.
 pub fn panel_width(client_w: i32) -> i32 {
     ((client_w as f32 * WIDTH_SHARE).round() as i32).clamp(MIN_W, MAX_W)
+}
+
+/// Width of a panel drawn inside the game, narrower than the one beside it.
+pub fn ingame_panel_width(client_w: i32) -> i32 {
+    ((client_w as f32 * 0.46).round() as i32).clamp(190, 360)
+}
+
+/// A panel inside the game: at the top right of its client area, below the game's header bar.
+pub fn ingame_origin(client: Ltrb, size: (i32, i32)) -> (i32, i32) {
+    let (cw, ch) = (client.2 - client.0, client.3 - client.1);
+    let margin = ((cw as f32 * 0.012).round() as i32).max(4);
+    let top = client.1 + (ch as f32 * 0.075).round() as i32;
+    let x = (client.2 - size.0 - margin).max(client.0);
+    let y = top.min(client.3 - size.1).max(client.1);
+    (x, y)
 }
 
 /// Where the panel goes in screen coordinates: beside the game window on the right,
@@ -151,6 +185,12 @@ fn chip_layout(fonts: &Fonts, px: f32, s: f32, max_w: f32, chips: &[Chip]) -> (u
 
 /// Render the panel at `width` px; the height follows its content.
 pub fn render_panel(width: u32, state: &PanelState, fonts: &Fonts) -> RgbaImage {
+    render_panel_hits(width, state, fonts).0
+}
+
+/// Like `render_panel`, also returning where its buttons are.
+pub fn render_panel_hits(width: u32, state: &PanelState, fonts: &Fonts) -> (RgbaImage, Vec<Hit>) {
+    let mut hits: Vec<Hit> = Vec::new();
     let s = width as f32 / PANEL_BASE_W;
     let wf = width as f32;
     let (pad, label_w) = (PAD * s, LABEL_W * s);
@@ -169,6 +209,7 @@ pub fn render_panel(width: u32, state: &PanelState, fonts: &Fonts) -> RgbaImage 
             Row::Note(t) => wrap(&fonts.regular, 12.5 * s, wf - pad * 2.0, t).len() as f32 * 18.0 * s + 5.0 * s,
             Row::Meter { .. } => 22.0 * s + 5.0 * s,
             Row::Verdict { .. } => 28.0 * s + 7.0 * s,
+            Row::Button { .. } => 24.0 * s + 5.0 * s,
         };
     }
     h += 12.0 * s;
@@ -184,7 +225,7 @@ pub fn render_panel(width: u32, state: &PanelState, fonts: &Fonts) -> RgbaImage 
     fill_rrect(&mut img, 8.0 * s, 14.0 * s, 4.0 * s, hf - 28.0 * s, 2.0 * s, |_, _| (ACCENT, 1.0));
 
     let mut y = 14.0 * s;
-    draw_text(&mut img, &fonts.bold, 12.5 * s, pad, y, ACCENT_LIGHT, 1.0, &format!("ba-scanner · {}", state.scene));
+    draw_text(&mut img, &fonts.bold, 12.5 * s, pad, y, ACCENT_LIGHT, 1.0, &if state.scene.is_empty() { "ba-scanner".to_string() } else { format!("ba-scanner · {}", state.scene) });
     y += 16.0 * s;
     if !state.title.is_empty() {
         y += 6.0 * s;
@@ -238,6 +279,20 @@ pub fn render_panel(width: u32, state: &PanelState, fonts: &Fonts) -> RgbaImage 
                 draw_text(&mut img, &fonts.bold, 12.5 * s, bx + bw + 8.0 * s, y + 2.0 * s, TEXT, 1.0, text);
                 y += 22.0 * s + 5.0 * s;
             }
+            Row::Button { id, label, value, on } => {
+                let (bx, bw, bh) = (pad, wf - pad * 2.0, 24.0 * s);
+                let fill = if *on { [38, 92, 146] } else { [30, 46, 74] };
+                fill_rrect(&mut img, bx, y, bw, bh, 7.0 * s, |_, _| (fill, 0.97));
+                fill_rrect(&mut img, bx, y, bw, bh, 7.0 * s, |x, py| {
+                    let edge = x < 1.0 * s || py < 1.0 * s || x > bw - 1.0 * s || py > bh - 1.0 * s;
+                    (TEXT, if edge { 0.22 } else { 0.0 })
+                });
+                draw_text(&mut img, &fonts.regular, 12.5 * s, bx + 9.0 * s, y + 4.5 * s, TEXT, 1.0, label);
+                let vw = text_width(&fonts.bold, 12.5 * s, value);
+                draw_text(&mut img, &fonts.bold, 12.5 * s, bx + bw - 9.0 * s - vw, y + 4.5 * s, if *on { ACCENT_LIGHT } else { TEXT_SOFT }, 1.0, value);
+                hits.push(Hit { id: id.clone(), x: bx, y, w: bw, h: bh });
+                y += 24.0 * s + 5.0 * s;
+            }
             Row::Verdict { label, text, tone } => {
                 draw_text(&mut img, &fonts.regular, 12.5 * s, pad, y + 6.0 * s, TEXT_SOFT, 0.9, label);
                 let (bx, bw, bh) = (pad + label_w, value_w, 28.0 * s);
@@ -249,7 +304,7 @@ pub fn render_panel(width: u32, state: &PanelState, fonts: &Fonts) -> RgbaImage 
             }
         }
     }
-    img
+    (img, hits)
 }
 
 #[cfg(test)]
@@ -298,6 +353,39 @@ mod tests {
         }
         let bare = render_panel(300, &PanelState { scene: "메인 메뉴".into(), ..Default::default() }, &f);
         assert!(bare.height() < render_panel(300, &sample(), &f).height(), "less content, shorter card");
+    }
+
+    #[test]
+    fn buttons_report_where_they_are_and_what_they_are_called() {
+        let Some(f) = load_fonts() else { return };
+        let state = PanelState {
+            scene: "메뉴".into(),
+            title: String::new(),
+            rows: vec![
+                Row::Button { id: "ingame".into(), label: "인게임 표시".into(), value: "켜짐".into(), on: true },
+                Row::Info { label: "지형".into(), value: "야외".into() },
+                Row::Button { id: "place:mission".into(), label: "임무 카드".into(), value: "게임 밖".into(), on: false },
+            ],
+        };
+        let (img, hits) = render_panel_hits(300, &state, &f);
+        assert_eq!(hits.iter().map(|h| h.id.as_str()).collect::<Vec<_>>(), vec!["ingame", "place:mission"]);
+        let first = &hits[0];
+        assert!(first.contains((first.x + 5.0) as i32, (first.y + 5.0) as i32) && !first.contains(1, 1));
+        assert!(hits[1].y > first.y + first.h, "the second button is below the first");
+        assert!(hits.iter().all(|h| h.x + h.w <= img.width() as f32 && h.y + h.h <= img.height() as f32), "buttons are inside the card");
+    }
+
+    #[test]
+    fn the_ingame_panel_sits_inside_the_game_below_its_header() {
+        let client = (100, 50, 560, 400);
+        let size = (200, 160);
+        let (x, y) = ingame_origin(client, size);
+        assert!(x >= client.0 && x + size.0 <= client.2 && y + size.1 <= client.3, "inside the client area: {x},{y}");
+        assert!(y > client.1 + 20, "below the header bar");
+        // a panel taller than the room is pushed up, never out of the window
+        let (_, y) = ingame_origin(client, (200, 340));
+        assert!(y >= client.1 && y + 340 <= client.3 || y == client.1);
+        assert_eq!(ingame_panel_width(458), 211);
     }
 
     #[test]

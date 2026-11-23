@@ -4,7 +4,7 @@
 //! (clicks pass through), WS_EX_NOACTIVATE (never takes focus), WS_EX_TOPMOST,
 //! WS_EX_TOOLWINDOW (no taskbar button). WDA_EXCLUDEFROMCAPTURE keeps it out of
 //! screenshots where the OS supports it.
-use crate::panel::{panel_origin, panel_width, render_panel};
+use crate::panel::{ingame_origin, ingame_panel_width, panel_origin, panel_width, render_panel, render_panel_hits, Hit};
 use crate::render::{banner_layout, banner_origin, load_fonts, render, Fonts, Ltrb};
 use crate::marks::render_marks;
 use crate::{Card, Shown};
@@ -142,7 +142,17 @@ fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
+/// Left clicks on the overlay's windows: (window, x, y) in the window's own pixels.
+static CLICKS: Mutex<Vec<(isize, i32, i32)>> = Mutex::new(Vec::new());
+const WM_LBUTTONDOWN: u32 = 0x0201;
+
 unsafe extern "system" fn wnd_proc(h: isize, m: u32, w: usize, l: isize) -> isize {
+    if m == WM_LBUTTONDOWN {
+        if let Ok(mut c) = CLICKS.lock() {
+            c.push((h, (l & 0xFFFF) as i16 as i32, ((l >> 16) & 0xFFFF) as i16 as i32));
+        }
+        return 0;
+    }
     DefWindowProcW(h, m, w, l)
 }
 
@@ -236,7 +246,7 @@ pub struct Worker {
 }
 
 impl Worker {
-    pub fn start(state: Arc<Mutex<Shown>>) -> Option<Worker> {
+    pub fn start(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>) -> Option<Worker> {
         let fonts = match load_fonts() {
             Some(f) => f,
             None => {
@@ -246,7 +256,7 @@ impl Worker {
         };
         let stop = Arc::new(AtomicBool::new(false));
         let flag = stop.clone();
-        let handle = std::thread::spawn(move || run(state, flag, fonts));
+        let handle = std::thread::spawn(move || run(state, events, flag, fonts));
         Some(Worker { stop, handle })
     }
 
@@ -265,9 +275,12 @@ struct Layer {
     drawn: Option<u64>,
 }
 
-unsafe fn create_layer(inst: isize, class: &[u16], title: &str) -> Option<Layer> {
+/// `click_through`: mouse clicks go to whatever is below (the game). The card beside the game
+/// is not click-through, so its buttons work; it never takes focus either way.
+unsafe fn create_layer(inst: isize, class: &[u16], title: &str, click_through: bool) -> Option<Layer> {
     let title = wide(title);
-    let hwnd = CreateWindowExW(WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, class.as_ptr(), title.as_ptr(), WS_POPUP, 0, 0, 10, 10, 0, 0, inst, std::ptr::null());
+    let ex = WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | if click_through { WS_EX_TRANSPARENT } else { 0 };
+    let hwnd = CreateWindowExW(ex, class.as_ptr(), title.as_ptr(), WS_POPUP, 0, 0, 10, 10, 0, 0, inst, std::ptr::null());
     if hwnd == 0 {
         return None;
     }
@@ -322,7 +335,7 @@ fn hash_of<T: std::hash::Hash>(v: &T) -> u64 {
     h.finish()
 }
 
-fn run(state: Arc<Mutex<Shown>>, stop: Arc<AtomicBool>, fonts: Fonts) {
+fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, stop: Arc<AtomicBool>, fonts: Fonts) {
     unsafe {
         SetProcessDPIAware();
         let inst = GetModuleHandleW(std::ptr::null());
@@ -342,13 +355,16 @@ fn run(state: Arc<Mutex<Shown>>, stop: Arc<AtomicBool>, fonts: Fonts) {
             icon_sm: 0,
         };
         RegisterClassExW(&wc); // already registered on a second run: harmless
-        let (Some(mut card), Some(mut marks)) = (create_layer(inst, &class, "ba-scanner"), create_layer(inst, &class, "ba-scanner-marks")) else {
+        let (Some(mut card), Some(mut ingame), Some(mut marks)) =
+            (create_layer(inst, &class, "ba-scanner", false), create_layer(inst, &class, "ba-scanner-ingame", true), create_layer(inst, &class, "ba-scanner-marks", true))
+        else {
             eprintln!("overlay: this Windows version cannot hide the overlay from screen capture (or the window could not be created); running without it");
             return;
         };
         let screen_dc = GetDC(0);
         let mut rect = None;
         let mut tick: u32 = 0;
+        let mut card_hits: Vec<Hit> = Vec::new();
         while !stop.load(Ordering::Relaxed) {
             let mut msg: Msg = std::mem::zeroed();
             while PeekMessageW(&mut msg, 0, 0, 0, PM_REMOVE) != 0 {
@@ -358,14 +374,26 @@ fn run(state: Arc<Mutex<Shown>>, stop: Arc<AtomicBool>, fonts: Fonts) {
             if tick % 8 == 0 {
                 rect = game_geometry(); // follow the window if it moves
             }
+            // clicks on the card's buttons
+            let clicks: Vec<(isize, i32, i32)> = CLICKS.lock().map(|mut c| std::mem::take(&mut *c)).unwrap_or_default();
+            for (h, x, y) in clicks {
+                if h == card.hwnd {
+                    if let Some(hit) = card_hits.iter().find(|hit| hit.contains(x, y)) {
+                        if let Ok(mut e) = events.lock() {
+                            e.push(hit.id.clone());
+                        }
+                    }
+                }
+            }
             match rect {
                 None => {
                     card.hide();
+                    ingame.hide();
                     marks.hide();
                 }
                 Some((client, outer, work)) => {
                     let (cw, ch) = (client.2 - client.0, client.3 - client.1);
-                    let shown = state.lock().map(|g| g.clone()).unwrap_or(Shown { card: Card::Hidden, marks: Vec::new() });
+                    let shown = state.lock().map(|g| g.clone()).unwrap_or(Shown { card: Card::Hidden, ingame: None, marks: Vec::new() });
                     // the card: the banner goes above/below the window, the panel beside it
                     let placed = match &shown.card {
                         Card::Hidden => None,
@@ -376,14 +404,28 @@ fn run(state: Arc<Mutex<Shown>>, stop: Arc<AtomicBool>, fonts: Fonts) {
                             Some((img, at, u64::from(tick)))
                         }
                         Card::Panel(p) => {
-                            let img = render_panel(panel_width(cw) as u32, p, &fonts);
+                            let (img, hits) = render_panel_hits(panel_width(cw) as u32, p, &fonts);
                             let key = hash_of(&(format!("{p:?}"), cw, ch));
-                            panel_origin(client, outer, work, (img.width() as i32, img.height() as i32)).map(|at| (img, at, key ^ hash_of(&at)))
+                            let size = (img.width() as i32, img.height() as i32);
+                            // beside the game; with no room there, inside it rather than nowhere
+                            let at = panel_origin(client, outer, work, size).unwrap_or_else(|| ingame_origin(client, size));
+                            card_hits = hits;
+                            Some((img, at, key ^ hash_of(&at)))
                         }
                     };
                     match placed {
                         Some((img, at, key)) => card.show(screen_dc, &img, at, key),
                         None => card.hide(),
+                    }
+                    // a card inside the game
+                    match &shown.ingame {
+                        Some(p) => {
+                            let img = render_panel(ingame_panel_width(cw) as u32, p, &fonts);
+                            let at = ingame_origin(client, (img.width() as i32, img.height() as i32));
+                            let key = hash_of(&(format!("{p:?}"), cw, ch)) ^ hash_of(&at);
+                            ingame.show(screen_dc, &img, at, key);
+                        }
+                        None => ingame.hide(),
                     }
                     // the icons over the portraits: the layer covers the game's client area
                     if shown.marks.is_empty() {
@@ -401,6 +443,7 @@ fn run(state: Arc<Mutex<Shown>>, stop: Arc<AtomicBool>, fonts: Fonts) {
             std::thread::sleep(Duration::from_millis(90));
         }
         drop(card);
+        drop(ingame);
         drop(marks);
         ReleaseDC(0, screen_dc);
     }

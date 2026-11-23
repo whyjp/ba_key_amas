@@ -1,0 +1,19 @@
+[package]
+name = "baocr-assist"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+baocr-core.workspace = true
+baocr-extract = { path = "../extract" }
+baocr-overlay = { path = "../overlay" }
+baocr-pixels = { path = "../pixels" }
+baocr-wikidb = { path = "../wikidb" }
+anyhow.workspace = true
+image.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+rusqlite = { version = "0.32", features = ["bundled"] }
+baocr-ocr = { path = "../ocr" }

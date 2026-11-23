@@ -7,6 +7,8 @@
 //! best candidate is not clearly ahead stays empty and carries a warning.
 use anyhow::Result;
 mod deep;
+mod cards;
+pub use cards::{read_card_names, CardName};
 pub mod scene;
 pub use deep::{apply_cell, match_label};
 use baocr_core::model::*;
@@ -92,7 +94,7 @@ fn all_ints(s: &str) -> Vec<Int> {
 }
 
 /// Best candidate and its lead over the best candidate with a different text.
-fn best_with_margin(cands: &[String], scores: &[f32]) -> Option<(usize, f32)> {
+pub(crate) fn best_with_margin(cands: &[String], scores: &[f32]) -> Option<(usize, f32)> {
     let best = scores.iter().enumerate().filter(|(_, s)| s.is_finite()).max_by(|a, b| a.1.partial_cmp(b.1).unwrap())?.0;
     let runner = scores
         .iter()

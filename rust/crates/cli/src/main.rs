@@ -139,7 +139,7 @@ fn main() -> Result<()> {
     }
     if args.assist {
         let ocr = load_ocr(&args)?;
-        return assist::run(&ocr, &hcu, region, args.region == "auto", &args.wiki, args.interval.min(700));
+        return assist::run(&ocr, &hcu, region, args.region == "auto", &args.wiki);
     }
     if let Some(dir) = &args.learn {
         return run_learn(&args, &hcu, region, dir);

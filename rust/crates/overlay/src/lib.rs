@@ -11,7 +11,7 @@ mod render;
 mod win;
 
 pub use marks::{render_marks, Icon, Mark};
-pub use panel::{panel_origin, panel_width, render_panel, Chip, PanelState, Row, Tone};
+pub use panel::{ingame_origin, ingame_panel_width, panel_origin, panel_width, render_panel, render_panel_hits, Chip, Hit, PanelState, Row, Tone};
 
 pub use render::{banner_layout, banner_origin, Ltrb, load_fonts, render, BannerState, Fonts, Phase, BASE_H, BASE_W};
 
@@ -30,12 +30,16 @@ pub enum Card {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Shown {
     pub card: Card,
+    /// A card drawn inside the game (click-through), in addition to the one beside it.
+    pub ingame: Option<PanelState>,
     pub marks: Vec<Mark>,
 }
 
 /// Handle to the running banner. Dropping it closes the window.
 pub struct Overlay {
     state: Arc<Mutex<Shown>>,
+    /// Ids of the card's buttons that were clicked, oldest first.
+    events: Arc<Mutex<Vec<String>>>,
     #[cfg(windows)]
     worker: Option<win::Worker>,
 }
@@ -53,11 +57,13 @@ impl Overlay {
     }
 
     fn start_with(first: Card) -> Overlay {
-        let state = Arc::new(Mutex::new(Shown { card: first, marks: Vec::new() }));
+        let state = Arc::new(Mutex::new(Shown { card: first, ingame: None, marks: Vec::new() }));
+        let events = Arc::new(Mutex::new(Vec::new()));
         #[cfg(windows)]
-        let worker = win::Worker::start(state.clone());
+        let worker = win::Worker::start(state.clone(), events.clone());
         Overlay {
             state,
+            events,
             #[cfg(windows)]
             worker,
         }
@@ -67,6 +73,18 @@ impl Overlay {
         if let Ok(mut g) = self.state.lock() {
             g.card = c;
         }
+    }
+
+    /// A card inside the game's window (None removes it).
+    pub fn ingame_card(&self, p: Option<PanelState>) {
+        if let Ok(mut g) = self.state.lock() {
+            g.ingame = p;
+        }
+    }
+
+    /// The ids of the buttons clicked since the last call.
+    pub fn take_events(&self) -> Vec<String> {
+        self.events.lock().map(|mut e| std::mem::take(&mut *e)).unwrap_or_default()
     }
 
     /// Icons over the game's portraits (positions in the 1280x960 frame); empty clears them.

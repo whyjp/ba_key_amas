@@ -638,12 +638,115 @@ pub fn same_cards(a: &[Card], b: &[Card]) -> bool {
     a.len() == b.len() && a.iter().zip(b).all(|(x, y)| signature_distance(&x.signature, &y.signature) <= 2.0)
 }
 
-/// Is the student card whose name label has its horizontal centre at `cx` and its top at
+/// A student card's name label in the 빠른 편성 grid: a solid dark-navy band under the
+/// portrait with the name in white. All figures are in the 1280x960 frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CardLabel {
+    /// Horizontal centre of the card.
+    pub cx: i32,
+    pub y0: i32,
+    pub y1: i32,
+}
+
+const LABEL_COLOR: [i32; 3] = [67, 82, 102];
+/// Left edge of the first card's label, the distance to the next card, cards per row.
+const LABEL_LEFT: i32 = 583;
+const LABEL_PITCH: i32 = 111;
+const LABEL_COLUMNS: i32 = 6;
+const LABEL_WIDTH: i32 = 92;
+/// The grid's viewport: labels cut off by its top or bottom edge are not whole.
+const GRID_TOP: i32 = 318;
+const GRID_BOTTOM: i32 = 650;
+const LABEL_MIN_HEIGHT: i32 = 28;
+
+fn is_label_color(p: [u8; 3]) -> bool {
+    (0..3).all(|i| (p[i] as i32 - LABEL_COLOR[i]).abs() <= 14)
+}
+
+/// The whole name labels visible in the 빠른 편성 grid, wherever it has been scrolled to.
+pub fn quick_card_labels(img: &RgbImage) -> Vec<CardLabel> {
+    let mut out = Vec::new();
+    for k in 0..LABEL_COLUMNS {
+        let left = LABEL_LEFT + k * LABEL_PITCH;
+        // a name can run from edge to edge: a row of the label counts when most of the
+        // columns sampled across it have the label's colour (strokes cover only some)
+        let xs: Vec<i32> = (2..LABEL_WIDTH - 1).step_by(4).map(|d| left + d).collect();
+        if *xs.last().unwrap() as u32 >= img.width() {
+            continue;
+        }
+        // rows that look like the label, then runs of them with the text's gaps closed
+        let on: Vec<i32> = (GRID_TOP..=GRID_BOTTOM.min(img.height() as i32 - 1))
+            .filter(|y| xs.iter().filter(|x| is_label_color(img.get_pixel(**x as u32, *y as u32).0)).count() * 3 >= xs.len())
+            .collect();
+        let mut runs: Vec<(i32, i32)> = Vec::new();
+        for y in on {
+            match runs.last_mut() {
+                Some(r) if y - r.1 <= 12 => r.1 = y,
+                _ => runs.push((y, y)),
+            }
+        }
+        for (s, e) in runs {
+            // a label touching the viewport's edge is cut off
+            let whole = s > GRID_TOP && e < GRID_BOTTOM;
+            if whole && e - s + 1 >= LABEL_MIN_HEIGHT {
+                out.push(CardLabel { cx: left + LABEL_WIDTH / 2, y0: s, y1: e + 1 });
+            }
+        }
+    }
+    out.sort_by_key(|l| (l.y0 / 40, l.cx));
+    out
+}
+
+/// The label's text as ink (dark on white), ready for the closed-set reader.
+pub fn quick_label_ink(img: &RgbImage, l: &CardLabel) -> GrayImage {
+    let (x0, x1) = (l.cx - LABEL_WIDTH / 2 + 3, l.cx + LABEL_WIDTH / 2 - 3);
+    let (y0, y1) = (l.y0 + 3, l.y1 - 3);
+    let mut g = GrayImage::from_pixel((x1 - x0) as u32, (y1 - y0) as u32, image::Luma([255]));
+    for y in y0..y1 {
+        for x in x0..x1 {
+            if x < 0 || y < 0 || x as u32 >= img.width() || y as u32 >= img.height() {
+                continue;
+            }
+            let p = img.get_pixel(x as u32, y as u32).0;
+            // the name is white on the navy label
+            if (p[0] as u32 + p[1] as u32 + p[2] as u32) / 3 > 140 {
+                g.put_pixel((x - x0) as u32, (y - y0) as u32, image::Luma([0]));
+            }
+        }
+    }
+    g
+}
+
+/// Which tab of the 빠른 편성 grid is active: `Some(true)` STRIKER, `Some(false)` SPECIAL (the
+/// active tab is filled red), None when neither is (the popup is not showing).
+pub fn quick_tab_is_striker(img: &RgbImage) -> Option<bool> {
+    let red = |x0: u32, x1: u32| {
+        let (mut n, mut t) = (0u32, 0u32);
+        for y in 262..296 {
+            for x in x0..x1.min(img.width()) {
+                if y >= img.height() {
+                    continue;
+                }
+                let p = img.get_pixel(x, y).0;
+                t += 1;
+                n += u32::from(p[0] > 170 && p[1] < 80 && p[2] < 90);
+            }
+        }
+        t > 0 && n as f64 / t as f64 > 0.3
+    };
+    match (red(574, 690), red(695, 810)) {
+        (true, false) => Some(true),
+        (false, true) => Some(false),
+        _ => None,
+    }
+}
+
+/// Is the student card whose name label (as `quick_card_labels` reports it) has its horizontal centre at `cx` and its top at
 /// `y0` (1280x960 frame) outlined in the lime green the 빠른 편성 grid draws around the
 /// students already in the squad? The band is just inside the card's left edge (not the
 /// neighbour's right border), from the portrait's top down to the label.
 pub fn quick_card_selected(img: &RgbImage, cx: i32, y0: i32) -> bool {
-    let (x0, x1, ya, yb) = (cx - 53, cx - 48, y0 - 100, y0 - 20);
+    let (x0, x1, ya, yb) = (cx - 56, cx - 51, y0 - 100, y0 - 20);
     let (mut lime, mut total) = (0u32, 0u32);
     for y in ya.max(0)..yb.min(img.height() as i32) {
         for x in x0.max(0)..x1.min(img.width() as i32) {

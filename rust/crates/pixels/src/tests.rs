@@ -183,10 +183,45 @@ fn list_shift_measures_the_scroll() {
 }
 
 #[test]
+fn quick_formation_labels_are_found_by_colour_wherever_the_grid_is_scrolled() {
+    let img = image::open(format!("{}/../../../fixtures/screens/quick-formation.png", env!("CARGO_MANIFEST_DIR"))).unwrap().to_rgb8();
+    let labels = quick_card_labels(&img);
+    // two whole rows of six cards; the third row is cut off by the viewport
+    assert_eq!(labels.len(), 12, "{labels:?}");
+    assert_eq!(labels[0].cx, 629, "{labels:?}");
+    assert!((labels[0].y0 - 428).abs() <= 2 && (labels[0].y1 - 462).abs() <= 2, "{:?}", labels[0]);
+    assert_eq!(labels[5].cx, 629 + 5 * 111);
+    let second_row = labels[6];
+    assert!((second_row.y0 - 580).abs() <= 6, "{second_row:?}");
+    let ink = quick_label_ink(&img, &labels[0]);
+    assert!(ink.pixels().filter(|p| p[0] == 0).count() > 60, "the name's strokes are ink");
+}
+
+#[test]
 fn quick_formation_marks_the_students_already_in_the_squad() {
     let img = image::open(format!("{}/../../../fixtures/screens/quick-formation.png", env!("CARGO_MANIFEST_DIR"))).unwrap().to_rgb8();
     // first row: four lime-outlined cards (the squad), then two plain ones; second row: none
-    for (cx, y0, want) in [(626, 431, true), (736, 429, true), (848, 431, true), (958, 431, true), (1070, 429, false), (1181, 432, false), (626, 583, false), (736, 583, false), (958, 584, false), (1181, 580, false)] {
+    for (cx, y0, want) in [(629, 427, true), (740, 427, true), (851, 428, true), (962, 428, true), (1073, 428, false), (1184, 428, false), (629, 579, false), (740, 579, false), (962, 579, false), (1184, 579, false)] {
         assert_eq!(quick_card_selected(&img, cx, y0), want, "card at x={cx} y={y0}");
     }
+}
+
+#[test]
+fn quick_formation_labels_follow_the_scroll() {
+    for name in ["quick-formation-scrolled-a.png", "quick-formation-scrolled-b.png"] {
+        let img = image::open(format!("{}/../../../fixtures/screens/{name}", env!("CARGO_MANIFEST_DIR"))).unwrap().to_rgb8();
+        let labels = quick_card_labels(&img);
+        assert_eq!(labels.len(), 12, "{name}: {labels:?}");
+        assert!(labels.iter().all(|l| l.y0 > 318 && l.y1 < 650));
+        assert_eq!(labels.iter().filter(|l| l.cx == 629).count(), 2, "{name}: one label per row in the first column");
+    }
+}
+
+#[test]
+fn quick_formation_tab_is_read_from_the_red_fill() {
+    let img = image::open(format!("{}/../../../fixtures/screens/quick-formation.png", env!("CARGO_MANIFEST_DIR"))).unwrap().to_rgb8();
+    assert_eq!(quick_tab_is_striker(&img), Some(true));
+    // a screen without the popup has neither tab
+    let lobby = image::open(format!("{}/../../../fixtures/lobby-main-menu.png", env!("CARGO_MANIFEST_DIR"))).unwrap().to_rgb8();
+    assert_eq!(quick_tab_is_striker(&lobby), None);
 }

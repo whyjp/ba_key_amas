@@ -225,6 +225,7 @@ name = "baocr"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "baocr-assist",
  "baocr-core",
  "baocr-export",
  "baocr-extract",
@@ -239,6 +240,23 @@ dependencies = [
  "ctrlc",
  "image",
  "rusqlite",
+ "serde_json",
+]
+
+[[package]]
+name = "baocr-assist"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "baocr-core",
+ "baocr-extract",
+ "baocr-ocr",
+ "baocr-overlay",
+ "baocr-pixels",
+ "baocr-wikidb",
+ "image",
+ "rusqlite",
+ "serde",
  "serde_json",
 ]
 
