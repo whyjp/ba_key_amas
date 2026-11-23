@@ -51,14 +51,14 @@ pub fn banner_origin(client: Ltrb, outer: Ltrb, work: Ltrb, size: (i32, i32)) ->
 }
 
 // Palette (Blue Archive UI): header navy, panel navy, cyan accent, light text.
-const NAVY_TOP: [u8; 3] = [44, 74, 116];
-const NAVY_BOTTOM: [u8; 3] = [27, 47, 80];
-const ACCENT: [u8; 3] = [76, 195, 255];
-const ACCENT_LIGHT: [u8; 3] = [150, 224, 255];
-const TRACK: [u8; 3] = [14, 28, 52];
-const TEXT: [u8; 3] = [255, 255, 255];
-const TEXT_SOFT: [u8; 3] = [196, 214, 236];
-const WARN: [u8; 3] = [255, 196, 92];
+pub(crate) const NAVY_TOP: [u8; 3] = [44, 74, 116];
+pub(crate) const NAVY_BOTTOM: [u8; 3] = [27, 47, 80];
+pub(crate) const ACCENT: [u8; 3] = [76, 195, 255];
+pub(crate) const ACCENT_LIGHT: [u8; 3] = [150, 224, 255];
+pub(crate) const TRACK: [u8; 3] = [14, 28, 52];
+pub(crate) const TEXT: [u8; 3] = [255, 255, 255];
+pub(crate) const TEXT_SOFT: [u8; 3] = [196, 214, 236];
+pub(crate) const WARN: [u8; 3] = [255, 196, 92];
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Phase {
@@ -104,7 +104,7 @@ pub fn load_fonts() -> Option<Fonts> {
     Some(Fonts { regular, bold })
 }
 
-fn over(dst: &mut Rgba<u8>, rgb: [u8; 3], alpha: f32) {
+pub(crate) fn over(dst: &mut Rgba<u8>, rgb: [u8; 3], alpha: f32) {
     let a = alpha.clamp(0.0, 1.0);
     if a <= 0.0 {
         return;
@@ -126,7 +126,7 @@ fn rrect_cov(px: f32, py: f32, x: f32, y: f32, w: f32, h: f32, r: f32) -> f32 {
     (0.5 - d).clamp(0.0, 1.0)
 }
 
-fn fill_rrect(img: &mut RgbaImage, x: f32, y: f32, w: f32, h: f32, r: f32, color: impl Fn(f32, f32) -> ([u8; 3], f32)) {
+pub(crate) fn fill_rrect(img: &mut RgbaImage, x: f32, y: f32, w: f32, h: f32, r: f32, color: impl Fn(f32, f32) -> ([u8; 3], f32)) {
     let (x0, y0) = ((x.floor() as i32 - 1).max(0), (y.floor() as i32 - 1).max(0));
     let (x1, y1) = (((x + w).ceil() as i32 + 1).min(img.width() as i32), ((y + h).ceil() as i32 + 1).min(img.height() as i32));
     for py in y0..y1 {
@@ -140,7 +140,7 @@ fn fill_rrect(img: &mut RgbaImage, x: f32, y: f32, w: f32, h: f32, r: f32, color
     }
 }
 
-fn lerp(a: [u8; 3], b: [u8; 3], t: f32) -> [u8; 3] {
+pub(crate) fn lerp(a: [u8; 3], b: [u8; 3], t: f32) -> [u8; 3] {
     let t = t.clamp(0.0, 1.0);
     [0, 1, 2].map(|i| (a[i] as f32 + (b[i] as f32 - a[i] as f32) * t).round() as u8)
 }
@@ -151,7 +151,7 @@ pub fn text_width(font: &FontVec, px: f32, s: &str) -> f32 {
 }
 
 /// Draw `s` with its top at `y` (so rows line up regardless of the glyphs).
-fn draw_text(img: &mut RgbaImage, font: &FontVec, px: f32, x: f32, y: f32, rgb: [u8; 3], alpha: f32, s: &str) {
+pub(crate) fn draw_text(img: &mut RgbaImage, font: &FontVec, px: f32, x: f32, y: f32, rgb: [u8; 3], alpha: f32, s: &str) {
     let scaled = font.as_scaled(PxScale::from(px));
     let mut caret = x;
     let baseline = y + scaled.ascent();

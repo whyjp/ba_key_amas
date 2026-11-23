@@ -4,17 +4,30 @@
 //! window, so it cannot take focus or swallow the scanner's clicks. It is also
 //! excluded from screen capture (when the OS supports it) so it never appears in
 //! the frames being read. On non-Windows targets it is a no-op.
+mod panel;
 mod render;
 #[cfg(windows)]
 mod win;
+
+pub use panel::{panel_origin, panel_width, render_panel, Chip, PanelState, Row, Tone};
 
 pub use render::{banner_layout, banner_origin, Ltrb, load_fonts, render, BannerState, Fonts, Phase, BASE_H, BASE_W};
 
 use std::sync::{Arc, Mutex};
 
+/// What the overlay window shows.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Shown {
+    /// Scan progress, over/above the game window.
+    Banner(BannerState),
+    /// Guide card beside the game window.
+    Panel(PanelState),
+    Hidden,
+}
+
 /// Handle to the running banner. Dropping it closes the window.
 pub struct Overlay {
-    state: Arc<Mutex<BannerState>>,
+    state: Arc<Mutex<Shown>>,
     #[cfg(windows)]
     worker: Option<win::Worker>,
 }
@@ -23,7 +36,16 @@ impl Overlay {
     /// Show the banner over the game window ("Blue Archive"). Never fails the
     /// caller: if the banner cannot be shown, scanning just runs without it.
     pub fn start() -> Overlay {
-        let state = Arc::new(Mutex::new(BannerState::default()));
+        Overlay::start_with(Shown::Banner(BannerState::default()))
+    }
+
+    /// Start with nothing shown (the guide panel appears when `panel` is called).
+    pub fn start_hidden() -> Overlay {
+        Overlay::start_with(Shown::Hidden)
+    }
+
+    fn start_with(first: Shown) -> Overlay {
+        let state = Arc::new(Mutex::new(first));
         #[cfg(windows)]
         let worker = win::Worker::start(state.clone());
         Overlay {
@@ -33,11 +55,24 @@ impl Overlay {
         }
     }
 
-    /// Replace the shown state.
-    pub fn set(&self, s: BannerState) {
+    fn show(&self, s: Shown) {
         if let Ok(mut g) = self.state.lock() {
             *g = s;
         }
+    }
+
+    /// Replace the shown banner state.
+    pub fn set(&self, s: BannerState) {
+        self.show(Shown::Banner(s));
+    }
+
+    /// Show the guide card beside the game window.
+    pub fn panel(&self, p: PanelState) {
+        self.show(Shown::Panel(p));
+    }
+
+    pub fn hide(&self) {
+        self.show(Shown::Hidden);
     }
 
     pub fn counting(&self) {

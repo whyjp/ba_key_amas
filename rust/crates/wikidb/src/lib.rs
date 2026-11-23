@@ -2,6 +2,8 @@
 //! data sources. Each source has its own module, so a source that disappears or
 //! changes shape does not touch the others. The schema lives in `wikidb/schema.sql`.
 pub mod schaledb;
+pub mod wiki;
+pub use wiki::{MissionBrief, Tally, Wiki};
 
 use anyhow::{Context, Result};
 use rusqlite::Connection;

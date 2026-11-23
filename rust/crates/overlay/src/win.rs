@@ -4,7 +4,9 @@
 //! (clicks pass through), WS_EX_NOACTIVATE (never takes focus), WS_EX_TOPMOST,
 //! WS_EX_TOOLWINDOW (no taskbar button). WDA_EXCLUDEFROMCAPTURE keeps it out of
 //! screenshots where the OS supports it.
-use crate::render::{banner_layout, banner_origin, load_fonts, render, BannerState, Fonts, Ltrb};
+use crate::panel::{panel_origin, panel_width, render_panel};
+use crate::render::{banner_layout, banner_origin, load_fonts, render, Fonts, Ltrb};
+use crate::Shown;
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -233,7 +235,7 @@ pub struct Worker {
 }
 
 impl Worker {
-    pub fn start(state: Arc<Mutex<BannerState>>) -> Option<Worker> {
+    pub fn start(state: Arc<Mutex<Shown>>) -> Option<Worker> {
         let fonts = match load_fonts() {
             Some(f) => f,
             None => {
@@ -253,7 +255,7 @@ impl Worker {
     }
 }
 
-fn run(state: Arc<Mutex<BannerState>>, stop: Arc<AtomicBool>, fonts: Fonts) {
+fn run(state: Arc<Mutex<Shown>>, stop: Arc<AtomicBool>, fonts: Fonts) {
     unsafe {
         SetProcessDPIAware();
         let inst = GetModuleHandleW(std::ptr::null());
@@ -324,25 +326,45 @@ fn run(state: Arc<Mutex<BannerState>>, stop: Arc<AtomicBool>, fonts: Fonts) {
                 }
                 Some((client, outer, work)) => {
                     let (cw, ch) = (client.2 - client.0, client.3 - client.1);
-                    let s = state.lock().map(|g| g.clone()).unwrap_or_default();
-                    let (_, _, bw, _) = banner_layout(cw, ch); // proportional to this window
-                    let img = render(bw, &s, tick, &fonts);
-                    let (w, h) = (img.width() as i32, img.height() as i32);
-                    if canvas.as_ref().map(|c| (c.w, c.h)) != Some((w, h)) {
-                        canvas = Canvas::new(screen_dc, w, h);
-                    }
-                    if let Some(c) = canvas.as_mut() {
-                        c.blit(&img);
-                        // off the game: above its window, else below it (see banner_origin)
-                        let (px, py) = banner_origin(client, outer, work, (w, h));
-                        let pos = Point { x: px, y: py };
-                        let size = Size { cx: w, cy: h };
-                        let src = Point { x: 0, y: 0 };
-                        let blend = BlendFunction { op: 0, flags: 0, alpha: 255, format: 1 };
-                        UpdateLayeredWindow(hwnd, screen_dc, &pos, &size, c.dc, &src, 0, &blend, ULW_ALPHA);
-                        if !visible {
-                            ShowWindow(hwnd, SW_SHOWNOACTIVATE);
-                            visible = true;
+                    let shown = state.lock().map(|g| g.clone()).unwrap_or(Shown::Hidden);
+                    // what to draw and where: the banner goes above/below the window, the panel beside it
+                    let placed = match &shown {
+                        Shown::Hidden => None,
+                        Shown::Banner(s) => {
+                            let (_, _, bw, _) = banner_layout(cw, ch); // proportional to this window
+                            let img = render(bw, s, tick, &fonts);
+                            let at = banner_origin(client, outer, work, (img.width() as i32, img.height() as i32));
+                            Some((img, at))
+                        }
+                        Shown::Panel(p) => {
+                            let img = render_panel(panel_width(cw) as u32, p, &fonts);
+                            panel_origin(client, outer, work, (img.width() as i32, img.height() as i32)).map(|at| (img, at))
+                        }
+                    };
+                    match placed {
+                        None => {
+                            if visible {
+                                ShowWindow(hwnd, SW_HIDE);
+                                visible = false;
+                            }
+                        }
+                        Some((img, (px, py))) => {
+                            let (w, h) = (img.width() as i32, img.height() as i32);
+                            if canvas.as_ref().map(|c| (c.w, c.h)) != Some((w, h)) {
+                                canvas = Canvas::new(screen_dc, w, h);
+                            }
+                            if let Some(c) = canvas.as_mut() {
+                                c.blit(&img);
+                                let pos = Point { x: px, y: py };
+                                let size = Size { cx: w, cy: h };
+                                let src = Point { x: 0, y: 0 };
+                                let blend = BlendFunction { op: 0, flags: 0, alpha: 255, format: 1 };
+                                UpdateLayeredWindow(hwnd, screen_dc, &pos, &size, c.dc, &src, 0, &blend, ULW_ALPHA);
+                                if !visible {
+                                    ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+                                    visible = true;
+                                }
+                            }
                         }
                     }
                 }
