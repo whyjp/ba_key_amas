@@ -10,9 +10,9 @@ use image::RgbImage;
 const STEP: usize = 3;
 /// Mean absolute grey difference below which two strips can count as the same content. Animated characters and
 /// speech bubbles beside a list keep it from reaching zero.
-const SAME: f32 = 15.0;
+const SAME: f32 = 25.0;
 /// The best shift must also be this much better than a typical one, or it is only the least bad of many.
-const CLEAR: f32 = 0.6;
+const CLEAR: f32 = 0.5;
 
 fn grey(img: &RgbImage, area: Rect) -> (Vec<Vec<f32>>, usize) {
     let rows = (area.y0..area.y1).map(|y| {

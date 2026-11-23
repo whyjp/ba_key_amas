@@ -293,7 +293,11 @@ fn past_events_section(nav: &Nav, lobby: &Look, snap: &mut ProgressSnapshot) -> 
         }
         nav.scroll_list(x, y, true, 1)?;
         let next = nav.settled()?;
-        match scroll::content_shift(&look.img, &next.img, area, 700) {
+        let shift = scroll::content_shift(&look.img, &next.img, area, 700);
+        if std::env::var_os("BAOCR_DEBUG_PROGRESS").is_some() {
+            eprintln!("progress: list moved {shift:?} px");
+        }
+        match shift {
             Some(0) => break,
             Some(d) => scrolled += d,
             None => {
