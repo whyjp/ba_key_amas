@@ -488,12 +488,12 @@ mod tests {
         let (r, ocr) = (rig(), NoOcr);
         let path = std::env::temp_dir().join(format!("baocr-dock-{}.json", std::process::id()));
         let mut settings = Settings::default();
-        settings.set_dock(Dock { side: baocr_overlay::Side::Left, y_permille: 250 });
+        settings.set_dock(Dock { side: baocr_overlay::Side::Left });
         let mut a = Assistant::new(Observer::new(&ocr, &r.students), &r.wiki, &r.students, &r.types, settings, Some(path.clone()), r.fake.clone());
-        assert_eq!(r.fake.0.borrow().docks, vec![Dock { side: baocr_overlay::Side::Left, y_permille: 250 }], "the saved place is applied first");
-        r.fake.0.borrow_mut().clicks.push("dock:r:610".into());
+        assert_eq!(r.fake.0.borrow().docks, vec![Dock { side: baocr_overlay::Side::Left }], "the saved place is applied first");
+        r.fake.0.borrow_mut().clicks.push("dock:r".into());
         assert!(a.poll());
-        assert_eq!(a.settings().dock(), Dock { side: baocr_overlay::Side::Right, y_permille: 610 });
+        assert_eq!(a.settings().dock(), Dock { side: baocr_overlay::Side::Right });
         assert_eq!(Settings::load(&path).dock(), a.settings().dock(), "and saved");
         let _ = std::fs::remove_file(&path);
     }

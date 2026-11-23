@@ -33,10 +33,8 @@ pub struct Settings {
     /// card beside the game stays.
     pub ingame_visible: bool,
     pub placements: BTreeMap<WidgetId, Placement>,
-    /// The card's side of the game window (true: right) and its height down the window, in
-    /// thousandths. Moved by dragging the card's header.
+    /// The card's side of the game window (true: right). Moved by dragging the card's header.
     pub dock_right: bool,
-    pub dock_y_permille: i32,
     /// The roster scan also reads the stat popup and the level-up and mystic tabs (slower).
     pub scan_deep: bool,
 }
@@ -52,7 +50,6 @@ impl Default for Settings {
                 (WidgetId::SlotStats, Placement::InGame),
             ]),
             dock_right: true,
-            dock_y_permille: 0,
             scan_deep: false,
         }
     }
@@ -60,12 +57,11 @@ impl Default for Settings {
 
 impl Settings {
     pub fn dock(&self) -> Dock {
-        Dock { side: if self.dock_right { Side::Right } else { Side::Left }, y_permille: self.dock_y_permille }
+        Dock { side: if self.dock_right { Side::Right } else { Side::Left } }
     }
 
     pub fn set_dock(&mut self, dock: Dock) {
         self.dock_right = dock.side == Side::Right;
-        self.dock_y_permille = dock.y_permille;
     }
 
     /// Where the widget is configured to go, falling back to the default for one the file lacks.
@@ -158,8 +154,9 @@ mod tests {
         std::fs::write(&path, r#"{"ingame_visible":true,"placements":{}}"#).unwrap();
         assert_eq!(Settings::load(&path).placement(WidgetId::MissionInfo), Placement::Outside);
         assert_eq!(Settings::load(&path).dock(), Dock::default());
+        // an older file that still carries a dock height loads, the height is ignored
         std::fs::write(&path, r#"{"dock_right":false,"dock_y_permille":300}"#).unwrap();
-        assert_eq!(Settings::load(&path).dock(), Dock { side: Side::Left, y_permille: 300 }, "a file with only the dock still loads");
+        assert_eq!(Settings::load(&path).dock(), Dock { side: Side::Left }, "a file with only the dock still loads");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
