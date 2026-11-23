@@ -3,7 +3,7 @@ use crate::matchup::{all_attack_types_by_edge, attack_types_by_edge, defense_mat
 use crate::raid_lookup::{RaidFound, RaidLookup};
 use crate::widget::{is_mission_screen, is_raid_screen, Context, Kind, Lookup, Output, Widget, WidgetId};
 use baocr_extract::raid::{RaidRef, DIFFICULTIES};
-use baocr_extract::scene::{RaidMode, Scene};
+use baocr_extract::scene::{Layout, RaidMode, Scene};
 use baocr_extract::CardName;
 use baocr_overlay::{Chip, Frame, Hue, Icon, Mark, Row, Tone, TypeTag};
 use baocr_wikidb::{evaluate, rate, FormationScore, MissionBrief, Rating, SeasonRelation, Share, StudentBrief, Tally, TypeTable, Verdict, Wiki};
@@ -243,6 +243,33 @@ const CARD_FRAME: (i32, i32, i32, i32) = (-55, -106, 55, 41);
 /// The grid's viewport: a card whose portrait is mostly scrolled out of it gets no icons.
 const GRID_ICONS_TOP: i32 = 322;
 const GRID_ICONS_BOTTOM: i32 = 600;
+/// The 빠른 편성 popup keeps its size and the order of its parts in 16:9 but is squeezed vertically:
+/// its top edge moves from y 182 to y 62 and everything inside it rises by the same 120 px
+/// (measured: the first name row at y 431 in 4:3 and 311 in 16:9, the squad strip at 676 and 556).
+const POPUP_RISE_169: i32 = 120;
+
+/// The vertical places of the 빠른 편성 popup's parts in one layout.
+struct PopupSpots {
+    grid_icons_top: i32,
+    grid_icons_bottom: i32,
+    slot_column_top: i32,
+    slot_frame_top: i32,
+    slot_frame_bottom: i32,
+}
+
+fn popup_spots(layout: Layout) -> PopupSpots {
+    let rise = match layout {
+        Layout::Ratio43 => 0,
+        Layout::Ratio169 => POPUP_RISE_169,
+    };
+    PopupSpots {
+        grid_icons_top: GRID_ICONS_TOP - rise,
+        grid_icons_bottom: GRID_ICONS_BOTTOM - rise,
+        slot_column_top: SLOT_COLUMN_TOP - rise,
+        slot_frame_top: SLOT_FRAME.1 - rise,
+        slot_frame_bottom: SLOT_FRAME.3 - rise,
+    }
+}
 
 /// What goes on one student's portrait: how well it suits the battle and the terrain face,
 /// or just "SP" for a special that is not rated. Without a known mission nothing can be
@@ -283,13 +310,19 @@ fn armor_icon(code: &str) -> Option<Icon> {
     Some(Icon::Armor(TypeTag { hue, glyph }))
 }
 
-/// Marks for the student cards on screen.
+/// Marks for the student cards on screen (a 4:3 frame).
 pub fn card_marks(cards: &[CardName], students: &[StudentBrief], brief: Option<&MissionBrief>, terrain: Option<&str>, types: &TypeTable, kind: Option<&str>) -> Vec<Mark> {
+    card_marks_in(cards, students, brief, terrain, types, kind, Layout::Ratio43)
+}
+
+/// [`card_marks`] for a frame of the given layout.
+pub fn card_marks_in(cards: &[CardName], students: &[StudentBrief], brief: Option<&MissionBrief>, terrain: Option<&str>, types: &TypeTable, kind: Option<&str>, layout: Layout) -> Vec<Mark> {
+    let spots = popup_spots(layout);
     cards
         .iter()
         .filter_map(|c| {
             let top = c.y0.round() as i32 - COLUMN_TOP_ABOVE_NAME;
-            if !(GRID_ICONS_TOP..=GRID_ICONS_BOTTOM).contains(&top) {
+            if !(spots.grid_icons_top..=spots.grid_icons_bottom).contains(&top) {
                 return None;
             }
             let s = Wiki::match_student_as(students, &c.text, kind)?;
@@ -321,7 +354,7 @@ impl Widget for PortraitIcons {
         Kind::Marks
     }
     fn render(&self, cx: &Context) -> Option<Output> {
-        (cx.obs.scene == Scene::QuickFormation).then(|| Output::Marks(card_marks(&cx.obs.cards, cx.students, cx.brief(), cx.terrain(), cx.types, cx.obs.grid_kind)))
+        (cx.obs.scene == Scene::QuickFormation).then(|| Output::Marks(card_marks_in(&cx.obs.cards, cx.students, cx.brief(), cx.terrain(), cx.types, cx.obs.grid_kind, cx.obs.layout)))
     }
 }
 
@@ -333,8 +366,14 @@ const SLOT_COLUMN_TOP: i32 = 700;
 /// A slot's outline: this far left of its right edge, between these rows, this far right of it.
 const SLOT_FRAME: (i32, i32, i32, i32) = (-89, 676, 2, 760);
 
-/// Marks for a squad: the strikers fill the first four slots, the specials the last two.
+/// Marks for a squad: the strikers fill the first four slots, the specials the last two (a 4:3 frame).
 pub fn slot_marks(team: &[StudentBrief], brief: Option<&MissionBrief>, terrain: Option<&str>, types: &TypeTable) -> Vec<Mark> {
+    slot_marks_in(team, brief, terrain, types, Layout::Ratio43)
+}
+
+/// [`slot_marks`] for a frame of the given layout.
+pub fn slot_marks_in(team: &[StudentBrief], brief: Option<&MissionBrief>, terrain: Option<&str>, types: &TypeTable, layout: Layout) -> Vec<Mark> {
+    let spots = popup_spots(layout);
     let strikers = team.iter().filter(|s| s.squad_type == "Main").take(4).enumerate().map(|(i, s)| (i, s));
     let specials = team.iter().filter(|s| s.squad_type != "Main").take(2).enumerate().map(|(i, s)| (4 + i, s));
     strikers
@@ -345,9 +384,9 @@ pub fn slot_marks(team: &[StudentBrief], brief: Option<&MissionBrief>, terrain: 
                 return None;
             }
             let edge = SLOT_RIGHT_EDGES[slot];
-            let mark = Mark::column_from_top(edge, SLOT_COLUMN_TOP, icons);
+            let mark = Mark::column_from_top(edge, spots.slot_column_top, icons);
             Some(match grade {
-                Some(grade) => mark.framed(Frame { left: edge + SLOT_FRAME.0, top: SLOT_FRAME.1, right: edge + SLOT_FRAME.2, bottom: SLOT_FRAME.3, grade }),
+                Some(grade) => mark.framed(Frame { left: edge + SLOT_FRAME.0, top: spots.slot_frame_top, right: edge + SLOT_FRAME.2, bottom: spots.slot_frame_bottom, grade }),
                 None => mark,
             })
         })
@@ -369,7 +408,7 @@ impl Widget for SlotStats {
     }
     fn render(&self, cx: &Context) -> Option<Output> {
         // the strip's place on a raid's popup is not known: no icons rather than icons on the wrong things
-        (cx.obs.scene == Scene::QuickFormation && cx.obs.raid.is_none()).then(|| Output::Marks(slot_marks(&cx.team(), cx.brief(), cx.terrain(), cx.types)))
+        (cx.obs.scene == Scene::QuickFormation && cx.obs.raid.is_none()).then(|| Output::Marks(slot_marks_in(&cx.team(), cx.brief(), cx.terrain(), cx.types, cx.obs.layout)))
     }
 }
 

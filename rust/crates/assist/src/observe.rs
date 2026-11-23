@@ -6,7 +6,7 @@
 //! nothing about how any of that is shown.
 use baocr_core::ocr_api::{Ocr, TextBox};
 use baocr_extract::raid::{RaidRef, RaidTracker};
-use baocr_extract::scene::{classify_in, squad_names, Layout, MissionRef, MissionTracker, Scene};
+use baocr_extract::scene::{classify_in, squad_names_in, Layout, MissionRef, MissionTracker, Scene};
 use baocr_extract::{read_card_names, CardName};
 use baocr_pixels::{quick_card_selected, quick_tab_is_striker};
 use baocr_wikidb::{StudentBrief, Wiki};
@@ -26,11 +26,13 @@ pub struct Observation {
     pub squad: Vec<i64>,
     /// The kind of student the grid's active tab lists: "Main" (STRIKER) or "Support" (SPECIAL).
     pub grid_kind: Option<&'static str>,
+    /// The screen ratio of the frame this was read from: where marks are placed depends on it.
+    pub layout: Layout,
 }
 
 impl Observation {
     pub fn new(scene: Scene) -> Observation {
-        Observation { scene, mission: None, raid: None, cards: Vec::new(), squad: Vec::new(), grid_kind: None }
+        Observation { scene, mission: None, raid: None, cards: Vec::new(), squad: Vec::new(), grid_kind: None, layout: Layout::Ratio43 }
     }
 
     /// The 빠른 편성 popup is up but its grid shows no names (compact view).
@@ -68,7 +70,8 @@ impl<'a> Observer<'a> {
     /// `boxes`: the frame's free-text OCR. `fallback`: the screen to assume when the text
     /// names none (the student list and profile are told apart by pixels, not text).
     pub fn observe(&mut self, img: &RgbImage, boxes: &[TextBox], fallback: Scene) -> Observation {
-        let mut scene = classify_in(boxes, None, Layout::of_frame(img.width(), img.height()));
+        let layout = Layout::of_frame(img.width(), img.height());
+        let mut scene = classify_in(boxes, None, layout);
         if scene == Scene::Unknown {
             scene = fallback;
         }
@@ -79,19 +82,20 @@ impl<'a> Observer<'a> {
         if scene != Scene::Unknown {
             self.last = scene;
         }
-        let mission = self.tracker.update(scene, boxes).cloned();
-        let raid = self.raid_tracker.update(scene, boxes).cloned();
+        let mission = self.tracker.update_in(scene, boxes, layout).cloned();
+        let raid = self.raid_tracker.update_in(scene, boxes, layout).cloned();
         // A squad belongs to the mission or edit session in progress: leaving for a screen that
         // has nothing to do with one forgets it, so the next mission never inherits it.
-        if !matches!(scene, Scene::Squad | Scene::QuickFormation | Scene::MissionMap | Scene::MissionInfo | Scene::EnemyInfo | Scene::RaidFormation(_) | Scene::Unknown) {
+        if !matches!(scene, Scene::Squad | Scene::QuickFormation | Scene::MissionMap | Scene::MissionInfo | Scene::EnemyInfo | Scene::RaidFormation(_) | Scene::AlertPopup | Scene::Unknown) {
             self.squad.clear();
         }
         let mut obs = Observation::new(scene);
+        obs.layout = layout;
         obs.mission = mission;
         obs.raid = raid;
         match scene {
             Scene::Squad => {
-                self.squad = squad_names(boxes).iter().filter_map(|(n, special)| Wiki::match_student_as(self.students, n, Some(if *special { "Support" } else { "Main" }))).map(|s| s.id).collect();
+                self.squad = squad_names_in(boxes, layout).iter().filter_map(|(n, special)| Wiki::match_student_as(self.students, n, Some(if *special { "Support" } else { "Main" }))).map(|s| s.id).collect();
             }
             Scene::QuickFormation => {
                 obs.grid_kind = quick_tab_is_striker(img).map(|striker| if striker { "Main" } else { "Support" });
@@ -110,7 +114,7 @@ impl<'a> Observer<'a> {
                     }
                 }
                 // the specials' names under the popup are still readable: they say who holds those slots
-                let specials: Vec<i64> = squad_names(boxes).iter().filter(|(_, special)| *special).filter_map(|(n, _)| Wiki::match_student_as(self.students, n, Some("Support"))).map(|s| s.id).collect();
+                let specials: Vec<i64> = squad_names_in(boxes, layout).iter().filter(|(_, special)| *special).filter_map(|(n, _)| Wiki::match_student_as(self.students, n, Some("Support"))).map(|s| s.id).collect();
                 if !specials.is_empty() {
                     let students = self.students;
                     self.squad.retain(|id| students.iter().find(|s| s.id == *id).is_none_or(|s| s.squad_type == "Main"));

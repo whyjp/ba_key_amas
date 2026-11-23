@@ -80,9 +80,19 @@ impl Default for Policy {
     }
 }
 
+/// Height of the 1280-wide frame a client area of this shape is read as: 720 for 16:9, else 960 for 4:3
+/// (the shapes are told apart at the midpoint of their ratios, like `baocr_core::layout::Layout`).
+fn frame_height(w: f64, h: f64) -> f64 {
+    if w / h > (4.0 / 3.0 + 16.0 / 9.0) / 2.0 {
+        720.0
+    } else {
+        960.0
+    }
+}
+
 pub struct HintScheduler {
     policy: Policy,
-    /// the client rectangle in screen pixels and the zones in client (1280x960) pixels
+    /// the client rectangle in screen pixels and the zones in frame pixels (1280 wide, 960 or 720 high by the client's shape)
     client: [i32; 4],
     zones: Vec<HotZone>,
     pending: Vec<Request>,
@@ -107,7 +117,7 @@ impl HintScheduler {
     fn zone_at(&self, x: i32, y: i32) -> Option<usize> {
         let [l, t, r, b] = self.client;
         let (w, h) = ((r - l).max(1) as f64, (b - t).max(1) as f64);
-        let (cx, cy) = (((x - l) as f64 * 1280.0 / w) as i32, ((y - t) as f64 * 960.0 / h) as i32);
+        let (cx, cy) = (((x - l) as f64 * 1280.0 / w) as i32, ((y - t) as f64 * frame_height(w, h) / h) as i32);
         self.zones.iter().position(|z| cx >= z.rect[0] && cx < z.rect[2] && cy >= z.rect[1] && cy < z.rect[3])
     }
 
@@ -412,6 +422,15 @@ mod tests {
         assert_eq!(first, vec![Request { due: 500, reason: Reason::Preempt(0), trust_single_frame: false }]);
         s.feed(ev(900, HintKind::Click, 600, 600));
         assert!(s.due(900).iter().all(|r| !matches!(r.reason, Reason::Preempt(_))), "a click elsewhere preempts nothing");
+    }
+
+    #[test]
+    fn zones_of_a_16_9_client_use_a_720_high_frame() {
+        let mut s = HintScheduler::new(Policy::default());
+        s.set_client([0, 0, 640, 360]); // half size, 16:9
+        s.set_zones(vec![HotZone { rect: [1000, 200, 1100, 260] }]);
+        s.feed(ev(0, HintKind::Click, 525, 115)); // frame (1050, 230)
+        assert!(s.due(0).iter().any(|r| r.reason == Reason::Preempt(0)));
     }
 
     #[test]
