@@ -1,0 +1,183 @@
+{
+  "name": "케이",
+  "level": 68,
+  "rarity_stars": 5,
+  "ex_skill_level": 2,
+  "normal_skill_level": 5,
+  "passive_skill_level": 4,
+  "sub_skill_level": 5,
+  "bond_rank": 13,
+  "unique_weapon_stars": 1,
+  "unique_weapon_level": null,
+  "combat_role": "STRIKER",
+  "is_pinned": true,
+  "name_match": {
+    "status": "exact",
+    "cleaned": "케이",
+    "candidate": "케이",
+    "distance": 0,
+    "margin": 1
+  },
+  "identity": {
+    "base_name": "케이",
+    "outfit": "",
+    "outfit_key": "base",
+    "is_outfit_variant": false,
+    "is_distinct_character": false
+  },
+  "stats": {
+    "max_hp": 24785,
+    "attack": 6074,
+    "defense": 303,
+    "healing": 3846
+  },
+  "exp": {
+    "current": 10,
+    "required": 21790
+  },
+  "loadout": {
+    "tactic_role": "서포터",
+    "position": "BACK",
+    "attack_type": "신비",
+    "armor_type": "복합장갑",
+    "weapon_class": "RG"
+  },
+  "terrain": {
+    "urban": null,
+    "outdoor": null,
+    "indoor": null
+  },
+  "badges": {
+    "basic_info_tab": false,
+    "level_up_tab": false,
+    "mystic_release_tab": false,
+    "skill_growth": false,
+    "weapon_growth": false,
+    "equipment_growth": false
+  },
+  "locks": {
+    "ability_unlock_locked": true,
+    "simsang_bloom_locked": true
+  },
+  "reference": {
+    "source": "schaledb",
+    "id": 10135,
+    "school": "Millennium",
+    "club": "SPTF",
+    "school_year": "1학년",
+    "age": "??세",
+    "birthday": "3/25",
+    "height": "152cm",
+    "full_name": "케이",
+    "hobby": "아리스 돌보기, 꾸미기, 게임(부정 중)",
+    "designer": "GULIM",
+    "illustrator": "GULIM",
+    "voice": "田中美海",
+    "base_star_grade": 3,
+    "weapon_type": "RG"
+  },
+  "fixed_meta": {
+    "source": "dictionary",
+    "dictionary_id": 10135,
+    "equipment_slots": [
+      "Shoes",
+      "Hairpin",
+      "Watch"
+    ],
+    "potential_material": "파에스토스 원반 조각",
+    "skill_materials": [
+      "기초 전술 교육 BD\n(밀레니엄)",
+      "파에스토스 원반 조각",
+      "일반 전술 교육 BD\n(밀레니엄)",
+      "파손된 파에스토스 원반",
+      "이스탄불 로켓 조각",
+      "상급 전술 교육 BD\n(밀레니엄)",
+      "마모된 파에스토스 원반",
+      "파손된 이스탄불 로켓",
+      "최상급 전술 교육 BD\n(밀레니엄)",
+      "온전한 파에스토스 원반",
+      "수리된 이스탄불 로켓",
+      "기초 기술 노트\n(밀레니엄)",
+      "일반 기술 노트\n(밀레니엄)",
+      "상급 기술 노트\n(밀레니엄)",
+      "최상급 기술 노트\n(밀레니엄)"
+    ],
+    "weapon_terrain": "Street",
+    "weapon_terrain_bonus": 1,
+    "terrain_base": {
+      "urban": 4,
+      "outdoor": 0,
+      "indoor": 3
+    }
+  },
+  "skill_locked": {
+    "ex": false,
+    "basic": false,
+    "passive": false,
+    "sub": false
+  },
+  "equipment": [
+    {
+      "slot": 1,
+      "slot_kind": "standard",
+      "equipped": true,
+      "type": null,
+      "item_name": null,
+      "tier": null,
+      "level": 55
+    },
+    {
+      "slot": 2,
+      "slot_kind": "standard",
+      "equipped": true,
+      "type": "Hairpin",
+      "item_name": "Bat Hairpin",
+      "tier": 6,
+      "level": 50,
+      "icon_match_error": 18.047272727272727
+    },
+    {
+      "slot": 3,
+      "slot_kind": "standard",
+      "equipped": true,
+      "type": null,
+      "item_name": null,
+      "tier": null,
+      "level": 74
+    },
+    {
+      "slot": 4,
+      "slot_kind": "unique_gear",
+      "equipped": false,
+      "type": null,
+      "item_name": null,
+      "tier": null,
+      "level": null
+    }
+  ],
+  "source": "profile arrow #2",
+  "raw_ocr": {
+    "basic": "Lv.5",
+    "bond": "13",
+    "equipment_1_level": "Hifuts5 5\"",
+    "equipment_1_tier": "7",
+    "equipment_2_level": "Nokia | Rokies | lily SO | fly SO” | v 50:",
+    "equipment_2_tier": "16 »",
+    "equipment_3_level": "HilUTS Se | (fu 74 So!",
+    "equipment_3_tier": "rs)",
+    "equipment_4_state": "EMPTY",
+    "ex": "Lv.2",
+    "exp": "10/21790",
+    "level": "Lv.68",
+    "name": "케이                    eis",
+    "passive": "Lv.4",
+    "stat_attack": "공격력 6074",
+    "stat_defense": "방어력 303",
+    "stat_healing": "지유력 3846",
+    "stat_hp": "최대체력 24785",
+    "sub": "v",
+    "sub_retry": "L5",
+    "weapon_level": "",
+    "weapon_level_retry": "gv230"
+  }
+}

@@ -1,0 +1,183 @@
+{
+  "name": "호시노(무장)",
+  "level": 68,
+  "rarity_stars": 5,
+  "ex_skill_level": 4,
+  "normal_skill_level": 7,
+  "passive_skill_level": 6,
+  "sub_skill_level": 6,
+  "bond_rank": 11,
+  "unique_weapon_stars": 1,
+  "unique_weapon_level": 50,
+  "combat_role": "STRIKER",
+  "is_pinned": true,
+  "name_match": {
+    "status": "exact",
+    "cleaned": "호시노(무장)",
+    "candidate": "호시노(무장)",
+    "distance": 0,
+    "margin": 0
+  },
+  "identity": {
+    "base_name": "호시노",
+    "outfit": "무장",
+    "outfit_key": "armed",
+    "is_outfit_variant": true,
+    "is_distinct_character": false
+  },
+  "stats": {
+    "max_hp": 63928,
+    "attack": 2083,
+    "defense": 2099,
+    "healing": 3817
+  },
+  "exp": {
+    "current": 1,
+    "required": 21790
+  },
+  "loadout": {
+    "tactic_role": "탱커",
+    "position": "FRONT",
+    "attack_type": "신비",
+    "armor_type": "중장갑",
+    "weapon_class": "SG"
+  },
+  "terrain": {
+    "urban": null,
+    "outdoor": null,
+    "indoor": null
+  },
+  "badges": {
+    "basic_info_tab": false,
+    "level_up_tab": false,
+    "mystic_release_tab": false,
+    "skill_growth": false,
+    "weapon_growth": false,
+    "equipment_growth": false
+  },
+  "locks": {
+    "ability_unlock_locked": true,
+    "simsang_bloom_locked": true
+  },
+  "reference": {
+    "source": "schaledb",
+    "id": 10098,
+    "school": "Abydos",
+    "club": "Countermeasure",
+    "school_year": "3학년",
+    "age": "17세",
+    "birthday": "1/2",
+    "height": "145cm",
+    "full_name": "타카나시 호시노",
+    "hobby": "낮잠, 게으름 피우기",
+    "designer": "9ml",
+    "illustrator": "9ml",
+    "voice": "花守ゆみり",
+    "base_star_grade": 3,
+    "weapon_type": "SG"
+  },
+  "fixed_meta": {
+    "source": "dictionary",
+    "dictionary_id": 10098,
+    "equipment_slots": [
+      "Hat",
+      "Bag",
+      "Watch"
+    ],
+    "potential_material": "네브라 디스크 조각",
+    "skill_materials": [
+      "기초 전술 교육 BD\n(아비도스)",
+      "네브라 디스크 조각",
+      "일반 전술 교육 BD\n(아비도스)",
+      "파손된 네브라 디스크",
+      "이스탄불 로켓 조각",
+      "상급 전술 교육 BD\n(아비도스)",
+      "마모된 네브라 디스크",
+      "파손된 이스탄불 로켓",
+      "최상급 전술 교육 BD\n(아비도스)",
+      "온전한 네브라 디스크",
+      "수리된 이스탄불 로켓",
+      "기초 기술 노트\n(아비도스)",
+      "일반 기술 노트\n(아비도스)",
+      "상급 기술 노트\n(아비도스)",
+      "최상급 기술 노트\n(아비도스)"
+    ],
+    "weapon_terrain": "Outdoor",
+    "weapon_terrain_bonus": 1,
+    "terrain_base": {
+      "urban": 3,
+      "outdoor": 4,
+      "indoor": 0
+    }
+  },
+  "skill_locked": {
+    "ex": false,
+    "basic": false,
+    "passive": false,
+    "sub": false
+  },
+  "equipment": [
+    {
+      "slot": 1,
+      "slot_kind": "standard",
+      "equipped": true,
+      "type": null,
+      "item_name": null,
+      "tier": null,
+      "level": null
+    },
+    {
+      "slot": 2,
+      "slot_kind": "standard",
+      "equipped": true,
+      "type": null,
+      "item_name": null,
+      "tier": 7,
+      "level": null
+    },
+    {
+      "slot": 3,
+      "slot_kind": "standard",
+      "equipped": true,
+      "type": null,
+      "item_name": null,
+      "tier": null,
+      "level": 50
+    },
+    {
+      "slot": 4,
+      "slot_kind": "unique_gear",
+      "equipped": false,
+      "type": null,
+      "item_name": null,
+      "tier": null,
+      "level": null
+    }
+  ],
+  "source": "profile arrow #4",
+  "raw_ocr": {
+    "basic": "L.7",
+    "bond": "11",
+    "equipment_1_level": "mioiso™ | miouso™ | mioiso™ | Amide | tty 3S O = | los O™",
+    "equipment_1_tier": "Te\"",
+    "equipment_2_level": "loa SSew | mWulss | hlaSSew | UutSS. | flea CXS ay | UutSS.",
+    "equipment_2_tier": "17)",
+    "equipment_3_level": "WuIso | lfut5SO | livI50",
+    "equipment_3_tier": "ré/\"",
+    "equipment_4_state": "EMPTY",
+    "ex": "Lv.4",
+    "exp": "1/21790",
+    "level": "Lv.68",
+    "name": "PSA (SY) ets",
+    "name_ink": "호시노(무장) ㆍ",
+    "name_retry1": ") 호시노",
+    "name_retry2": "호시노(무장:",
+    "passive": "Lv.6",
+    "stat_attack": "공격력 2083",
+    "stat_defense": "방어력 2099",
+    "stat_healing": "지유력 3817",
+    "stat_hp": "죄대체력 63928",
+    "sub": "Lv6",
+    "weapon_level": "50"
+  }
+}

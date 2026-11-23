@@ -101,11 +101,11 @@ fn index_roundtrip_and_rebuild() {
     assert_eq!(rep.entries[1].detail_path, "details/002");
 }
 
-/// Real Go outputs: load, export, report, rebuild; skip when the folder is absent.
+/// Real Go outputs (a few students kept as fixtures): load, export, report, rebuild.
 #[test]
 fn real_go_output() {
-    let src = PathBuf::from("D:/work-github/bluearchive-ocr/output-fast-full2");
-    let Ok(ix) = Index::load(&src) else { return };
+    let src = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../fixtures/go-output"));
+    let ix = Index::load(&src).expect("fixtures/go-output index");
     let out = tmp("real");
     let go_report: RosterReport = match std::fs::read(src.join("students.json")) {
         Ok(b) => serde_json::from_slice(&b).expect("Go students.json must deserialize"),

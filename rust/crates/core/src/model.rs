@@ -299,8 +299,8 @@ mod tests {
     /// A student.json written by the Go program must load and survive a round trip.
     #[test]
     fn loads_go_student_json() {
-        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../output-fast-full2/details/001/student.json");
-        let Ok(text) = std::fs::read_to_string(dir) else { return }; // output dirs are not tracked
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../fixtures/go-output/details/001/student.json");
+        let text = std::fs::read_to_string(dir).expect("fixture student.json");
         let s: Student = serde_json::from_str(&text).expect("Go student.json must deserialize");
         assert!(!s.name.is_empty());
         let again: Student = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();

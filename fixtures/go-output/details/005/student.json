@@ -1,0 +1,187 @@
+{
+  "name": "슌",
+  "level": 68,
+  "rarity_stars": 5,
+  "ex_skill_level": 2,
+  "normal_skill_level": 3,
+  "passive_skill_level": 3,
+  "sub_skill_level": 2,
+  "bond_rank": 11,
+  "unique_weapon_stars": 1,
+  "unique_weapon_level": null,
+  "combat_role": "STRIKER",
+  "is_pinned": true,
+  "name_match": {
+    "status": "corrected",
+    "cleaned": "순",
+    "candidate": "슌",
+    "distance": 1,
+    "margin": 2
+  },
+  "identity": {
+    "base_name": "슌",
+    "outfit": "",
+    "outfit_key": "base",
+    "is_outfit_variant": false,
+    "is_distinct_character": false
+  },
+  "stats": {
+    "max_hp": 20221,
+    "attack": 4343,
+    "defense": 86,
+    "healing": 4808
+  },
+  "exp": {
+    "current": 3,
+    "required": 21790
+  },
+  "loadout": {
+    "tactic_role": "딜러",
+    "position": "BACK",
+    "attack_type": "폭발",
+    "armor_type": "경장갑",
+    "weapon_class": "SR"
+  },
+  "terrain": {
+    "urban": null,
+    "outdoor": null,
+    "indoor": null
+  },
+  "badges": {
+    "basic_info_tab": true,
+    "level_up_tab": false,
+    "mystic_release_tab": false,
+    "skill_growth": false,
+    "weapon_growth": false,
+    "equipment_growth": true
+  },
+  "locks": {
+    "ability_unlock_locked": true,
+    "simsang_bloom_locked": true
+  },
+  "reference": {
+    "source": "schaledb",
+    "id": 10011,
+    "school": "Shanhaijing",
+    "club": "Meihuayuan",
+    "school_year": "3학년",
+    "age": "극비",
+    "birthday": "2/5",
+    "height": "174cm",
+    "full_name": "스노하라 슌",
+    "hobby": "아이들과 놀아주기",
+    "designer": "9ml",
+    "illustrator": "9ml",
+    "voice": "伊藤静",
+    "base_star_grade": 3,
+    "weapon_type": "SR"
+  },
+  "fixed_meta": {
+    "source": "dictionary",
+    "dictionary_id": 10011,
+    "equipment_slots": [
+      "Gloves",
+      "Hairpin",
+      "Watch"
+    ],
+    "potential_material": "에테르 가루",
+    "skill_materials": [
+      "기초 전술 교육 BD\n(산해경)",
+      "에테르 가루",
+      "일반 전술 교육 BD\n(산해경)",
+      "에테르 조각",
+      "님루드 렌즈 조각",
+      "상급 전술 교육 BD\n(산해경)",
+      "에테르 결정",
+      "파손된 님루드 렌즈",
+      "최상급 전술 교육 BD\n(산해경)",
+      "에테르 정수",
+      "마모된 님루드 렌즈",
+      "기초 기술 노트\n(산해경)",
+      "일반 기술 노트\n(산해경)",
+      "상급 기술 노트\n(산해경)",
+      "최상급 기술 노트\n(산해경)"
+    ],
+    "weapon_terrain": "Street",
+    "weapon_terrain_bonus": 1,
+    "terrain_base": {
+      "urban": 4,
+      "outdoor": 2,
+      "indoor": 0
+    }
+  },
+  "skill_locked": {
+    "ex": false,
+    "basic": false,
+    "passive": false,
+    "sub": false
+  },
+  "equipment": [
+    {
+      "slot": 1,
+      "slot_kind": "standard",
+      "equipped": true,
+      "type": "Gloves",
+      "item_name": "Leather Gloves",
+      "tier": 4,
+      "level": 40,
+      "icon_match_error": 15.191358024691358
+    },
+    {
+      "slot": 2,
+      "slot_kind": "standard",
+      "equipped": true,
+      "type": "Hairpin",
+      "item_name": "Winged Hairpin",
+      "tier": 4,
+      "level": 40,
+      "icon_match_error": 24.018284106891702
+    },
+    {
+      "slot": 3,
+      "slot_kind": "standard",
+      "equipped": true,
+      "type": "Watch",
+      "item_name": "Antique Pocket Watch",
+      "tier": 4,
+      "level": 40,
+      "icon_match_error": 32.12814070351759
+    },
+    {
+      "slot": 4,
+      "slot_kind": "unique_gear",
+      "equipped": false,
+      "type": null,
+      "item_name": null,
+      "tier": null,
+      "level": null
+    }
+  ],
+  "source": "profile arrow #5",
+  "raw_ocr": {
+    "basic": "Lv.3",
+    "bond": "11",
+    "equipment_1_level": "loging | ily 40",
+    "equipment_1_tier": "T4)'",
+    "equipment_2_level": "luv%40™",
+    "equipment_2_tier": "T4)",
+    "equipment_3_level": "lholZine, | l6u%4 O",
+    "equipment_3_tier": "14)",
+    "equipment_4_state": "EMPTY",
+    "ex": "Lv.2",
+    "exp": "3/21790",
+    "level": "Lv.68",
+    "name": "순         whi",
+    "name_ink": "'    윤                                                                 ㅣ    ,",
+    "name_retry1": "'순",
+    "name_retry2": "순",
+    "passive": "Lv.3",
+    "stat_attack": "공격력 4343",
+    "stat_defense": "방어력 86",
+    "stat_healing": "지유력 4808",
+    "stat_hp": "ACHAEA 20221",
+    "sub": "L.2",
+    "weapon_level": "",
+    "weapon_level_retry": "Cy f"
+  }
+}

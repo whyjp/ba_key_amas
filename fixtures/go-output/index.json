@@ -1,0 +1,959 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "001",
+      "status": "extracted",
+      "name": "리오(무장)",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "002",
+      "status": "extracted",
+      "name": "케이",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "003",
+      "status": "extracted",
+      "name": "시로코*테러",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "004",
+      "status": "extracted",
+      "name": "호시노(무장)",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "005",
+      "status": "extracted",
+      "name": "슌",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "006",
+      "status": "extracted",
+      "name": "하나코(수영복)",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "007",
+      "status": "extracted",
+      "name": "사오리(드레스)",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "008",
+      "status": "extracted",
+      "name": "사츠키(수영복)",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "009",
+      "status": "extracted",
+      "name": "미카",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "010",
+      "status": "extracted",
+      "name": "마코토(수영복)",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "011",
+      "status": "extracted",
+      "name": "리오",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "012",
+      "status": "extracted",
+      "name": "아코",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "013",
+      "status": "extracted",
+      "name": "아리스",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "014",
+      "status": "extracted",
+      "name": "토키(바니걸)",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "015",
+      "status": "extracted",
+      "name": "키사키",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "016",
+      "status": "extracted",
+      "name": "카요코",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "017",
+      "status": "extracted",
+      "name": "아루",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "018",
+      "status": "extracted",
+      "name": "카요코(새해)",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "019",
+      "status": "extracted",
+      "name": "유우카(파자마)",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "020",
+      "status": "extracted",
+      "name": "노도카(온천)",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "021",
+      "status": "extracted",
+      "name": "토모에(치파오)",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "022",
+      "status": "extracted",
+      "name": "노조미",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "023",
+      "status": "extracted",
+      "name": "아카리",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "024",
+      "status": "extracted",
+      "name": "키라라",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "025",
+      "status": "extracted",
+      "name": "사쿠라코",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "026",
+      "status": "extracted",
+      "name": "아루(드레스)",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "027",
+      "status": "extracted",
+      "name": "호시노",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "028",
+      "status": "extracted",
+      "name": "렌게",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "029",
+      "status": "extracted",
+      "name": "츠바키(가이드)",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "030",
+      "status": "extracted",
+      "name": "루미",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "031",
+      "status": "extracted",
+      "name": "와카모(수영복)",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "032",
+      "status": "extracted",
+      "name": "하나코",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "033",
+      "status": "extracted",
+      "name": "하나에",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "034",
+      "status": "extracted",
+      "name": "아이리",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "035",
+      "status": "extracted",
+      "name": "히나",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "036",
+      "status": "extracted",
+      "name": "카린",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "037",
+      "status": "extracted",
+      "name": "후우카",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "038",
+      "status": "extracted",
+      "name": "주리",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "039",
+      "status": "extracted",
+      "name": "히요리",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "040",
+      "status": "extracted",
+      "name": "시구레",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "041",
+      "status": "extracted",
+      "name": "카스미",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "042",
+      "status": "extracted",
+      "name": "시로코(라이딩)",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "043",
+      "status": "extracted",
+      "name": "모에(수영복)",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "044",
+      "status": "extracted",
+      "name": "츠쿠요",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "045",
+      "status": "extracted",
+      "name": "사야(사복)",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "046",
+      "status": "extracted",
+      "name": "나구사(수영복)",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "047",
+      "status": "extracted",
+      "name": "마리나(치파오)",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "048",
+      "status": "extracted",
+      "name": "시구레(온천)",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "049",
+      "status": "extracted",
+      "name": "이즈미(새해)",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "050",
+      "status": "extracted",
+      "name": "하루카(새해)",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "051",
+      "status": "extracted",
+      "name": "세리카(새해)",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "052",
+      "status": "extracted",
+      "name": "모에",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "053",
+      "status": "extracted",
+      "name": "사키(수영복)",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "054",
+      "status": "extracted",
+      "name": "미모리(수영복)",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "055",
+      "status": "extracted",
+      "name": "피나(가이드)",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "056",
+      "status": "extracted",
+      "name": "이치카",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "057",
+      "status": "extracted",
+      "name": "메구",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "058",
+      "status": "extracted",
+      "name": "네루(교복)",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "059",
+      "status": "extracted",
+      "name": "노아",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "060",
+      "status": "extracted",
+      "name": "하스미",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "061",
+      "status": "extracted",
+      "name": "아카네",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "062",
+      "status": "extracted",
+      "name": "노노미",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "063",
+      "status": "extracted",
+      "name": "렌게(수영복)",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "064",
+      "status": "extracted",
+      "name": "마리",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "065",
+      "status": "extracted",
+      "name": "아야네",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "066",
+      "status": "extracted",
+      "name": "하레",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "067",
+      "status": "extracted",
+      "name": "시즈코",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "068",
+      "status": "extracted",
+      "name": "츠바키",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "069",
+      "status": "extracted",
+      "name": "모미지",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "070",
+      "status": "extracted",
+      "name": "세리카",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "071",
+      "status": "extracted",
+      "name": "우타하",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "072",
+      "status": "extracted",
+      "name": "키리노",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "073",
+      "status": "extracted",
+      "name": "치세",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "074",
+      "status": "extracted",
+      "name": "무츠키",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "075",
+      "status": "extracted",
+      "name": "준코",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "076",
+      "status": "extracted",
+      "name": "모모이",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "077",
+      "status": "extracted",
+      "name": "유우카",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "078",
+      "status": "extracted",
+      "name": "토키(무장)",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "079",
+      "status": "extracted",
+      "name": "토모에",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "080",
+      "status": "extracted",
+      "name": "아스나",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "081",
+      "status": "extracted",
+      "name": "세리나",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "082",
+      "status": "extracted",
+      "name": "아야네(수영복)",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "083",
+      "status": "extracted",
+      "name": "시미코",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "084",
+      "status": "extracted",
+      "name": "요시미",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "085",
+      "status": "extracted",
+      "name": "츠루기(수영복)",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "086",
+      "status": "extracted",
+      "name": "코타마",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "087",
+      "status": "extracted",
+      "name": "피나",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "088",
+      "status": "extracted",
+      "name": "노도카",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "089",
+      "status": "extracted",
+      "name": "스즈미",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "090",
+      "status": "extracted",
+      "name": "코하루(수영복)",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "091",
+      "status": "extracted",
+      "name": "하스미(체육복)",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "092",
+      "status": "extracted",
+      "name": "준코(새해)",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "093",
+      "status": "extracted",
+      "name": "유즈(메이드)",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "094",
+      "status": "extracted",
+      "name": "코토리",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "095",
+      "status": "extracted",
+      "name": "미유(수영복)",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "096",
+      "status": "extracted",
+      "name": "미치루",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "097",
+      "status": "extracted",
+      "name": "이즈미(수영복)",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "098",
+      "status": "extracted",
+      "name": "치나츠",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "099",
+      "status": "extracted",
+      "name": "하루카",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "100",
+      "status": "extracted",
+      "name": "카린(교복)",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "101",
+      "status": "extracted",
+      "name": "히비키(응원단)",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "102",
+      "status": "extracted",
+      "name": "아츠코(수영복)",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "103",
+      "status": "extracted",
+      "name": "후부키",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "104",
+      "status": "extracted",
+      "name": "오토기",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "105",
+      "status": "extracted",
+      "name": "아오바",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    },
+    {
+      "id": "106",
+      "status": "extracted",
+      "name": "치아키(수영복)",
+      "attempts": 1,
+      "frames": [
+        "detail"
+      ]
+    }
+  ]
+}

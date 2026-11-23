@@ -1,0 +1,182 @@
+{
+  "name": "리오(무장)",
+  "level": 68,
+  "rarity_stars": 5,
+  "ex_skill_level": 3,
+  "normal_skill_level": 4,
+  "passive_skill_level": 4,
+  "sub_skill_level": 4,
+  "bond_rank": 13,
+  "unique_weapon_stars": 1,
+  "unique_weapon_level": null,
+  "combat_role": "STRIKER",
+  "is_pinned": true,
+  "name_match": {
+    "status": "exact",
+    "cleaned": "리오(무장)",
+    "candidate": "리오(무장)",
+    "distance": 0,
+    "margin": 4
+  },
+  "identity": {
+    "base_name": "리오",
+    "outfit": "무장",
+    "outfit_key": "armed",
+    "is_outfit_variant": true,
+    "is_distinct_character": false
+  },
+  "stats": {
+    "max_hp": 33907,
+    "attack": 3444,
+    "defense": 85,
+    "healing": 4848
+  },
+  "exp": {
+    "current": 41,
+    "required": 21790
+  },
+  "loadout": {
+    "tactic_role": "딜러",
+    "position": "MIDDLE",
+    "attack_type": "폭발",
+    "armor_type": "특수장갑",
+    "weapon_class": "HG"
+  },
+  "terrain": {
+    "urban": null,
+    "outdoor": null,
+    "indoor": null
+  },
+  "badges": {
+    "basic_info_tab": false,
+    "level_up_tab": false,
+    "mystic_release_tab": false,
+    "skill_growth": false,
+    "weapon_growth": false,
+    "equipment_growth": false
+  },
+  "locks": {
+    "ability_unlock_locked": true,
+    "simsang_bloom_locked": true
+  },
+  "reference": {
+    "source": "schaledb",
+    "id": 10133,
+    "school": "Millennium",
+    "club": "TheSeminar",
+    "school_year": "3학년",
+    "age": "17세",
+    "birthday": "6/6",
+    "height": "171cm",
+    "full_name": "츠카츠키 리오",
+    "hobby": "디자인",
+    "designer": "Paruru",
+    "illustrator": "koo3473",
+    "voice": "Lynn",
+    "base_star_grade": 3,
+    "weapon_type": "HG"
+  },
+  "fixed_meta": {
+    "source": "dictionary",
+    "dictionary_id": 10133,
+    "equipment_slots": [
+      "Hat",
+      "Hairpin",
+      "Watch"
+    ],
+    "potential_material": "디스코 콜간테 조각",
+    "skill_materials": [
+      "기초 전술 교육 BD\n(밀레니엄)",
+      "디스코 콜간테 조각",
+      "일반 전술 교육 BD\n(밀레니엄)",
+      "파손된 디스코 콜간테",
+      "보이니치 사본 페이지",
+      "상급 전술 교육 BD\n(밀레니엄)",
+      "수리된 디스코 콜간테",
+      "훼손된 보이니치 사본",
+      "최상급 전술 교육 BD\n(밀레니엄)",
+      "온전한 디스코 콜간테",
+      "편집된 보이니치 사본",
+      "기초 기술 노트\n(밀레니엄)",
+      "일반 기술 노트\n(밀레니엄)",
+      "상급 기술 노트\n(밀레니엄)",
+      "최상급 기술 노트\n(밀레니엄)"
+    ],
+    "weapon_terrain": "Street",
+    "weapon_terrain_bonus": 1,
+    "terrain_base": {
+      "urban": 4,
+      "outdoor": 2,
+      "indoor": 0
+    }
+  },
+  "skill_locked": {
+    "ex": false,
+    "basic": false,
+    "passive": false,
+    "sub": false
+  },
+  "equipment": [
+    {
+      "slot": 1,
+      "slot_kind": "standard",
+      "equipped": true,
+      "type": null,
+      "item_name": null,
+      "tier": null,
+      "level": null
+    },
+    {
+      "slot": 2,
+      "slot_kind": "standard",
+      "equipped": true,
+      "type": "Hairpin",
+      "item_name": "Bat Hairpin",
+      "tier": 6,
+      "level": 50,
+      "icon_match_error": 18.047272727272727
+    },
+    {
+      "slot": 3,
+      "slot_kind": "standard",
+      "equipped": true,
+      "type": null,
+      "item_name": null,
+      "tier": null,
+      "level": 50
+    },
+    {
+      "slot": 4,
+      "slot_kind": "unique_gear",
+      "equipped": false,
+      "type": null,
+      "item_name": null,
+      "tier": null,
+      "level": null
+    }
+  ],
+  "source": "profile arrow #1",
+  "raw_ocr": {
+    "basic": "Lv.4",
+    "bond": "13",
+    "equipment_1_level": "mioiso™ | miouso™ | mioiso™ | Amide | tty 3S O = | los O™",
+    "equipment_1_tier": "Te\"",
+    "equipment_2_level": "Nokia | Rokies | lily SO | fly SO” | v 50:",
+    "equipment_2_tier": "16 »",
+    "equipment_3_level": "WuIso | lfut5SO | livI50",
+    "equipment_3_tier": "ré/\"",
+    "equipment_4_state": "EMPTY",
+    "ex": "Lv.3",
+    "exp": "41/21790",
+    "level": "Lv68",
+    "name": "'리오(무장)     ory",
+    "passive": "Lv.4",
+    "stat_attack": "공격력 3444",
+    "stat_defense": "방어력 85",
+    "stat_healing": "지유력 4848",
+    "stat_hp": "죄대체력 33907",
+    "sub": "Lv4",
+    "weapon_level": "L",
+    "weapon_level_retry": "gV230)"
+  }
+}
