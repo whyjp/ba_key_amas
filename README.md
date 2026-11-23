@@ -105,6 +105,26 @@ Workspace crates: `core` (schema, OCR trait), `names`, `pixels`, `equipment`,
 The Go program below is kept only until the Rust scan and watcher have been
 verified live against the game; it is superseded.
 
+## Trying the input path without the game
+
+`baocr --doctor` reads the game window, DPI, monitors (including dead space in the virtual desktop), the
+game's and the add-on's elevation and the focus, and prints OK/경고 lines. It sends no input.
+
+Two examples in `rust/crates/hcu/examples` exercise the in-process input against a harmless window instead
+of the game. They are **not** run by `cargo test`, because `input_selftest` moves the real mouse:
+
+```
+cargo build -p baocr-hcu --examples
+cargo run -p baocr-hcu --example input_selftest     # starts input_target itself
+```
+
+`input_target` is a plain window titled "HCU Test Target" (coloured quadrants, a white marker square) that
+logs the screen position of every click and wheel turn it receives. `input_selftest` takes a screenshot and
+a zoom, clicks at three points, turns the wheel, and checks that the target saw each event where it was aimed.
+It also checks the refusals, which must reach nothing: the window moved after the frame, the point covered by
+another window, and a point on no monitor. Each check prints PASS/FAIL and the exit code is 1 on any FAIL.
+Every input call is also written to `%APPDATA%\baocr\input.log` (the selftest uses `%TEMP%\hcu-selftest-input.log`).
+
 ## Requirements and limits
 
 - Game in **4:3, windowed**, SDR. The window position is found automatically

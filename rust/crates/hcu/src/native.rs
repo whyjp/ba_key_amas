@@ -11,15 +11,21 @@
 //! the screenshot is the whole virtual desktop delivered at no more than 1366x768; zoom regions and
 //! click points are in that delivered frame; a click point maps to the native pixel
 //! `(u + 0.5) * scale - 0.5` and is sent as a `SendInput` absolute coordinate on the virtual desktop;
-//! a wheel notch is 120 units. Input is refused (nothing is sent) when the desktop's size is no longer
-//! the one the last frame was taken at: the caller takes a fresh screenshot and repeats.
+//! a wheel notch is 120 units.
+//!
+//! Input is guarded here, at the boundary, so no caller has to remember to (see `docs/hcu-native.md`):
+//! nothing is sent when the frame is stale (desktop size or the windows over the point changed since
+//! the screenshot), when no monitor shows the point, or when the window under it is not the intended
+//! one. Input that stopped half way is answered `effect_unknown` and is never repeated.
+use crate::audit::{iso_utc, AuditSink};
+use crate::guard::{failure_record, same_over, Refusal, SendError, WinInfo};
 use crate::hcu::Runner;
 use anyhow::{anyhow, bail, Result};
 use image::{imageops, RgbImage};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant, SystemTime};
 
 const MAX_DELIVERED: (u32, u32) = (1366, 768);
 const MIN_ZOOM_SIDE: f64 = 8.0;
@@ -106,32 +112,101 @@ pub trait Desktop: Send + Sync {
     fn bounds(&self) -> (i32, i32, u32, u32);
     /// The pixels of a rectangle of the virtual desktop (absolute coordinates).
     fn grab(&self, x: i32, y: i32, w: u32, h: u32) -> Result<RgbImage>;
-    /// Move the pointer to a desktop pixel and press/release the left button.
-    fn click(&self, x: i32, y: i32) -> Result<()>;
+    /// Move the pointer to a desktop pixel and press/release the left button. An `Err` never
+    /// leaves the button down (best effort) and says whether anything was already sent.
+    fn click(&self, x: i32, y: i32) -> Result<(), SendError>;
     /// Move the pointer to a desktop pixel and turn the wheel by `notches` (positive = up).
-    fn wheel(&self, x: i32, y: i32, notches: i32) -> Result<()>;
+    fn wheel(&self, x: i32, y: i32, notches: i32) -> Result<(), SendError>;
     /// `(ref, title, active)` of the visible top-level windows with a title.
     fn windows(&self) -> Vec<(String, String, bool)>;
     fn activate(&self, window_ref: &str) -> Result<()>;
+    /// The visible top-level windows of other programs, front to back.
+    fn layout(&self) -> Vec<WinInfo>;
+    /// The top-level window that receives a click at a desktop pixel (own windows included, flagged).
+    fn window_at(&self, x: i32, y: i32) -> Option<WinInfo>;
+    /// Whether a monitor shows this desktop pixel (the virtual desktop can have dead space).
+    fn monitor_contains(&self, x: i32, y: i32) -> bool;
 }
 
-/// Answers the CLI's requests from a [`Desktop`].
+/// After input: how long to wait for the screen to be still again.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Settle {
+    /// Longest wait; zero turns waiting off.
+    pub cap: Duration,
+    /// Time between the captures that are compared.
+    pub step: Duration,
+}
+
+impl Settle {
+    pub const OFF: Settle = Settle { cap: Duration::ZERO, step: Duration::from_millis(60) };
+
+    /// 600 ms unless `BAOCR_HCU_SETTLE_MS` says otherwise (0 = do not wait).
+    pub fn from_env() -> Self {
+        let ms = std::env::var("BAOCR_HCU_SETTLE_MS").ok().and_then(|v| v.trim().parse::<u64>().ok()).unwrap_or(600);
+        Settle { cap: Duration::from_millis(ms), ..Settle::OFF }
+    }
+}
+
+/// The frame the last screenshot showed, which coordinates are relative to.
+#[derive(Clone)]
+struct Frame {
+    native: (u32, u32),
+    layout: Vec<WinInfo>,
+}
+
+/// Where an input point landed once it passed the guards.
+struct Located {
+    native: (i32, i32),
+    window: WinInfo,
+}
+
+/// Answers the CLI's requests from a [`Desktop`], refusing input that no longer matches what was seen.
 pub struct NativeRunner<D: Desktop> {
     desktop: D,
     state: Mutex<State>,
+    /// Exact title of the only window input may reach; None = whichever window the frame showed there.
+    target: Option<String>,
+    settle: Settle,
+    audit: Option<Box<dyn AuditSink>>,
 }
 
 #[derive(Default)]
 struct State {
-    /// Native size of the desktop at the last screenshot: input is refused when it differs.
-    frame_native: Option<(u32, u32)>,
+    frame: Option<Frame>,
     images: HashMap<String, RgbImage>,
     next: u64,
 }
 
+/// Attempts at a screenshot while windows move under it.
+const CAPTURE_ATTEMPTS: u32 = 3;
+
+/// How an input request ended.
+struct Outcome<'a> {
+    code: &'a str,
+    hint: &'a str,
+    emitted: bool,
+}
+
 impl<D: Desktop> NativeRunner<D> {
+    /// No target window, no settling, no audit log: the bare protocol with the frame guards.
     pub fn new(desktop: D) -> Self {
-        Self { desktop, state: Mutex::new(State::default()) }
+        Self { desktop, state: Mutex::new(State::default()), target: None, settle: Settle::OFF, audit: None }
+    }
+
+    /// Input is only sent when the window under the point has exactly this title.
+    pub fn with_target(mut self, title: &str) -> Self {
+        self.target = Some(title.to_string());
+        self
+    }
+
+    pub fn with_settle(mut self, settle: Settle) -> Self {
+        self.settle = settle;
+        self
+    }
+
+    pub fn with_audit(mut self, sink: Box<dyn AuditSink>) -> Self {
+        self.audit = Some(sink);
+        self
     }
 
     fn store(&self, img: RgbImage) -> String {
@@ -151,68 +226,199 @@ impl<D: Desktop> NativeRunner<D> {
         (w, h)
     }
 
+    fn frame(&self) -> Option<Frame> {
+        self.state.lock().unwrap().frame.clone()
+    }
+
     fn screenshot(&self) -> Result<String> {
-        let (x, y, w, h) = self.desktop.bounds();
-        let img = self.desktop.grab(x, y, w, h)?;
-        let (dw, dh) = delivered_size((w, h));
-        let delivered = if (dw, dh) == (w, h) { img } else { imageops::resize(&img, dw, dh, imageops::FilterType::CatmullRom) };
-        self.state.lock().unwrap().frame_native = Some((w, h));
-        let id = self.store(delivered);
-        Ok(json!({"ok": true, "images": [id], "screen": {"width": dw, "height": dh}}).to_string())
+        // a window that moves while the pixels are read would pair them with the wrong layout
+        for attempt in 1..=CAPTURE_ATTEMPTS {
+            let (before, bounds) = (self.desktop.layout(), self.desktop.bounds());
+            let (x, y, w, h) = bounds;
+            let img = self.desktop.grab(x, y, w, h)?;
+            if self.desktop.bounds() != bounds || !same_over(&before, &self.desktop.layout(), [x, y, x + w as i32, y + h as i32]) {
+                if attempt < CAPTURE_ATTEMPTS {
+                    std::thread::sleep(Duration::from_millis(25));
+                }
+                continue;
+            }
+            let (dw, dh) = delivered_size((w, h));
+            let delivered = if (dw, dh) == (w, h) { img } else { imageops::resize(&img, dw, dh, imageops::FilterType::CatmullRom) };
+            self.state.lock().unwrap().frame = Some(Frame { native: (w, h), layout: before });
+            let id = self.store(delivered);
+            return Ok(json!({"ok": true, "images": [id], "screen": {"width": dw, "height": dh}}).to_string());
+        }
+        bail!("desktop_layout_unstable: windows kept moving during every screenshot attempt")
     }
 
     fn zoom(&self, region: [f64; 4]) -> Result<String> {
         let native = self.native();
-        if self.state.lock().unwrap().frame_native != Some(native) {
+        let Some(frame) = self.frame().filter(|f| f.native == native) else {
             return Ok(failure("gui_frame_stale", "the desktop's size changed since the last screenshot; take a new one"));
-        }
+        };
         let g = match zoom_geometry(region, native) {
             Ok(g) => g,
             Err(e) => return Ok(failure("invalid_zoom_region", &e.to_string())),
         };
         let (ox, oy, _, _) = self.desktop.bounds();
-        let crop = self.desktop.grab(ox + g.native.0, oy + g.native.1, g.native.2 as u32, g.native.3 as u32)?;
+        let (left, top) = (ox + g.native.0, oy + g.native.1);
+        let area = [left, top, left + g.native.2, top + g.native.3];
+        let before = self.desktop.layout();
+        if !same_over(&frame.layout, &before, area) {
+            return Ok(failure("gui_frame_stale", "the windows over the zoom region changed since the frame its coordinates came from; take a new screenshot"));
+        }
+        let crop = self.desktop.grab(left, top, g.native.2 as u32, g.native.3 as u32)?;
+        if !same_over(&before, &self.desktop.layout(), area) {
+            return Ok(failure("gui_frame_stale", "the windows over the zoom region changed during the capture; take a new screenshot"));
+        }
         let img = if g.size == crop.dimensions() { crop } else { imageops::resize(&crop, g.size.0, g.size.1, imageops::FilterType::CatmullRom) };
         let id = self.store(img);
         let (sx, sy) = (g.size.0 as f64 / (g.region[2] - g.region[0]), g.size.1 as f64 / (g.region[3] - g.region[1]));
         Ok(json!({"ok": true, "images": [id], "evidence": {"zoom": {"region": g.region, "scale_x": sx, "scale_y": sy}}}).to_string())
     }
 
-    /// Where a frame point is on the desktop, or None when the frame is stale.
-    fn locate(&self, x: f64, y: f64) -> Option<(i32, i32)> {
+    /// Everything that must hold right before input at a frame point: the frame still describes the
+    /// desktop, a monitor shows the pixel, nothing was stacked over it since, and the window that
+    /// receives the click is the intended one. The add-on's own windows never qualify: they are
+    /// click-through, so a click that would land on one is not aimed at the game.
+    fn guard(&self, frame: &Frame, x: f64, y: f64) -> Result<Located, Refusal> {
         let (ox, oy, w, h) = self.desktop.bounds();
-        if self.state.lock().unwrap().frame_native != Some((w, h)) {
-            return None;
+        if frame.native != (w, h) {
+            return Err(Refusal::Stale("the desktop's size changed since the last screenshot".into()));
         }
         let (dw, dh) = delivered_size((w, h));
         if !(x.is_finite() && y.is_finite() && x >= 0.0 && y >= 0.0 && x <= dw as f64 - 1.0 && y <= dh as f64 - 1.0) {
-            return None;
+            return Err(Refusal::Stale("the point is outside the last frame".into()));
         }
-        Some((ox + to_native(x, dw, w).round() as i32, oy + to_native(y, dh, h).round() as i32))
+        let (px, py) = (ox + to_native(x, dw, w).round() as i32, oy + to_native(y, dh, h).round() as i32);
+        if !self.desktop.monitor_contains(px, py) {
+            return Err(Refusal::OffMonitor);
+        }
+        if !same_over(&frame.layout, &self.desktop.layout(), [px, py, px + 1, py + 1]) {
+            return Err(Refusal::Stale("the windows over the point changed since the frame its coordinates came from".into()));
+        }
+        let Some(window) = self.desktop.window_at(px, py) else {
+            return Err(Refusal::WrongWindow("no window receives a click at that point".into()));
+        };
+        if window.own {
+            return Err(Refusal::WrongWindow("the add-on's own window is under the point".into()));
+        }
+        if let Some(title) = &self.target {
+            if &window.title != title {
+                return Err(Refusal::WrongWindow(format!("the window under the point is \"{}\", not \"{title}\"", window.title)));
+            }
+        }
+        Ok(Located { native: (px, py), window })
     }
 
     fn input(&self, actions: &[Action]) -> Result<String> {
+        let at = |a: &Action| match a {
+            Action::Click { x, y } | Action::Scroll { x, y, .. } => (*x, *y),
+        };
+        let started = Instant::now();
+        let Some(frame) = self.frame() else {
+            let hint = Refusal::Stale("no screenshot has been taken yet".into()).hint();
+            return Ok(self.finish(actions, &[], 0, Some(Outcome { code: "gui_frame_stale", hint: &hint, emitted: false }), started));
+        };
         // every point is checked before anything is sent
-        let mut points = Vec::new();
+        let mut located: Vec<Located> = Vec::new();
         for a in actions {
-            let (x, y) = match a {
-                Action::Click { x, y } | Action::Scroll { x, y, .. } => (*x, *y),
-            };
-            match self.locate(x, y) {
-                Some(p) => points.push(p),
-                None => return Ok(failure("gui_frame_stale", "the point is outside the last frame or the desktop changed; take a new screenshot")),
+            match self.guard(&frame, at(a).0, at(a).1) {
+                Ok(l) => located.push(l),
+                Err(r) => return Ok(self.finish(actions, &located, 0, Some(Outcome { code: r.code(), hint: &r.hint(), emitted: false }), started)),
             }
         }
         let mut done = 0;
-        for (a, (px, py)) in actions.iter().zip(points) {
-            match a {
-                Action::Click { .. } => self.desktop.click(px, py)?,
-                Action::Scroll { delta, .. } => self.desktop.wheel(px, py, -*delta)?,
+        let mut stop: Option<(&str, String, bool)> = None;
+        for (i, a) in actions.iter().enumerate() {
+            // the first point was checked a moment ago; later ones may follow a click that changed the screen
+            if i > 0 {
+                if let Err(r) = self.guard(&frame, at(a).0, at(a).1) {
+                    stop = Some((r.code(), r.hint(), false));
+                    break;
+                }
+            }
+            let (px, py) = located[i].native;
+            let sent = match a {
+                Action::Click { .. } => self.desktop.click(px, py),
+                Action::Scroll { delta, .. } => self.desktop.wheel(px, py, -*delta),
+            };
+            if let Err(e) = sent {
+                stop = Some(("input_failed", format!("{:#}", e.error), e.emitted));
+                break;
             }
             done += 1;
         }
-        let (dw, dh) = delivered_size(self.native());
-        Ok(json!({"ok": true, "input_emitted": done > 0, "completed": done, "screen": {"width": dw, "height": dh}}).to_string())
+        if let Some((code, hint, emitted)) = stop {
+            // Some events were sent and the rest were not (or one failed half way): the effect on the
+            // game is unknown, so the caller must look at the screen, not repeat the input.
+            if done > 0 || emitted {
+                let hint = format!("{code}: {hint}; {done} of {} actions completed", actions.len());
+                return Ok(self.finish(actions, &located, done, Some(Outcome { code: "effect_unknown", hint: &hint, emitted: true }), started));
+            }
+            return Ok(self.finish(actions, &located, done, Some(Outcome { code, hint: &hint, emitted: false }), started));
+        }
+        self.wait_still(located.first().map(|l| l.window.rect));
+        Ok(self.finish(actions, &located, done, None, started))
+    }
+
+    /// The answer record, and the audit line for it.
+    fn finish(&self, actions: &[Action], located: &[Located], done: usize, failed: Option<Outcome>, started: Instant) -> String {
+        let kind = match actions {
+            [Action::Click { .. }] => "click",
+            a if a.iter().all(|x| matches!(x, Action::Scroll { .. })) => "scroll",
+            _ => "batch",
+        };
+        if let Some(sink) = &self.audit {
+            let first = located.first();
+            let requested = actions.first().map(|a| match a {
+                Action::Click { x, y } | Action::Scroll { x, y, .. } => json!([x, y]),
+            });
+            sink.record(&json!({
+                "t": iso_utc(SystemTime::now()),
+                "kind": kind,
+                "actions": actions.len(),
+                "frame": requested,
+                "native": first.map(|l| json!([l.native.0, l.native.1])),
+                "window": first.map(|l| json!({"title": l.window.title.chars().take(80).collect::<String>(), "class": l.window.class})),
+                "code": failed.as_ref().map_or("ok", |o| o.code),
+                "input_emitted": failed.as_ref().map_or(done > 0, |o| o.emitted),
+                "completed": done,
+                "ms": started.elapsed().as_millis() as u64,
+            }));
+        }
+        match failed {
+            Some(o) => failure_record(o.code, o.hint, o.emitted, done),
+            None => {
+                let (dw, dh) = delivered_size(self.native());
+                json!({"ok": true, "input_emitted": done > 0, "completed": done, "screen": {"width": dw, "height": dh}}).to_string()
+            }
+        }
+    }
+
+    /// Returns once the window the input went to has stopped changing, or after the cap: what
+    /// the game shows right after a click is often still moving, and the caller reads it next.
+    fn wait_still(&self, area: Option<[i32; 4]>) {
+        let (Some(area), true) = (area, self.settle.cap > Duration::ZERO) else { return };
+        let (ox, oy, w, h) = self.desktop.bounds();
+        let (x0, y0) = (area[0].max(ox), area[1].max(oy));
+        let (x1, y1) = (area[2].min(ox + w as i32), area[3].min(oy + h as i32));
+        if x1 <= x0 || y1 <= y0 {
+            return;
+        }
+        let started = Instant::now();
+        let mut prev: Option<RgbImage> = None;
+        loop {
+            std::thread::sleep(self.settle.step);
+            if started.elapsed() >= self.settle.cap {
+                return;
+            }
+            let Ok(cur) = self.desktop.grab(x0, y0, (x1 - x0) as u32, (y1 - y0) as u32) else { return };
+            if prev.as_ref().is_some_and(|p| p.dimensions() == cur.dimensions() && p.as_raw() == cur.as_raw()) {
+                return;
+            }
+            prev = Some(cur);
+        }
     }
 
     fn apps(&self) -> String {
@@ -274,6 +480,12 @@ mod win {
         bottom: i32,
     }
     #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct Point {
+        x: i32,
+        y: i32,
+    }
+    #[repr(C)]
     struct MouseInput {
         dx: i32,
         dy: i32,
@@ -319,6 +531,11 @@ mod win {
         fn IsWindow(hwnd: isize) -> i32;
         fn GetWindowRect(hwnd: isize, r: *mut Rect) -> i32;
         fn GetWindowThreadProcessId(hwnd: isize, pid: *mut u32) -> u32;
+        fn GetClassNameW(hwnd: isize, buf: *mut u16, max: i32) -> i32;
+        fn GetWindowLongW(hwnd: isize, index: i32) -> i32;
+        fn WindowFromPoint(p: Point) -> isize;
+        fn GetAncestor(hwnd: isize, flags: u32) -> isize;
+        fn MonitorFromPoint(p: Point, flags: u32) -> isize;
         fn AttachThreadInput(from: u32, to: u32, attach: i32) -> i32;
         fn keybd_event(vk: u8, scan: u8, flags: u32, extra: usize);
     }
@@ -336,6 +553,10 @@ mod win {
     extern "system" {
         fn GetCurrentThreadId() -> u32;
     }
+    #[link(name = "dwmapi")]
+    extern "system" {
+        fn DwmGetWindowAttribute(hwnd: isize, attribute: u32, value: *mut c_void, size: u32) -> i32;
+    }
 
     const SRCCOPY_CAPTUREBLT: u32 = 0x00CC_0020 | 0x4000_0000;
     const MOVE: u32 = 0x0001;
@@ -347,6 +568,12 @@ mod win {
     const SW_RESTORE: i32 = 9;
     const VK_MENU: u8 = 0x12;
     const KEYEVENTF_KEYUP: u32 = 2;
+    const GWL_EXSTYLE: i32 = -20;
+    const WS_EX_TRANSPARENT: u32 = 0x20;
+    const WS_EX_LAYERED: u32 = 0x0008_0000;
+    const GA_ROOT: u32 = 2;
+    const DWMWA_CLOAKED: u32 = 14;
+    const RELEASE_TRIES: u32 = 3;
 
     /// The real desktop.
     pub struct WinDesktop;
@@ -366,6 +593,40 @@ mod win {
                 bail!("SendInput sent {sent} of 1 events (the desktop may be locked or the game runs elevated)");
             }
             Ok(())
+        }
+
+        /// Release the left button, trying again: a button left down would keep dragging in the game.
+        fn release_left(&self) -> Result<()> {
+            let mut last = Ok(());
+            for _ in 0..RELEASE_TRIES {
+                last = self.mouse(LEFT_UP, 0, 0, 0);
+                if last.is_ok() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            last
+        }
+
+        fn info(&self, hwnd: isize) -> Option<WinInfo> {
+            unsafe {
+                let mut r = Rect { left: 0, top: 0, right: 0, bottom: 0 };
+                if GetWindowRect(hwnd, &mut r) == 0 {
+                    return None;
+                }
+                let (mut title, mut class) = ([0u16; 256], [0u16; 256]);
+                let tn = GetWindowTextW(hwnd, title.as_mut_ptr(), 256).max(0) as usize;
+                let cn = GetClassNameW(hwnd, class.as_mut_ptr(), 256).max(0) as usize;
+                let mut pid = 0u32;
+                GetWindowThreadProcessId(hwnd, &mut pid);
+                Some(WinInfo {
+                    hwnd,
+                    rect: [r.left, r.top, r.right, r.bottom],
+                    class: String::from_utf16_lossy(&class[..cn]),
+                    title: String::from_utf16_lossy(&title[..tn]),
+                    own: pid == std::process::id(),
+                })
+            }
         }
 
         fn move_to(&self, x: i32, y: i32) -> Result<()> {
@@ -412,19 +673,16 @@ mod win {
             }
         }
 
-        fn click(&self, x: i32, y: i32) -> Result<()> {
-            self.move_to(x, y)?;
-            self.mouse(LEFT_DOWN, 0, 0, 0)?;
-            if let Err(e) = self.mouse(LEFT_UP, 0, 0, 0) {
-                let _ = self.mouse(LEFT_UP, 0, 0, 0); // never leave the button down
-                return Err(e);
-            }
-            Ok(())
+        fn click(&self, x: i32, y: i32) -> Result<(), SendError> {
+            self.move_to(x, y).map_err(SendError::not_sent)?;
+            // from here on the pointer has moved: any failure leaves an input the player can see
+            self.mouse(LEFT_DOWN, 0, 0, 0).map_err(SendError::sent)?;
+            self.release_left().map_err(SendError::sent)
         }
 
-        fn wheel(&self, x: i32, y: i32, notches: i32) -> Result<()> {
-            self.move_to(x, y)?;
-            self.mouse(WHEEL, 0, 0, (notches * 120) as u32)?;
+        fn wheel(&self, x: i32, y: i32, notches: i32) -> Result<(), SendError> {
+            self.move_to(x, y).map_err(SendError::not_sent)?;
+            self.mouse(WHEEL, 0, 0, (notches * 120) as u32).map_err(SendError::sent)?;
             std::thread::sleep(WHEEL_GAP);
             Ok(())
         }
@@ -450,6 +708,47 @@ mod win {
                 EnumWindows(each, &mut list as *mut _ as isize);
             }
             list
+        }
+
+        fn layout(&self) -> Vec<WinInfo> {
+            unsafe extern "system" fn each(hwnd: isize, out: isize) -> i32 {
+                let list = &mut *(out as *mut Vec<isize>);
+                if IsWindowVisible(hwnd) != 0 && IsIconic(hwnd) == 0 {
+                    list.push(hwnd);
+                }
+                1
+            }
+            let mut all: Vec<isize> = Vec::new();
+            unsafe {
+                EnumWindows(each, &mut all as *mut _ as isize);
+            }
+            all.into_iter()
+                .filter(|&hwnd| unsafe {
+                    // hidden by the shell (other virtual desktops, suspended apps)
+                    let mut cloaked = 0u32;
+                    DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &mut cloaked as *mut u32 as *mut c_void, 4);
+                    // click-through windows cannot receive a click, so they cannot change what one hits
+                    let ex = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
+                    cloaked == 0 && ex & (WS_EX_LAYERED | WS_EX_TRANSPARENT) != (WS_EX_LAYERED | WS_EX_TRANSPARENT)
+                })
+                .filter_map(|hwnd| self.info(hwnd))
+                .filter(|w| !w.own && w.rect[2] > w.rect[0] && w.rect[3] > w.rect[1])
+                .collect()
+        }
+
+        fn window_at(&self, x: i32, y: i32) -> Option<WinInfo> {
+            unsafe {
+                let hit = WindowFromPoint(Point { x, y });
+                if hit == 0 {
+                    return None;
+                }
+                let root = GetAncestor(hit, GA_ROOT);
+                self.info(if root == 0 { hit } else { root })
+            }
+        }
+
+        fn monitor_contains(&self, x: i32, y: i32) -> bool {
+            unsafe { MonitorFromPoint(Point { x, y }, 0) != 0 } // MONITOR_DEFAULTTONULL
         }
 
         fn activate(&self, window_ref: &str) -> Result<()> {
@@ -488,6 +787,7 @@ mod win {
 mod tests {
     use super::*;
     use image::Rgb;
+    use std::sync::Arc;
 
     #[test]
     fn delivery_never_enlarges_and_fits_1366_by_768() {
@@ -527,14 +827,43 @@ mod tests {
         assert!(parse_actions(r#"{"actions":[{"type":"key"}]}"#).is_err());
     }
 
-    /// A 2000x1000 desktop whose left half is red and right half green; records what is sent.
+    /// A 2000x1000 desktop whose left half is red and right half green, with the game window over
+    /// all of it; records what is sent.
     struct Fake {
         log: Mutex<Vec<String>>,
         size: Mutex<(u32, u32)>,
+        /// every window, front to back, the add-on's own included
+        wins: Mutex<Vec<WinInfo>>,
+        /// the monitors' rectangles; empty means the whole desktop is shown
+        monitors: Mutex<Vec<[i32; 4]>>,
+        /// the nth click (0 based) fails; whether it had already sent something
+        fail_click: Mutex<Option<(usize, bool)>>,
+        /// a click replaces the window list (a popup opening)
+        on_click: Mutex<Option<Vec<WinInfo>>>,
+        /// every grab differs from the one before (the screen never settles)
+        animate: Mutex<bool>,
+        clicks: Mutex<usize>,
+        grabs: Mutex<u8>,
+    }
+    fn win(hwnd: isize, title: &str, rect: [i32; 4]) -> WinInfo {
+        WinInfo { hwnd, rect, class: "UnityWndClass".into(), title: title.into(), own: false }
     }
     impl Fake {
         fn new() -> Self {
-            Fake { log: Mutex::new(Vec::new()), size: Mutex::new((2000, 1000)) }
+            Fake {
+                log: Mutex::new(Vec::new()),
+                size: Mutex::new((2000, 1000)),
+                wins: Mutex::new(vec![win(13, "Blue Archive", [0, 0, 2000, 1000])]),
+                monitors: Mutex::new(Vec::new()),
+                fail_click: Mutex::new(None),
+                on_click: Mutex::new(None),
+                animate: Mutex::new(false),
+                clicks: Mutex::new(0),
+                grabs: Mutex::new(0),
+            }
+        }
+        fn sent(&self) -> Vec<String> {
+            self.log.lock().unwrap().iter().filter(|l| l.starts_with("click") || l.starts_with("wheel")).cloned().collect()
         }
     }
     impl Desktop for &Fake {
@@ -544,13 +873,33 @@ mod tests {
         }
         fn grab(&self, x: i32, y: i32, w: u32, h: u32) -> Result<RgbImage> {
             self.log.lock().unwrap().push(format!("grab {x} {y} {w} {h}"));
-            Ok(RgbImage::from_fn(w, h, |px, _| if (x as u32 + px) < 1000 { Rgb([200, 0, 0]) } else { Rgb([0, 200, 0]) }))
+            let tick = if *self.animate.lock().unwrap() {
+                let mut g = self.grabs.lock().unwrap();
+                *g = g.wrapping_add(1);
+                *g
+            } else {
+                0
+            };
+            Ok(RgbImage::from_fn(w, h, |px, _| if (x as u32 + px) < 1000 { Rgb([200, tick, 0]) } else { Rgb([0, 200, tick]) }))
         }
-        fn click(&self, x: i32, y: i32) -> Result<()> {
+        fn click(&self, x: i32, y: i32) -> Result<(), SendError> {
+            let n = {
+                let mut c = self.clicks.lock().unwrap();
+                *c += 1;
+                *c - 1
+            };
+            if let Some((at, emitted)) = *self.fail_click.lock().unwrap() {
+                if n == at {
+                    return Err(SendError { emitted, error: anyhow!("SendInput refused") });
+                }
+            }
             self.log.lock().unwrap().push(format!("click {x} {y}"));
+            if let Some(next) = self.on_click.lock().unwrap().take() {
+                *self.wins.lock().unwrap() = next;
+            }
             Ok(())
         }
-        fn wheel(&self, x: i32, y: i32, n: i32) -> Result<()> {
+        fn wheel(&self, x: i32, y: i32, n: i32) -> Result<(), SendError> {
             self.log.lock().unwrap().push(format!("wheel {x} {y} {n}"));
             Ok(())
         }
@@ -561,6 +910,21 @@ mod tests {
             self.log.lock().unwrap().push(format!("activate {r}"));
             Ok(())
         }
+        fn layout(&self) -> Vec<WinInfo> {
+            self.wins.lock().unwrap().iter().filter(|w| !w.own).cloned().collect()
+        }
+        fn window_at(&self, x: i32, y: i32) -> Option<WinInfo> {
+            self.wins.lock().unwrap().iter().find(|w| w.contains(x, y)).cloned()
+        }
+        fn monitor_contains(&self, x: i32, y: i32) -> bool {
+            let m = self.monitors.lock().unwrap();
+            m.is_empty() || m.iter().any(|r| x >= r[0] && x < r[2] && y >= r[1] && y < r[3])
+        }
+    }
+
+    /// The runner the app builds: input only for the exact-title game window.
+    fn game_runner(fake: &Fake) -> NativeRunner<&Fake> {
+        NativeRunner::new(fake).with_target("Blue Archive")
     }
 
     fn ask(r: &NativeRunner<&Fake>, args: &[&str]) -> Value {
@@ -629,5 +993,176 @@ mod tests {
         assert!(!crate::hcu::window_active(&apps, "Chrome"));
         ask(&r, &["activate", "w13", "--records"]);
         assert!(fake.log.lock().unwrap().contains(&"activate w13".to_string()));
+    }
+
+    struct Collect(Arc<Mutex<Vec<Value>>>);
+    impl AuditSink for Collect {
+        fn record(&self, line: &Value) {
+            self.0.lock().unwrap().push(line.clone());
+        }
+    }
+
+    fn code(v: &Value) -> (Option<bool>, Option<&str>, Option<bool>) {
+        (v["ok"].as_bool(), v["code"].as_str(), v["input_emitted"].as_bool())
+    }
+
+    const CLICK: &[&str] = &["gui", "click", "683", "341.5", "--records"];
+    fn two_clicks(a: u32, b: u32) -> String {
+        format!(r#"{{"actions":[{{"type":"click","x":{a},"y":100}},{{"type":"click","x":{b},"y":100}}]}}"#)
+    }
+
+    #[test]
+    fn a_window_stacked_over_the_point_after_the_frame_refuses_the_click() {
+        let fake = Fake::new();
+        let r = game_runner(&fake);
+        ask(&r, &["gui", "screenshot"]);
+        fake.wins.lock().unwrap().insert(0, win(5, "Chrome", [900, 400, 1100, 600]));
+        let v = ask(&r, CLICK);
+        assert_eq!(code(&v), (Some(false), Some("gui_frame_stale"), Some(false)));
+        assert!(fake.sent().is_empty(), "nothing sent");
+        // a fresh screenshot sees the new layout, and then the browser is the window under the point
+        ask(&r, &["gui", "screenshot"]);
+        let v = ask(&r, CLICK);
+        assert_eq!(code(&v), (Some(false), Some("target_window_mismatch"), Some(false)));
+        assert!(v["hint"].as_str().unwrap().contains("Chrome"), "{v}");
+        assert!(fake.sent().is_empty());
+    }
+
+    #[test]
+    fn windows_that_do_not_touch_the_point_leave_the_frame_valid() {
+        let fake = Fake::new();
+        let r = game_runner(&fake);
+        ask(&r, &["gui", "screenshot"]);
+        fake.wins.lock().unwrap().insert(0, win(5, "Chrome", [0, 0, 100, 100]));
+        assert_eq!(ask(&r, CLICK)["ok"].as_bool(), Some(true));
+    }
+
+    #[test]
+    fn zoom_applies_the_same_layout_check_to_its_region() {
+        let fake = Fake::new();
+        let r = game_runner(&fake);
+        ask(&r, &["gui", "screenshot"]);
+        // frame 1366x683: the region covers native x 0..1000; a window far to the right is irrelevant
+        fake.wins.lock().unwrap().insert(0, win(5, "Chrome", [1800, 0, 2000, 100]));
+        assert_eq!(ask(&r, &["gui", "zoom", "100", "100", "300", "300"])["ok"].as_bool(), Some(true));
+        fake.wins.lock().unwrap().insert(0, win(6, "Chrome", [100, 100, 400, 400]));
+        let v = ask(&r, &["gui", "zoom", "100", "100", "300", "300"]);
+        assert_eq!((v["ok"].as_bool(), v["code"].as_str()), (Some(false), Some("gui_frame_stale")));
+    }
+
+    #[test]
+    fn the_add_ons_own_window_is_never_a_target_and_never_makes_a_frame_stale() {
+        let fake = Fake::new();
+        let r = game_runner(&fake);
+        ask(&r, &["gui", "screenshot"]);
+        // the overlay appears over the point after the frame: not a layout change ...
+        fake.wins.lock().unwrap().insert(0, WinInfo { own: true, ..win(9, "overlay", [0, 0, 2000, 1000]) });
+        ask(&r, &["gui", "zoom", "100", "100", "300", "300"]);
+        // ... but a click that would land on it is not aimed at the game
+        let v = ask(&r, CLICK);
+        assert_eq!(code(&v), (Some(false), Some("target_window_mismatch"), Some(false)));
+        assert!(v["hint"].as_str().unwrap().contains("own window"), "{v}");
+        assert!(fake.sent().is_empty());
+    }
+
+    #[test]
+    fn a_point_on_no_monitor_is_refused() {
+        let fake = Fake::new();
+        *fake.monitors.lock().unwrap() = vec![[0, 0, 1000, 1000]];
+        let r = game_runner(&fake);
+        ask(&r, &["gui", "screenshot"]);
+        let v = ask(&r, CLICK); // native x 1000: dead space
+        assert_eq!(code(&v), (Some(false), Some("target_off_monitor"), Some(false)));
+        let v = ask(&r, &["gui", "click", "100", "100"]);
+        assert_eq!(v["ok"].as_bool(), Some(true));
+        assert_eq!(fake.sent().len(), 1);
+    }
+
+    #[test]
+    fn a_failed_send_before_anything_went_out_is_a_plain_failure() {
+        let fake = Fake::new();
+        *fake.fail_click.lock().unwrap() = Some((0, false));
+        let r = game_runner(&fake);
+        ask(&r, &["gui", "screenshot"]);
+        let v = ask(&r, CLICK);
+        assert_eq!(code(&v), (Some(false), Some("input_failed"), Some(false)));
+    }
+
+    #[test]
+    fn input_that_stopped_half_way_is_effect_unknown_and_reports_what_was_done() {
+        let fake = Fake::new();
+        *fake.fail_click.lock().unwrap() = Some((1, false));
+        let r = game_runner(&fake);
+        ask(&r, &["gui", "screenshot"]);
+        let v = ask(&r, &["gui", "--json", &two_clicks(100, 200)]);
+        assert_eq!(code(&v), (Some(false), Some("effect_unknown"), Some(true)));
+        assert_eq!(v["completed"].as_i64(), Some(1));
+        assert_eq!(fake.sent().len(), 1);
+        // one click that failed after the pointer moved is unknown too
+        *fake.fail_click.lock().unwrap() = Some((2, true));
+        let v = ask(&r, CLICK);
+        assert_eq!(code(&v), (Some(false), Some("effect_unknown"), Some(true)));
+    }
+
+    #[test]
+    fn a_change_between_the_actions_of_one_request_stops_the_rest() {
+        let fake = Fake::new();
+        // the first click opens a popup over the second point
+        *fake.on_click.lock().unwrap() = Some(vec![win(5, "Popup", [1500, 0, 2000, 500]), win(13, "Blue Archive", [0, 0, 2000, 1000])]);
+        let r = game_runner(&fake);
+        ask(&r, &["gui", "screenshot"]);
+        let v = ask(&r, &["gui", "--json", &two_clicks(100, 1300)]);
+        assert_eq!(code(&v), (Some(false), Some("effect_unknown"), Some(true)));
+        assert_eq!(v["completed"].as_i64(), Some(1));
+        assert_eq!(fake.sent().len(), 1, "the second click was not sent");
+    }
+
+    #[test]
+    fn every_input_call_leaves_one_audit_line_without_content() {
+        let fake = Fake::new();
+        let lines = Arc::new(Mutex::new(Vec::new()));
+        let r = game_runner(&fake).with_audit(Box::new(Collect(lines.clone())));
+        ask(&r, &["gui", "screenshot"]);
+        ask(&r, &["gui", "zoom", "100", "100", "300", "300"]);
+        assert!(lines.lock().unwrap().is_empty(), "reading is not logged");
+        ask(&r, CLICK);
+        ask(&r, &["gui", "--json", r#"{"actions":[{"type":"scroll","x":100,"y":100,"scroll_y":-2},{"type":"scroll","x":100,"y":100,"scroll_y":-2}]}"#]);
+        fake.wins.lock().unwrap().insert(0, win(5, "Chrome", [0, 0, 2000, 1000]));
+        ask(&r, CLICK);
+        let l = lines.lock().unwrap().clone();
+        assert_eq!(l.len(), 3);
+        assert_eq!((l[0]["kind"].as_str(), l[0]["code"].as_str(), l[0]["input_emitted"].as_bool()), (Some("click"), Some("ok"), Some(true)));
+        assert_eq!(l[0]["native"], json!([1000, 500]));
+        assert_eq!(l[0]["window"], json!({"title": "Blue Archive", "class": "UnityWndClass"}));
+        assert_eq!((l[1]["kind"].as_str(), l[1]["actions"].as_i64(), l[1]["completed"].as_i64()), (Some("scroll"), Some(2), Some(2)));
+        assert_eq!((l[2]["code"].as_str(), l[2]["input_emitted"].as_bool(), l[2]["native"].is_null()), (Some("gui_frame_stale"), Some(false), true));
+        let keys: Vec<&str> = l[0].as_object().unwrap().keys().map(String::as_str).collect();
+        assert!(keys.iter().all(|k| ["t", "kind", "actions", "frame", "native", "window", "code", "input_emitted", "completed", "ms"].contains(k)), "{keys:?}");
+    }
+
+    #[test]
+    fn input_waits_for_a_still_screen_but_not_longer_than_the_cap() {
+        let fake = Fake::new();
+        // a small game window, so the fake's pixel generation does not dominate the timing
+        *fake.wins.lock().unwrap() = vec![win(13, "Blue Archive", [0, 0, 400, 300])];
+        let click = ["gui", "click", "100", "100", "--records"];
+        let settle = Settle { cap: Duration::from_millis(600), step: Duration::from_millis(60) };
+        let r = game_runner(&fake).with_settle(settle);
+        ask(&r, &["gui", "screenshot"]);
+        let t = Instant::now();
+        ask(&r, &click);
+        let still = t.elapsed();
+        *fake.animate.lock().unwrap() = true;
+        let t = Instant::now();
+        ask(&r, &click);
+        let moving = t.elapsed();
+        println!("settle latency: still screen {still:?}, never-still screen {moving:?} (cap 600 ms, step 60 ms)");
+        assert!(still < Duration::from_millis(300), "{still:?}");
+        assert!(moving >= Duration::from_millis(540) && moving < Duration::from_millis(900), "{moving:?}");
+        let off = game_runner(&fake).with_settle(Settle::OFF);
+        ask(&off, &["gui", "screenshot"]);
+        let t = Instant::now();
+        ask(&off, &click);
+        assert!(t.elapsed() < Duration::from_millis(50));
     }
 }

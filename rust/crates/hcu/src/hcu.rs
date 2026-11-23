@@ -106,7 +106,10 @@ pub enum Act {
     Click { x: f64, y: f64 },
 }
 
-/// Handle on the HCU CLI.
+/// Read-only handle on the desktop: screenshots, zooms, the window list. It cannot send input,
+/// so a loop that only watches (the add-on's card, the region search, `--watch`) holds this type
+/// and nothing it calls can click, scroll or switch windows. Input needs an [`Exclusive`], which
+/// only an [`HcuSession`] hands out.
 pub struct Hcu {
     runner: Box<dyn Runner>,
     /// Tests only: skip the real sleeps.
@@ -119,19 +122,38 @@ pub struct Hcu {
     cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
-impl Hcu {
+/// The owner of the desktop connection. Passive code is given [`HcuSession::view`] (or just `&session`,
+/// which coerces to `&Hcu`); scan code asks for input explicitly with [`HcuSession::exclusive`].
+pub struct HcuSession {
+    hcu: Hcu,
+}
+
+impl std::ops::Deref for HcuSession {
+    type Target = Hcu;
+    fn deref(&self) -> &Hcu {
+        &self.hcu
+    }
+}
+
+impl HcuSession {
     pub fn new(binary: impl Into<PathBuf>) -> Self {
         Self::with_runner(Box::new(ProcessRunner { binary: binary.into() }))
     }
 
     pub fn with_runner(runner: Box<dyn Runner>) -> Self {
-        Self { runner, no_sleep: false, stats: Default::default(), frame: Default::default(), retrying: Default::default(), cancel: Default::default() }
+        Self { hcu: Hcu { runner, no_sleep: false, stats: Default::default(), frame: Default::default(), retrying: Default::default(), cancel: Default::default() } }
     }
 
     /// Control the desktop in-process (no helper program).
     #[cfg(windows)]
     pub fn native() -> Self {
-        Self::with_runner(Box::new(crate::native::NativeRunner::new(crate::native::WinDesktop::new())))
+        let mut runner = crate::native::NativeRunner::new(crate::native::WinDesktop::new())
+            .with_target(GAME_TITLE)
+            .with_settle(crate::native::Settle::from_env());
+        if let Some(sink) = crate::audit::FileSink::default_sink() {
+            runner = runner.with_audit(Box::new(sink));
+        }
+        Self::with_runner(Box::new(runner))
     }
 
     /// The in-process desktop on Windows; the `computer-use` helper (`$HCU_BIN`, `vendor/hcu`, PATH)
@@ -162,10 +184,88 @@ impl Hcu {
 
     /// Skip the sleeps in settle/wait loops (unit tests with a fake runner).
     pub fn without_sleep(mut self) -> Self {
-        self.no_sleep = true;
+        self.hcu.no_sleep = true;
         self
     }
 
+    /// The read-only handle, for everything that only looks.
+    pub fn view(&self) -> &Hcu {
+        &self.hcu
+    }
+
+    /// The capability to send input to the game. Take it where the player asked for input (a scan)
+    /// and hand it only to the code that needs it.
+    pub fn exclusive(&self) -> Exclusive<'_> {
+        Exclusive { hcu: &self.hcu }
+    }
+}
+
+/// Permission to click, scroll and switch windows through one [`Hcu`]. It reads like the `Hcu` it
+/// wraps (it derefs to it) and adds the input calls; only [`HcuSession::exclusive`] makes one.
+pub struct Exclusive<'a> {
+    hcu: &'a Hcu,
+}
+
+impl std::ops::Deref for Exclusive<'_> {
+    type Target = Hcu;
+    fn deref(&self) -> &Hcu {
+        self.hcu
+    }
+}
+
+impl Exclusive<'_> {
+    /// Click at frame coordinates; fails unless the dispatch is confirmed.
+    pub fn click(&self, x: f64, y: f64) -> Result<()> {
+        let r = self.hcu.call(&["gui", "click", &format!("{x:.2}"), &format!("{y:.2}"), "--records"])?;
+        if !r.input_emitted || r.completed != 1 {
+            bail!("HCU click dispatch unconfirmed: {r:?}");
+        }
+        Ok(())
+    }
+
+    /// Scroll the wheel at frame coordinates.
+    pub fn scroll(&self, x: f64, y: f64, delta: i32) -> Result<()> {
+        self.scroll_n(x, y, delta, 1)
+    }
+
+    /// `count` wheel movements in a single call. One call moves the list only a
+    /// fixed distance whatever its delta, but extra movements in the same call cost
+    /// almost nothing, so this is how a longer scroll is made.
+    pub fn scroll_n(&self, x: f64, y: f64, delta: i32, count: usize) -> Result<()> {
+        self.actions(&vec![Act::Scroll { x, y, delta }; count.max(1)])
+    }
+
+    /// Several input actions in ONE call. Every input call costs a fixed amount (the helper process
+    /// returned a final screenshot; the native runner waits for the screen to settle), however many
+    /// actions it holds, so actions that do not need to look at the screen in between belong in one call.
+    pub fn actions(&self, acts: &[Act]) -> Result<()> {
+        let list: Vec<String> = acts
+            .iter()
+            .map(|a| match a {
+                Act::Scroll { x, y, delta } => format!(r#"{{"type":"scroll","x":{x:.2},"y":{y:.2},"scroll_y":{delta}}}"#),
+                Act::Click { x, y } => format!(r#"{{"type":"click","x":{x:.2},"y":{y:.2}}}"#),
+            })
+            .collect();
+        let payload = format!(r#"{{"actions":[{}]}}"#, list.join(","));
+        let r = self.hcu.call(&["gui", "--json", &payload, "--records"])?;
+        if !r.input_emitted || r.completed != acts.len() as i64 {
+            bail!("HCU input dispatch unconfirmed: {r:?}");
+        }
+        Ok(())
+    }
+
+    /// Bring the game window (exact title) to the front.
+    pub fn activate(&self) -> Result<()> {
+        let apps = self.hcu.apps()?;
+        let Some(r) = window_ref(&apps, GAME_TITLE) else {
+            bail!("no window titled exactly \"{GAME_TITLE}\"");
+        };
+        self.hcu.call(&["activate", &r, "--records"])?;
+        Ok(())
+    }
+}
+
+impl Hcu {
     pub(crate) fn nap(&self, ms: u64) {
         if !self.no_sleep {
             std::thread::sleep(Duration::from_millis(ms));
@@ -211,7 +311,7 @@ impl Hcu {
         self.cancel.clone()
     }
 
-    pub fn call(&self, args: &[&str]) -> Result<Record> {
+    fn call(&self, args: &[&str]) -> Result<Record> {
         if self.cancel.load(std::sync::atomic::Ordering::SeqCst) {
             bail!("cancelled by the user");
         }
@@ -266,58 +366,8 @@ impl Hcu {
         self.call(&["gui", "zoom", &a, &b, &c, &d, "--records"])
     }
 
-    /// Click at frame coordinates; fails unless HCU confirms the dispatch.
-    pub fn click(&self, x: f64, y: f64) -> Result<()> {
-        let r = self.call(&["gui", "click", &format!("{x:.2}"), &format!("{y:.2}"), "--records"])?;
-        if !r.input_emitted || r.completed != 1 {
-            bail!("HCU click dispatch unconfirmed: {r:?}");
-        }
-        Ok(())
-    }
-
-    /// Scroll the wheel at frame coordinates.
-    pub fn scroll(&self, x: f64, y: f64, delta: i32) -> Result<()> {
-        self.scroll_n(x, y, delta, 1)
-    }
-
-    /// `count` wheel movements in a single HCU call. One call moves the list only a
-    /// fixed distance whatever its delta, but extra movements in the same call cost
-    /// almost nothing, so this is how a longer scroll is made.
-    pub fn scroll_n(&self, x: f64, y: f64, delta: i32, count: usize) -> Result<()> {
-        self.actions(&vec![Act::Scroll { x, y, delta }; count.max(1)])
-    }
-
-    /// Several input actions in ONE HCU call. Every input call costs a fixed ~1.35 s
-    /// (HCU returns a final screenshot), however many actions it holds, so actions
-    /// that do not need to look at the screen in between belong in one call.
-    pub fn actions(&self, acts: &[Act]) -> Result<()> {
-        let list: Vec<String> = acts
-            .iter()
-            .map(|a| match a {
-                Act::Scroll { x, y, delta } => format!(r#"{{"type":"scroll","x":{x:.2},"y":{y:.2},"scroll_y":{delta}}}"#),
-                Act::Click { x, y } => format!(r#"{{"type":"click","x":{x:.2},"y":{y:.2}}}"#),
-            })
-            .collect();
-        let payload = format!(r#"{{"actions":[{}]}}"#, list.join(","));
-        let r = self.call(&["gui", "--json", &payload, "--records"])?;
-        if !r.input_emitted || r.completed != acts.len() as i64 {
-            bail!("HCU input dispatch unconfirmed: {r:?}");
-        }
-        Ok(())
-    }
-
     fn apps(&self) -> Result<String> {
         self.run_args(&["apps"]).map_err(|e| anyhow!("HCU apps: {e}"))
-    }
-
-    /// Target the game window by exact title.
-    pub fn activate(&self) -> Result<()> {
-        let apps = self.apps()?;
-        let Some(r) = window_ref(&apps, GAME_TITLE) else {
-            bail!("no window titled exactly \"{GAME_TITLE}\"");
-        };
-        self.call(&["activate", &r, "--records"])?;
-        Ok(())
     }
 
     /// Fails unless the exact-titled game window is the active one, so a focus
@@ -390,13 +440,45 @@ mod tests {
                 panic!("a cancelled handle must not run anything")
             }
         }
-        let h = Hcu::with_runner(Box::new(Never));
+        let h = HcuSession::with_runner(Box::new(Never));
         h.cancel_token().store(true, std::sync::atomic::Ordering::SeqCst);
         let e = h.call(&["gui", "screenshot"]).unwrap_err();
         assert!(format!("{e:#}").contains("cancelled"), "{e:#}");
         // and it can be lowered again for the next scan
         h.cancel_token().store(false, std::sync::atomic::Ordering::SeqCst);
         assert!(!h.cancel.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    /// Answers every call with one fixed record and keeps the calls.
+    struct Fixed(std::sync::Mutex<Vec<String>>, &'static str);
+    impl Runner for Fixed {
+        fn run(&self, args: &[String]) -> Result<String> {
+            self.0.lock().unwrap().push(args.join(" "));
+            Ok(if args[1] == "screenshot" { r#"{"ok":true,"screen":{"width":10,"height":10}}"#.into() } else { self.1.into() })
+        }
+    }
+    struct Shared(std::sync::Arc<Fixed>);
+    impl Runner for Shared {
+        fn run(&self, args: &[String]) -> Result<String> {
+            self.0.run(args)
+        }
+    }
+
+    #[test]
+    fn input_with_an_unknown_effect_is_never_repeated_but_a_refused_one_is_retried_once_after_a_new_screenshot() {
+        let click = ["gui", "click", "1", "2", "--records"];
+        let unknown = std::sync::Arc::new(Fixed(Default::default(), r#"{"ok":false,"code":"effect_unknown","input_emitted":true,"completed":1}"#));
+        let h = HcuSession::with_runner(Box::new(Shared(unknown.clone())));
+        let e = h.call(&click).unwrap_err();
+        assert!(format!("{e:#}").contains("effect_unknown"), "{e:#}");
+        assert_eq!(unknown.0.lock().unwrap().len(), 1, "one attempt, no screenshot, no repeat");
+
+        let stale = std::sync::Arc::new(Fixed(Default::default(), r#"{"ok":false,"code":"gui_frame_stale","input_emitted":false}"#));
+        let h = HcuSession::with_runner(Box::new(Shared(stale.clone())));
+        assert!(h.call(&click).is_err());
+        let calls = stale.0.lock().unwrap().clone();
+        assert_eq!(calls.len(), 3, "{calls:?}");
+        assert_eq!((calls[1].as_str(), calls[0] == calls[2]), ("gui screenshot --records", true));
     }
 
     #[test]

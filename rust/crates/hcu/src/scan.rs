@@ -1,6 +1,6 @@
 use crate::capture::{game_capture, layout_looks_calibrated, to_frame};
 use crate::deep::capture_deep;
-use crate::hcu::Hcu;
+use crate::hcu::{Exclusive, Hcu};
 use anyhow::{anyhow, bail, Result};
 use baocr_core::ocr_api::ScanSink;
 use baocr_extract::{FRAME_DETAIL, FRAME_LEVEL_UP, FRAME_MYSTIC, FRAME_POPUP_BOTTOM, FRAME_POPUP_TOP};
@@ -61,7 +61,7 @@ pub fn wait_stable_next(h: &Hcu, region: [f64; 4], prev: &DetailKey) -> Result<O
 /// profile). Every later stop is an `Ok(ScanOutcome)` with its reason.
 /// `out` is kept for API parity with Go; the sink owns persistence.
 pub fn scan_arrows(
-    h: &Hcu,
+    h: &Exclusive,
     region: [f64; 4],
     out: &Path,
     max_students: usize,
@@ -170,7 +170,7 @@ mod tests {
     }
 
     fn run(w: &World, max: usize, deep: bool, sink: &FakeSink) -> ScanOutcome {
-        scan_arrows(&w.hcu(), R, Path::new("out"), max, true, deep, sink).unwrap()
+        scan_arrows(&w.hcu().exclusive(), R, Path::new("out"), max, true, deep, sink).unwrap()
     }
 
     /// A look-alike name strip with a different (or unreadable) name is not a wrap.

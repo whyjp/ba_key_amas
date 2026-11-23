@@ -1,5 +1,5 @@
 //! Test doubles: a scripted "game" behind the `Runner` trait, and a fake `ScanSink`.
-use crate::hcu::{Hcu, Runner};
+use crate::hcu::{HcuSession, Runner};
 use anyhow::Result;
 use baocr_core::model::Student;
 use baocr_core::ocr_api::ScanSink;
@@ -62,8 +62,8 @@ impl World {
         self.st.lock().unwrap().inputs.clone()
     }
 
-    pub fn hcu(&self) -> Hcu {
-        Hcu::with_runner(Box::new(self.clone())).without_sleep()
+    pub fn hcu(&self) -> HcuSession {
+        HcuSession::with_runner(Box::new(self.clone())).without_sleep()
     }
 }
 

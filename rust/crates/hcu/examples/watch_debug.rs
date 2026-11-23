@@ -1,9 +1,9 @@
 //! Prints the watcher's stability metrics for consecutive live frames (no input).
-use baocr_hcu::{game_capture, parse_frame_region, Hcu};
+use baocr_hcu::{game_capture, parse_frame_region, HcuSession};
 use baocr_pixels::{detail_visible, frame_distance, frame_key, panel_delta};
 
 fn main() -> anyhow::Result<()> {
-    let hcu = Hcu::default_backend();
+    let hcu = HcuSession::default_backend();
     let region = parse_frame_region("230.36,91.73,685.39,433.07")?;
     let mut prev: Option<image::RgbImage> = None;
     for i in 0..8 {

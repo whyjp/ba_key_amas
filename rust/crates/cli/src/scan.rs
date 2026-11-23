@@ -6,7 +6,7 @@ use anyhow::Result;
 use baocr_core::model::RosterReport;
 use baocr_core::ocr_api::{Ocr, ScanSink};
 use baocr_extract::Options;
-use baocr_hcu::{ensure_profile, new_capture, prepare_scan, scan_arrows, Hcu};
+use baocr_hcu::{ensure_profile, new_capture, prepare_scan, scan_arrows, Exclusive};
 use baocr_overlay::BannerState;
 use baocr_pipeline::Pipeline;
 use std::collections::BTreeMap;
@@ -69,7 +69,7 @@ fn stop_note(reason: &str) -> String {
     }
 }
 
-pub fn scan_students(ocr: Arc<dyn Ocr>, hcu: &Hcu, region: [f64; 4], req: &ScanRequest, opts: Options, report: &dyn Fn(BannerState)) -> Result<ScanSummary> {
+pub fn scan_students(ocr: Arc<dyn Ocr>, hcu: &Exclusive, region: [f64; 4], req: &ScanRequest, opts: Options, report: &dyn Fn(BannerState)) -> Result<ScanSummary> {
     // Learn the total first (scroll through the roster once) so progress reads n/m,
     // and start from the first student.
     report(BannerState::counting(0));

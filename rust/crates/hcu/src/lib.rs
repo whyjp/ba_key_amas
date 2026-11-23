@@ -7,8 +7,11 @@
 //! No OCR lives here: name reads and extraction go through `ScanSink` /
 //! closures supplied by the caller. Everything above the process boundary
 //! talks to HCU through the [`Runner`] trait, so it is testable with a fake.
+mod audit;
 mod capture;
 mod deep;
+mod doctor;
+mod guard;
 mod hcu;
 mod native;
 mod roster;
@@ -21,10 +24,13 @@ mod fake;
 
 pub use capture::{check_aspect, game_capture, layout_looks_calibrated, new_capture, parse_frame_region, to_frame};
 pub use deep::{capture_deep, click_game, settle, settle_quiet};
-pub use native::{delivered_size, to_absolute, to_native, zoom_geometry, Desktop, NativeRunner};
+pub use doctor::{evaluate as evaluate_doctor, run as run_doctor, Facts, Report};
+pub use audit::{AuditSink, FileSink};
+pub use guard::{Refusal, SendError, WinInfo};
+pub use native::{delivered_size, to_absolute, to_native, zoom_geometry, Desktop, NativeRunner, Settle};
 #[cfg(windows)]
 pub use native::WinDesktop;
-pub use hcu::{find_bin, window_active, window_ref, Hcu, ProcessRunner, Record, Runner, GAME_TITLE};
+pub use hcu::{find_bin, window_active, window_ref, Exclusive, Hcu, HcuSession, ProcessRunner, Record, Runner, GAME_TITLE};
 pub use roster::{count_roster, ensure_profile, go_to_roster, merge_new_cards, open_first_student, prepare_scan, screen_kind, scroll_to_top, Screen};
 pub use scan::{scan_arrows, wait_stable_next, ScanOutcome};
 pub use window::{auto_region, detect_region, to_frame_region};
