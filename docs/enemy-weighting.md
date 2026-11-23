@@ -68,10 +68,10 @@ has a 70,012,000 HP champion (a sentinel-sized value) next to 77,000 HP and mini
 
 ## Three models on real rows
 
-A head count (the old rule). B HP weighted (each enemy counts its HP at the encounter's level and grade, summons,
-escorted transports and shootable projectiles weigh 0). C = B plus one structural rule for raids: an entry that is not a
-Boss and has exactly a Boss's HP is that Boss's own body and weighs 0 (phases, skins and the shared bar). No numeric
-role multiplier: no source supports one.
+Model A is a head count (the old rule). Model B is HP weighted. Each enemy counts its HP at the encounter's level and
+grade, and summons, escorted transports and shootable projectiles weigh 0. Model C is B plus one structural rule for
+raids: an entry that is not a Boss and has exactly a Boss's HP is that Boss's own body and weighs 0 (phases, skins and
+the shared bar). There is no numeric role multiplier, because no source supports one.
 
 | Case (DB rows) | A heads | B HP | C chosen |
 | --- | --- | --- | --- |
@@ -82,14 +82,14 @@ role multiplier: no source supports one.
 | (구) 사립 히아신스 학원: wave 1 and 2 elites and minions 특수, wave 3 elites 경, wave 4 champion 경 | 특수 48 / 경 52 | 특수 17 / 경 83 | same as B |
 | 현상수배 ChaserE Lv.10 (2 light champions, 6 heavy minions) | 경 25 / 중 75 | 경 100 / 중 0 | same as B |
 
-Reading: A over-weights swarms (ChaserE says the enemy is mostly heavy; the light champions are the fight). B follows
+Reading: A over-weights swarms (ChaserE says the enemy is mostly heavy; the light champions are the enemies the squad fights). B follows
 the boss and the boss wave, but on Drum Crab it counts the shared 400k bar six times (Boss, two bodies, 배딱지 twice,
 부패한 드럼통) and so hides the light parts, which the guides say are fought. C counts the bar once and keeps the parts
 with their own HP, so the DB alone gives both armors, the way the screen shows them. C is chosen.
 
-Limits, said plainly. HP share is not time share: area attacks kill swarms together, which B and C ignore, so ChaserE's
+Limits. HP share is not time share. Area attacks kill swarms together, which B and C ignore, so ChaserE's
 0 % heavy is a lower bound. The 70M sentinel in ChaserE does not change that stage's armor (both champions are light).
-The mirror rule is an inference from the Drum Crab data and the `TotalHP` dev name; it hits the Drum Crab and the
+The mirror rule is an inference from the Drum Crab data and the `TotalHP` dev name; it applies to the Drum Crab, and the
 Kaitenger elites are untouched (their HP differs from the Boss). Per-raid extra HP buffs (`EnemyExtraStats`) and floor
 `StatChange` are not applied. The expected-damage figure is a weighted arithmetic mean of the multipliers; the
 time-based mean (harmonic) would sit lower when a weak match covers much HP.
@@ -193,6 +193,6 @@ raid Raid 5 KAITEN FX Mk.0 (Lunatic) (Lv.90)
 Where the weighting changes the conclusion: 현상수배 고저택 (ChaserE), where heads say 관통 is a strong fit and HP
 says 폭발; KV 하이웨이 (the heavy champion outweighs the light minions); 드럼통 게, where 폭발 is a strong fit by
 heads and an average one with the light parts weighed in. Where it does not: single-boss raids.
-To check against the live game: the HP-weighted share is not time; confirm on 드럼통 게 that the 경장갑 parts
-(hull, steel pincer) are what the squad spends the second phase on, and that the 현상수배 gating minions die as quickly
-as the model assumes.
+To check against the live game, confirm on 드럼통 게 that the 경장갑 parts (hull, steel pincer) are what the squad
+spends the second phase on, and that the 현상수배 gating minions die as quickly as the model assumes. The HP-weighted
+share is not time.

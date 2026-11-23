@@ -10,16 +10,16 @@ case (the screen shows two armors, the DB had one) looked like a reason to trust
 ## Decision
 Dynamic data, read from the screen: which screen, which mission, stage, boss, difficulty and mode, the
 squad's names and slots, selection state. Static data, from the database only: enemy armor and attack mix,
-levels, terrain, student types, terrain adaptation, roles, the type table. Screen words about types are kept
-only as a cross-check; a mismatch is reported and means the DB model is incomplete.
+levels, terrain, student types, terrain adaptation, roles, the type table. The add-on keeps
+screen words about types only as a cross-check. It reports a mismatch, which means the DB model is incomplete.
 
 ## Alternatives
-- Screen wins: breaks silently on OCR noise and hides DB gaps.
-- Screen only: no facts for screens that show none (formation).
+- Letting the screen win breaks silently on OCR noise and hides DB gaps.
+- Using the screen only gives no facts for screens that show none (formation).
 
 ## Consequences
 - A lookup is deterministic given its keys (tested with wrong or missing screen words).
-- A mismatch is fixed in the DB model (ADR 0006), not by special-casing the screen.
+- The developer fixes a mismatch in the DB model (ADR 0006) instead of special-casing the screen.
 
 ## Evidence
 `docs/enemy-weighting.md` (static and dynamic table), `assist/src/raid_lookup.rs`, property test over screen

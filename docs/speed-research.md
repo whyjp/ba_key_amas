@@ -49,10 +49,10 @@ Modelled reaction (`speed_model`, quick-formation costs: capture 110, key 7, OCR
 | wake + band-rec + input hints | 471 | 420 | 384 |
 | wake + band-rec + speculative OCR + hints + settle 20 + fast key | 295 | 324 | 339 |
 
-The model is optimistic for speculative OCR (it assumes the background OCR costs the loop nothing) and for hints
-(it assumes the guessed look times match the game's real animation; one wrong guess is shown by the 600 ms and the
-250 ms inertia rows of `speed_model`, where hints make things worse than today, up to 1.6 s). The click-lag, the
-animation length and the scroll inertia are inputs, not measurements: they need a live test.
+The model is optimistic for speculative OCR, because it assumes the background OCR costs the loop nothing. It is also
+optimistic for hints, because it assumes the guessed look times match the game's real animation. The 600 ms and the
+250 ms inertia rows of `speed_model` show one wrong guess, where hints make things worse than the today row, up to 1.6 s. The click-lag, the
+animation length and the scroll inertia are inputs, not measurements, so they need a live test.
 
 ## 2. OCR cost
 
@@ -76,17 +76,17 @@ library-default output (committed fixtures: the default itself reads 13 of 15 fr
 DirectML cold run: the first call costs 444 ms once (kernel setup); later first-time frames cost the same as warm ones
 (sum of cold runs 2123 ms against 1710 warm), so new screen shapes do not recompile. Session creation 400 to 560 ms
 against 170 ms. The runtime copies `DirectML.dll` beside the exe (it must ship with it).
-Per frame: lobby-idle 87 to 104 -> 19 to 21 ms, quick-formation 547 -> 185 to 190 ms.
+Per frame, lobby-idle falls from 87 to 104 ms to 19 to 21 ms, and quick-formation from 547 ms to 185 to 190 ms.
 
 Not a win, measured:
 - Three OCR strips (header, popup-title band, bottom bar) to classify the scene instead of the whole frame: 100 to 350 ms,
   not clearly cheaper than 100 to 560 ms of the full frame (per-call overhead), same scene on all frames that classify.
-- Parallel `choose` over cards: 96 to 70 ms in one session, 249 to 113 in another: the recogniser session is behind a mutex,
-  only the CTC share (13 to 22 percent) parallelises. Small.
+- Parallel `choose` over cards: 96 to 70 ms in one session, 249 to 113 ms in another. The recogniser session is behind a mutex,
+  so only the CTC share (13 to 22 percent) parallelises. The gain is small.
 
-Where det versus rec costs: sparse screens are detector dominated (lobby-idle 101 ms falls to 25 ms at limit 512), dense ones
+Detector versus recogniser cost: sparse screens are detector dominated (lobby-idle 101 ms falls to 25 ms at limit 512), dense ones
 split roughly 60/40 (quick-formation 562 -> 325). Running only the recogniser on known boxes of template screens would
-therefore save up to 60 to 70 percent on them. Not prototyped: it needs a template matcher and a safety check per screen,
+therefore save up to 60 to 70 percent on them. It is not prototyped. It needs a template matcher and a safety check per screen,
 and DirectML already takes the detector to a few tens of milliseconds.
 
 ## 3. 편성 > 빠른 편성, the three cases the user named
@@ -97,7 +97,7 @@ Everything for quick formation is in `speed_quick` (fixtures `quick-formation*`,
    * OCR only the grid and its tabs (crop x 560, y 300, 720x360): 231 to 358 ms instead of 476 to 565 ms; the cards read are
      identical on 4 of 4 frames (`read_card_names` 82 to 95 ms).
    * Free text per label band only (one recogniser call on each 92 px wide label band, 75 to 78 ms for 12 labels, no detector):
-     cards identical on 4 of 4 frames. Together with the card reading about 165 ms instead of about 620 ms (full OCR + cards),
+     cards identical on 4 of 4 frames. Together with the card reading about 165 ms instead of about 620 ms (full OCR plus cards),
      measured offline. Reading cards with no free text at all differs on 1 of 4 frames (a card is missed), so the band read is
      what keeps it safe.
    * Both only apply when the scene is already known to be 빠른 편성 and the popup is still there (`quick_tab_is_striker` is
@@ -112,12 +112,12 @@ Everything for quick formation is in `speed_quick` (fixtures `quick-formation*`,
    편성-screen PNG fixture (only `squad.boxes.txt`), so recognition of the closed state was not timed or reproduced;
    why it failed once is not known from this data. With DirectML a full read of a formation-like screen is 20 to 200 ms.
 3. Leaving for a battle or the base formation. The `transition()` fix takes the icons down on the first changed frame,
-   which the loop sees after 0 to 410 ms (idle wait) + 125 ms (capture + key). Input hints cut the first part to about
+   which the loop sees after 0 to 410 ms (idle wait) plus 125 ms (capture plus key). Input hints cut the first part to about
    the click time + the first-look delay.
 
 ## 4. Settle and poll policy
 
-* Frame keys of two captures of the same view (quick-formation vs its `-live-a` recapture) are 1.46 apart against `STILL = 1.5`: the
+* Frame keys of two captures of the same view (quick-formation vs its `-live-a` recapture) are 1.46 apart against `STILL = 1.5`. The
   threshold is tight, so an exact-hash revisit cache is not possible, and any key change must keep the distances. The block-mean key
   (`fast_frame_key`) gives 1.38 for that pair, 5.19 against 5.28, 75.85 against 76.09: within 0.3 on every pair tried, same side of 1.5
   on all 15 pairs in the unit test.
@@ -142,12 +142,12 @@ Unit tests cover the primitive (`overlay/src/wake.rs`); the saved 45 ms mean is 
 ## 6. Input hints (experimental, off by default)
 
 `overlay/src/hints.rs`. A passive `WH_MOUSE_LL` hook thread (`InputHints`) timestamps only left-button and wheel events that are
-inside the game's client rectangle (tested with atomics in the callback, no lock, no allocation, events outside are dropped at once,
-injected events are ignored, mouse moves, keys and everything else are never looked at, nothing is logged, `try_send` on a bounded queue
-never blocks) and always calls `CallNextHookEx`: nothing is intercepted or forwarded. The pure part, `HintScheduler`, turns events into
-requests: a click asks for a look after 80 ms and a trusted single-frame look after 450 ms (no second matching frame needed), a wheel burst
-or a held-button drag asks for a trusted look 160 ms after the last turn, and a click inside a configured hot zone (for example the close
-button of 빠른 편성) asks for an immediate pre-empt that takes the old icons down. 8 unit tests; the real hook was not run.
+inside the game's client rectangle. The callback tests with atomics, takes no lock and allocates nothing. It drops events outside the
+rectangle at once, ignores injected events, never looks at mouse moves, keys or anything else, and logs nothing. `try_send` on a bounded queue
+never blocks. The hook always calls `CallNextHookEx`, so nothing is intercepted or forwarded. The pure part, `HintScheduler`, turns events into
+requests. A click asks for a look after 80 ms and a trusted single-frame look after 450 ms (no second matching frame needed). A wheel burst
+or a held-button drag asks for a trusted look 160 ms after the last turn. A click inside a configured hot zone (for example the close
+button of 빠른 편성) asks for an immediate pre-empt that takes the old icons down. There are 8 unit tests; the real hook was not run.
 
 Estimated gain (`speed_model`, same cost inputs): about 150 to 200 ms for clicks, 100 to 130 ms for scroll stops, on top of the other changes,
 when the guessed delays fit the game. What needs a live test, and cannot be answered without input: the game's reaction lag after a click, the
@@ -183,7 +183,7 @@ Hot zones need button positions for the screens that matter (none are known in t
    reaction for scrolls from about 1.0 s to about 0.55 s with the CPU alone (model), and the same pixel test takes icons down at once when the popup closes.
 3. Try input hints as an experimental option; do it after 1 and 2, because the model shows the click and scroll look-times only pay off when OCR is cheap.
 
-## What was NOT tested
+## What was not tested
 
 * Anything with real input: the game's reaction lag, animation lengths, scroll inertia, the real hook (never installed), whether hints help in play.
 * Recognition of the closed-popup (편성) screen: there is no fixture PNG for it; the earlier failure was not reproduced.

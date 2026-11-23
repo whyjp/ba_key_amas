@@ -14,8 +14,8 @@ each. The PC ran out of RAM, the game and the terminal crashed, and the D: drive
 - Agents run with `CARGO_BUILD_JOBS=3` and debug info off, and use `-p <crate>` while iterating.
 
 ## Alternatives
-- Shared target dir: lock contention and mixed feature sets.
-- Fewer worktrees: slower, not needed once the limits hold.
+- A shared target dir causes lock contention and mixed feature sets.
+- Fewer worktrees would be slower and are not needed once the limits hold.
 
 ## Consequences
 - Backtraces keep line numbers, not variable inspection.

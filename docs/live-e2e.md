@@ -5,10 +5,10 @@ Code: `rust/crates/cli/examples/live_e2e/{main,rig,scenarios}.rs`, the hook `rus
 Reports: `<out>/<label>/report.md|json`, screenshots in `<out>/<label>/shots`.
 
 ## The hook
-`BAOCR_STATE_DUMP=<file>`: the add-on wraps its `Surface` in `DumpSurface` and rewrites the file atomically on every change and at
-least every 250 ms: main card (scene, title, rows as text, close), in-game card, marks count, dock (anchor, presentation) as the overlay
-holds it, card layer (`fold` open/folded/sliding/hidden, slide, rect, hit areas in screen pixels), `battle`, `locked`, `seq`, `mono_ms`,
-`unix_ms`, `changed_unix_ms`. Unset: nothing is in the path. Pure parts are unit tested (`dump.rs`).
+With `BAOCR_STATE_DUMP=<file>` set, the add-on wraps its `Surface` in `DumpSurface` and rewrites the file atomically on every change and at
+least every 250 ms. The file holds the main card (scene, title, rows as text, close), the in-game card, the marks count, the dock (anchor, presentation) as the overlay
+holds it, the card layer (`fold` open/folded/sliding/hidden, slide, rect, hit areas in screen pixels), `battle`, `locked`, `seq`, `mono_ms`,
+`unix_ms` and `changed_unix_ms`. When the variable is unset, the dump code is not in the path. Unit tests cover the pure parts (`dump.rs`).
 
 ## Safety
 Game input is navigation and the add-on's own scan only. Every click needs a fresh dump naming the expected scene and a frame that is

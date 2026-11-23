@@ -13,16 +13,16 @@ CPU while nothing changes. Not every monitor has room beside the game.
   wake signal instead of a fixed poll. Measured idle load fell from 11 to 14 percent of a core to 0.4 percent.
 - The assistant sends the surface only outputs that changed. Icons stay down while the view is moving,
   because a redraw from a stale reading would put the old view's icons back.
-- Card placement is one of four anchors (outside left or right, inside top left or right) with a presentation,
-  pinned or bookmark. Outside needs room on the monitor, otherwise the card falls back inside, and the stored
+- Card placement is one of four anchors (outside left or right, inside top left or right) plus a presentation
+  (pinned or bookmark). Outside needs room on the monitor, otherwise the card falls back inside, and the stored
   preference is kept. The bookmark tab is a small window, so the rest of the game stays clickable. Hover
   opens after 100 ms, slides in 120 ms, closes 350 ms after the pointer leaves. Dragging snaps to the nearest
   anchor.
 - Closing is a power icon in the header, and the tray icon closes the add-on whatever the windows do.
 
 ## Alternatives
-- One full-screen transparent window: simpler, but it covers every click and costs more to draw.
-- Fixed polling of state: wasted wakeups and up to 90 ms added latency.
+- One full-screen transparent window is simpler but covers every click and costs more to draw.
+- Fixed polling of state wastes wakeups and adds up to 90 ms of latency.
 
 ## Consequences
 - The card width is 58 percent of the game window (230 to 360 px); inside it is 34 percent (220 to 320 px).

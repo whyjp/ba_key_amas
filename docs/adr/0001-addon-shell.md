@@ -13,7 +13,7 @@ player, and is the only thing that sends input to the game. Output of the scan i
 
 ## Alternatives
 - A separate overlay program and a separate scanner: two processes to start and keep consistent.
-- Scanning automatically on a schedule: rejected, input to the game must be an explicit act.
+- Scanning automatically on a schedule. Rejected, because input to the game must be an explicit act.
 
 ## Consequences
 - One process, one settings file, one tray icon that can always close it.

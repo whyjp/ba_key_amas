@@ -29,7 +29,7 @@ record in [adr/](adr/README.md). This page is the map.
 
 1. The loop (`cli/src/assist.rs`) captures the game client as a 1280x960 frame, tells whether the view is
    moving or settled with a cheap frame key, and detects a battle from a few pixels.
-2. A settled, unseen view goes through OCR once. `extract` classifies the scene from header and anchor
+2. OCR runs once on a settled view the loop has not seen. `extract` classifies the scene from header and anchor
    words, and trackers (`MissionTracker`, `RaidTracker`) remember what the player picked, because the
    later screens do not show it.
 3. The `Observer` turns the frame into an `Observation`: scene, mission or raid key, squad, grid cards.
@@ -72,7 +72,8 @@ The graph is generated from `cargo metadata` by `python scripts/gen_arch.py`. Th
 | `wikidb` | SchaleDB collector, schema, lookups, formation evaluation, raid data | [raid-data.md](raid-data.md) |
 | `pipeline`, `export`, `names`, `equipment`, `core` | roster scan back end: async extraction, JSON store, name dictionary, equipment icons, shared model | |
 
-Dependency rule: `cli → assist → overlay/extract/wikidb`, `hcu → extract`, `extract → ocr/pixels`.
+Dependency rule: `cli` depends on `assist`, and `assist` on `overlay`, `extract` and `wikidb`. `hcu` depends on
+`extract`, and `extract` on `ocr` and `pixels`.
 Nothing below `assist` knows about drawing, and `overlay` knows nothing about the game's data.
 
 ## Threads and windows
@@ -85,15 +86,15 @@ Nothing below `assist` knows about drawing, and `overlay` knows nothing about th
 | input block (`overlay/input_block.rs`) | low-level hooks while a scan runs, ESC aborts | run outside a scan |
 | input hints (`overlay/hints.rs`) | optional pass-through mouse hook (off by default, not wired) | block or forward input |
 
-Layered windows: the card is interactive, the in-game card, the icons and the tooltip are click-through,
-all are excluded from screen capture so the add-on never reads itself.
+The card is an interactive layered window. The in-game card, the icons and the tooltip are click-through.
+All four are excluded from screen capture, so the add-on never reads itself.
 
 ## Constraints that shape the design
 
-- The game is read at 4:3 windowed only; ROIs are calibrated on a 1280x960 client.
+- The add-on reads the game only at 4:3 windowed, and the regions of interest are calibrated on a 1280x960 client.
 - Input is sent only for the scan, behind guards ([ADR 0004](adr/0004-input-policy.md)).
-- No game memory or file access; screenshots and public data only.
-- Builds are limited to protect RAM and disk ([ADR 0009](adr/0009-build-limits.md)).
+- The add-on reads no game memory or files, only screenshots and public data.
+- Build limits protect RAM and disk ([ADR 0009](adr/0009-build-limits.md)).
 
 ## Verification
 
@@ -110,6 +111,6 @@ all are excluded from screen capture so the add-on never reads itself.
 The earlier extraction-era notes (Go and Tesseract, the OCR benchmark, bond rank, risks) are kept in
 [history/go-era-architecture.md](history/go-era-architecture.md).
 
-[adr/README.md](adr/README.md) lists them. Older notes: [hcu-native.md](hcu-native.md),
+[adr/README.md](adr/README.md) lists them. Detail notes: [hcu-native.md](hcu-native.md),
 [raid-data.md](raid-data.md), [card-dock.md](card-dock.md), [speed-research.md](speed-research.md),
 [enemy-weighting.md](enemy-weighting.md).

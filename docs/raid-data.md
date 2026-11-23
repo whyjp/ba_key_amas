@@ -1,7 +1,7 @@
 # Raid data (총력전, 종합전술시험, 월드 레이드, ...)
 
 What the wiki DB knows about raid-like encounters, where it comes from, what it cannot know, and what a screen
-reader has to hand it. Schema: `wikidb/schema.sql` (version 4). Code: `rust/crates/wikidb/src/schaledb.rs`
+reader must give it. Schema: `wikidb/schema.sql` (version 4). Code: `rust/crates/wikidb/src/schaledb.rs`
 (collector) and `rust/crates/wikidb/src/raid.rs` (lookup).
 
 ## Model
@@ -13,14 +13,14 @@ once, at the boundary, into the same four tables. Nothing downstream reads the s
 | --- | --- | --- |
 | `raid` | one encounter, key `(kind, id)` | `kind` is `Raid` (총력전), `TimeAttack` (종합전술시험), `WorldRaid`, `MultiFloorRaid`, `InteractiveWorldRaid`. Ids repeat across kinds. `raw` keeps the source record. |
 | `raid_difficulty` | one difficulty of an encounter, key `(raid_kind, raid_id, idx)` | `idx` is the position in the source arrays. `released_global` is true when the raid is released on Global and `idx` is within the Global `MaxDifficulty`. |
-| `raid_difficulty_enemy` | one enemy of a difficulty, in source order | Links to `enemy`. Summons, projectiles and escorted transports are here too: filter on `enemy.rank`. |
+| `raid_difficulty_enemy` | one enemy of a difficulty, in source order | Links to `enemy`. Summons, projectiles and escorted transports are here too. Filter on `enemy.rank`. |
 | `raid_season` | one Global season, key `(mode, season_id)` | `mode` is `Raid` (총력전) or `Eliminate` (대결전). The season's `terrain` is the terrain the raid is played on. `start_at` and `end_at` are unix seconds. |
 
 `v_raid_difficulty` is a difficulty with its lead enemy (name, attack type, armor type).
 
-### Columns that need a sentence
+### Column notes
 
-- `raid.name_ko` is the source's name. It is NULL for every `TimeAttack`: the source names none.
+- `raid.name_ko` is the source's name. It is NULL for every `TimeAttack`, because the source names none.
 - `raid.display_ko` is what to show and to match against. It is `name_ko`, or for a time attack a name derived
   from the record: test, terrain and enemy armor, for example `사격 시험 · 야외 · 경장갑`. The derived name is
   not a string the game is known to show; a screen reader that sees the real wording should compare it with this.
@@ -47,7 +47,7 @@ once, at the boundary, into the same four tables. Nothing downstream reads the s
 | `WorldRaid`, `InteractiveWorldRaid` | `EnemyList[idx]`, `Level[idx]`, `BattleDuration[idx]` | `DifficultyName[idx]` |
 | `MultiFloorRaid` | `EnemyList[tier]`, `DifficultyStartFloor[tier]`, one `BattleDuration` | none |
 
-The `Raid` label order is an inference: SchaleDB's `RaidDifficulty` localization lists these names, and the attack
+The `Raid` label order is an inference. SchaleDB's `RaidDifficulty` localization lists these names, and the attack
 type of the enemies switches at position 5, where the record's `BulletTypeInsane` applies. A test pins it.
 
 ## What the data says about attack types
@@ -55,7 +55,7 @@ type of the enemies switches at position 5, where the record's `BulletTypeInsane
 Attack and armor type are properties of each enemy in a difficulty, not of the raid. A boss changes attack type
 with the difficulty: Binah is Normal on positions 0 to 4 and Pierce on 5 to 7, Hieronymus Normal then Explosion.
 Minions and summons can differ from the boss (Hieronymus' relics stay Normal). The mission shape takes armor and attack types as shares of the enemy HP (`v_raid_armor_share`,
-`v_raid_attack_share`), see `docs/enemy-weighting.md`; ranks `Summoned`, `Student` and `DestructibleProjectile`
+`v_raid_attack_share`; see `docs/enemy-weighting.md`). Ranks `Summoned`, `Student` and `DestructibleProjectile`
 weigh nothing.
 
 ## Lookup API (`baocr_wikidb`, module `raid`)
@@ -127,7 +127,7 @@ What the add-on reads on screen and how it reaches the lookup above. Code: `extr
 | 대결전 between seasons | `EliminateClosed` | scene label only | `eliminate-closed` |
 | Warning before 제약해제결전 | `SpoilerWarning` | scene label only | `spoiler-warning` |
 
-Scenes are told by the header text plus words only that screen has (e.g. "Battle Select", "보스 선택", the popup titles
+`extract` tells scenes apart by the header text plus words only that screen has (e.g. "Battle Select", "보스 선택", the popup titles
 "방 정보" and "다음 시즌 정보"), never by position alone. The mode of a formation comes from its header
 (`총력전 편성`, `모의 총력전 편성`, `제약해제결전 편성`), because a mock screen also shows "총력전" as a side button.
 
@@ -137,10 +137,10 @@ Scenes are told by the header text plus words only that screen has (e.g. "Battle
    terrain tabs) from the list, the popup or the stage screen, so the formation, which names none of it, knows it. A mission
    screen forgets the raid and a raid screen forgets the mission. The mode of a formation must match the remembered encounter.
 2. `raid_lookup::lookup` finds the raid by boss name among the raids of the mode's kind (총력전 and 모의 총력전: `Raid`,
-   제약해제결전: `MultiFloorRaid`), decodes the armor and attack words through the `label` table (`Wiki::decode_labels`, per
-   kind: 일반 is an attack type, 일반장갑 an armor type; a word the table lacks is reported, not guessed), maps the
-   difficulty word to `idx` by its position (Normal 0 .. Lunatic 7; the game writes `Hardcore`, the DB `HardCore`), takes the
-   terrain from the 총력전 season (only a `Raid` mode season; 대결전 seasons are ignored), and builds the brief with
+   제약해제결전: `MultiFloorRaid`). It decodes the armor and attack words through the `label` table (`Wiki::decode_labels`, per
+   kind; 일반 is an attack type and 일반장갑 an armor type), and it reports a word the table lacks instead of guessing. It maps the
+   difficulty word to `idx` by its position (Normal 0 .. Lunatic 7; the game writes `Hardcore`, the DB `HardCore`). It takes the
+   terrain from the 총력전 season (only a `Raid` mode season; 대결전 seasons are ignored). Then it builds the brief with
    `raid_mission`.
 3. The screen is the truth for what the player sees. Where it names the boss's armor, attack type or level, those replace the
    wiki's (`Wiki::with_screen_types` swaps the lead enemy's types in the tally and recomputes the best attack types), and a

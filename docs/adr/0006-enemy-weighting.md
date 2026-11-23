@@ -12,15 +12,15 @@ An enemy weighs its HP at the encounter's level and grade, using SchaleDB's own 
 and DestructibleProjectile weigh 0. In a raid, a non-boss entry whose HP equals a boss's HP is that boss's own
 body and weighs 0; parts with less HP keep their weight. The expected damage multiplier of a student against
 the mix is the weighted mean. The UI shows shares ("경장갑 36%", under 5 percent merged into 기타) and says
-"HP 비중 기준". No role multipliers: no source supports a number.
+"HP 비중 기준". There are no role multipliers, because no source supports a number.
 
 ## Alternatives (compared on real rows)
-Head count (old): drum crab 78/22. Plain HP weighting: 91/9, which hides the hull. HP with the structural
-mirror rule: Normal 64/36, Insane 68/32, Lunatic 82/18 (chosen).
+Head count (old) gives 78/22 for the drum crab. Plain HP weighting gives 91/9, which hides the hull. HP with
+the structural mirror rule gives Normal 64/36, Insane 68/32 and Lunatic 82/18 (chosen).
 
 ## Consequences
 - Fit tiers change for several stages (현상수배 고저택, KV 하이웨이, drum crab).
-- HP share is not time share: swarms killed together by area attacks are under-counted.
+- HP share is not time share. Swarms killed together by area attacks are under-counted.
 - Raid extra HP buffs and floor raid stat changes are not modelled.
 
 ## Evidence
