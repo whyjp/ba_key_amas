@@ -28,13 +28,14 @@ ROLE = {
     "baocr-equipment": "장비 아이콘 읽기",
     "baocr-core": "데이터 모델, Ocr 트레이트",
     "baocr-namedict": "도구: 이름 사전을 만든다",
+    "baocr-progress": "진행 상태 읽기와 BAReceipt 내보내기",
 }
 GROUP = {  # colour by layer of responsibility
     "baocr": "#1f3a63",
     "baocr-assist": "#2f6f9f", "baocr-overlay": "#2f6f9f",
     "baocr-hcu": "#8a5a1c", "baocr-ocr": "#6b3f8f", "baocr-extract": "#6b3f8f", "baocr-pixels": "#6b3f8f",
     "baocr-names": "#6b3f8f", "baocr-equipment": "#6b3f8f", "baocr-pipeline": "#6b3f8f", "baocr-export": "#3f7f4f",
-    "baocr-wikidb": "#3f7f4f", "baocr-core": "#555555", "baocr-namedict": "#777777",
+    "baocr-wikidb": "#3f7f4f", "baocr-core": "#555555", "baocr-namedict": "#777777", "baocr-progress": "#6b3f8f",
 }
 
 
