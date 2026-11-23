@@ -4,13 +4,14 @@
 pub mod formation;
 pub mod raid;
 pub mod schaledb;
+pub mod weight;
 pub mod wiki;
 pub use formation::{
     adaptation_factor, attack_multiplier, damage_taken, enemy_armors, enemy_attacks, evaluate, fit_tier, matchup, rate, rates_by_type, special_role, Fit, FormationScore, Matchup, Rating, SupportRole, TypeTable,
     Verdict,
 };
 pub use raid::{pick_season, RaidBoss, RaidCandidate, RaidDifficulty, RaidKind, RaidSeason, SeasonMode, SeasonPick, SeasonRelation};
-pub use wiki::{DecodedLabels, FurnitureBrief, FurnitureStudent, MissionBrief, StudentBrief, Tally, Wiki};
+pub use wiki::{DecodedLabels, FurnitureBrief, FurnitureStudent, MissionBrief, Share, StudentBrief, Tally, Wiki};
 
 use anyhow::{Context, Result};
 use rusqlite::Connection;
@@ -20,7 +21,7 @@ pub const SCHEMA: &str = include_str!("../../../../wikidb/schema.sql");
 
 /// The schema version this build reads and writes (meta.schema_version). `Wiki::open` refuses
 /// a database of another version: rebuild it with the collector.
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 4;
 
 /// A fresh database with the schema applied.
 pub fn create(conn: &Connection) -> Result<()> {

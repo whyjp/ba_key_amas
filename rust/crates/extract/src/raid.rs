@@ -29,7 +29,23 @@ pub fn difficulty_index(text: &str) -> Option<usize> {
     DIFFICULTIES.iter().position(|d| d.to_lowercase() == n)
 }
 
-/// What the screens say about the encounter. Every field is optional because no screen says all of them.
+/// Words a raid screen shows about the encounter's types and level. They are not an input of any
+/// judgment: the encounter's armor, attack type and level are static data of the wiki DB, found by the
+/// keys of `RaidRef` (mode, boss, difficulty). These words only let the app notice that the DB is
+/// incomplete (a boss the screen shows with two armors and the DB with one), and the armor words
+/// also tell apart same-named raids that no other screen text separates.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RaidScreenWords {
+    /// The boss's armor words as shown, one per armor ("특수장갑/경장갑" is two).
+    pub armors: Vec<String>,
+    /// The boss's attack-type word as shown.
+    pub attack: Option<String>,
+    /// The enemy level the screen recommends.
+    pub level: Option<u32>,
+}
+
+/// What the screens say about the encounter: the keys to find it by (`mode`, `boss`, `difficulty`)
+/// and the cross-check words. Every field is optional because no screen says all of them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RaidRef {
     pub mode: RaidMode,
@@ -37,12 +53,8 @@ pub struct RaidRef {
     pub boss: String,
     /// Position in `DIFFICULTIES`. The boss list shows every difficulty and selects none: only 방 정보 names one.
     pub difficulty: Option<usize>,
-    /// The boss's armor words as shown, one per armor ("특수장갑/경장갑" is two).
-    pub armors: Vec<String>,
-    /// The boss's attack-type word as shown.
-    pub attack: Option<String>,
-    /// The enemy level the screen recommends.
-    pub level: Option<u32>,
+    /// What else the screen says about the encounter. Cross-check only, never data: see `RaidScreenWords`.
+    pub words: RaidScreenWords,
     /// The terrain tabs read on the boss list, left to right. A boss offers two. The highlighted one is a
     /// colour, not text: which of them is chosen is not read.
     pub terrains: Vec<String>,
@@ -50,7 +62,7 @@ pub struct RaidRef {
 
 impl RaidRef {
     fn named(mode: RaidMode, boss: &str) -> RaidRef {
-        RaidRef { mode, boss: boss.trim().to_string(), difficulty: None, armors: Vec::new(), attack: None, level: None, terrains: Vec::new() }
+        RaidRef { mode, boss: boss.trim().to_string(), difficulty: None, words: RaidScreenWords::default(), terrains: Vec::new() }
     }
 
     /// "모의 총력전 시로&쿠로 Normal".
@@ -116,7 +128,7 @@ pub fn mock_boss_from_list(boxes: &[TextBox]) -> Option<RaidRef> {
     let mut tabs: Vec<&TextBox> = boxes.iter().filter(|b| b.y0 > 60.0 && b.y1 < 130.0 && b.x0 > 880.0 && TERRAIN_WORDS.contains(&norm(&b.text).as_str())).collect();
     tabs.sort_by(|a, b| a.x0.total_cmp(&b.x0));
     let terrains = tabs.iter().map(|b| norm(&b.text)).collect();
-    Some(RaidRef { armors, terrains, ..RaidRef::named(RaidMode::MockTotalAssault, &boss.text) })
+    Some(RaidRef { words: RaidScreenWords { armors, ..Default::default() }, terrains, ..RaidRef::named(RaidMode::MockTotalAssault, &boss.text) })
 }
 
 /// The boss of the 총력전 list: the same boss on every row.
@@ -158,7 +170,7 @@ pub fn room_from_info(boxes: &[TextBox]) -> Option<RaidRef> {
     let difficulty = boxes.iter().filter(|b| in_popup(b) && b.x0 < 330.0).find_map(|b| difficulty_index(&b.text).map(|i| (i, b)))?;
     let boss = below(boxes, difficulty.1, 40.0, 40.0)?;
     let (attack, armors) = pills(boxes, in_popup);
-    Some(RaidRef { difficulty: Some(difficulty.0), armors, attack, level: recommended_level(boxes), ..RaidRef::named(RaidMode::MockTotalAssault, &boss.text) })
+    Some(RaidRef { difficulty: Some(difficulty.0), words: RaidScreenWords { armors, attack, level: recommended_level(boxes) }, ..RaidRef::named(RaidMode::MockTotalAssault, &boss.text) })
 }
 
 /// The boss named under the small "제약해제결전" label on the stage screen and on the select screen's
@@ -182,7 +194,7 @@ pub fn boss_from_unrestricted_select(boxes: &[TextBox]) -> Option<RaidRef> {
 pub fn unrestricted_stage(boxes: &[TextBox]) -> Option<RaidRef> {
     let boss = unrestricted_boss(boxes, true)?;
     let (attack, armors) = pills(boxes, |b| b.x0 > 800.0 && b.y0 > 380.0 && b.y1 < 460.0);
-    Some(RaidRef { armors, attack, level: recommended_level(boxes), ..RaidRef::named(RaidMode::UnrestrictedRaid, &boss.text) })
+    Some(RaidRef { words: RaidScreenWords { armors, attack, level: recommended_level(boxes) }, ..RaidRef::named(RaidMode::UnrestrictedRaid, &boss.text) })
 }
 
 /// Remembers the raid encounter across the screens that do not name it.
@@ -293,7 +305,7 @@ mod tests {
     fn every_boss_on_the_mock_list_is_read_with_its_armor_and_the_dual_armor_stays_two() {
         for (i, (boss, armors)) in MOCK_BOSSES.iter().enumerate() {
             let r = mock_boss_from_list(&boxes(&format!("raid-mock-m{i:02}"))).unwrap_or_else(|| panic!("m{i:02}"));
-            assert_eq!((r.boss.as_str(), r.armors.iter().map(String::as_str).collect::<Vec<_>>()), (*boss, armors.to_vec()), "m{i:02}");
+            assert_eq!((r.boss.as_str(), r.words.armors.iter().map(String::as_str).collect::<Vec<_>>()), (*boss, armors.to_vec()), "m{i:02}");
             assert_eq!((r.mode, r.difficulty), (RaidMode::MockTotalAssault, None), "the list selects no difficulty");
         }
     }
@@ -323,15 +335,15 @@ mod tests {
     #[test]
     fn the_room_popup_names_difficulty_boss_level_attack_and_armor() {
         let r = room_from_info(&boxes("raid-mock-room-info")).unwrap();
-        assert_eq!((r.mode, r.boss.as_str(), r.difficulty, r.level), (RaidMode::MockTotalAssault, "시로&쿠로", Some(0), Some(17)));
-        assert_eq!((r.attack.as_deref(), r.armors.as_slice()), (Some("일반"), ["특수장갑".to_string()].as_slice()));
+        assert_eq!((r.mode, r.boss.as_str(), r.difficulty, r.words.level), (RaidMode::MockTotalAssault, "시로&쿠로", Some(0), Some(17)));
+        assert_eq!((r.words.attack.as_deref(), r.words.armors.as_slice()), (Some("일반"), ["특수장갑".to_string()].as_slice()));
     }
 
     #[test]
     fn the_stage_screen_names_boss_level_attack_and_armor_and_the_select_screen_the_boss() {
         let r = unrestricted_stage(&boxes("unrestricted-raid-stage01")).unwrap();
-        assert_eq!((r.mode, r.boss.as_str(), r.level, r.attack.as_deref()), (RaidMode::UnrestrictedRaid, "세트의분노", Some(25), Some("일반")));
-        assert_eq!(r.armors, ["경장갑"]);
+        assert_eq!((r.mode, r.boss.as_str(), r.words.level, r.words.attack.as_deref()), (RaidMode::UnrestrictedRaid, "세트의분노", Some(25), Some("일반")));
+        assert_eq!(r.words.armors, ["경장갑"]);
         assert_eq!(boss_from_unrestricted_select(&boxes("unrestricted-raid-select")).unwrap().boss, "세트의분노");
     }
 
@@ -344,9 +356,9 @@ mod tests {
             t.update(scene, &b).cloned()
         };
         let list = feed(&mut t, "raid-mock-m00").unwrap();
-        assert_eq!((list.boss.as_str(), list.difficulty, list.level), ("시로&쿠로", None, None));
+        assert_eq!((list.boss.as_str(), list.difficulty, list.words.level), ("시로&쿠로", None, None));
         let room = feed(&mut t, "raid-mock-room-info").unwrap();
-        assert_eq!((room.difficulty, room.level, room.attack.as_deref()), (Some(0), Some(17), Some("일반")));
+        assert_eq!((room.difficulty, room.words.level, room.words.attack.as_deref()), (Some(0), Some(17), Some("일반")));
         assert_eq!(room.terrains, list.terrains, "the popup keeps the tabs of the list under it");
         let formation = feed(&mut t, "raid-formation-empty").unwrap();
         assert_eq!(formation, room, "the formation names nothing and keeps the room");

@@ -1,7 +1,7 @@
 # Raid data (총력전, 종합전술시험, 월드 레이드, ...)
 
 What the wiki DB knows about raid-like encounters, where it comes from, what it cannot know, and what a screen
-reader has to hand it. Schema: `wikidb/schema.sql` (version 3). Code: `rust/crates/wikidb/src/schaledb.rs`
+reader has to hand it. Schema: `wikidb/schema.sql` (version 4). Code: `rust/crates/wikidb/src/schaledb.rs`
 (collector) and `rust/crates/wikidb/src/raid.rs` (lookup).
 
 ## Model
@@ -54,9 +54,9 @@ type of the enemies switches at position 5, where the record's `BulletTypeInsane
 
 Attack and armor type are properties of each enemy in a difficulty, not of the raid. A boss changes attack type
 with the difficulty: Binah is Normal on positions 0 to 4 and Pierce on 5 to 7, Hieronymus Normal then Explosion.
-Minions and summons can differ from the boss (Hieronymus' relics stay Normal). The mission shape counts enemies the
-way stage missions are counted, excluding ranks `Summoned`, `Student` (escorted transports) and
-`DestructibleProjectile`.
+Minions and summons can differ from the boss (Hieronymus' relics stay Normal). The mission shape takes armor and attack types as shares of the enemy HP (`v_raid_armor_share`,
+`v_raid_attack_share`), see `docs/enemy-weighting.md`; ranks `Summoned`, `Student` and `DestructibleProjectile`
+weigh nothing.
 
 ## Lookup API (`baocr_wikidb`, module `raid`)
 

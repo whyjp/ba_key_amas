@@ -1,7 +1,7 @@
 //! Is a squad a good fit for a mission? A rough guide, not a simulation: it compares the
 //! squad's attack and armor types and its terrain adaptation with the mission's enemies,
 //! relative to what the average released student would do on the same mission.
-use crate::wiki::{MissionBrief, StudentBrief, Tally, Wiki};
+use crate::wiki::{MissionBrief, Share, StudentBrief, Wiki};
 use anyhow::Result;
 use std::collections::HashMap;
 
@@ -111,7 +111,7 @@ pub fn rates_by_type(s: &StudentBrief) -> bool {
 }
 
 /// The three figures a fit is made of. `attack` is the damage multiplier of the student's
-/// attack type against the mission's enemies (weighted by how many of each armor), `taken`
+/// attack type against the mission's enemies (weighted by each armor's share of the enemy HP), `taken`
 /// the multiplier of the enemies' attack types against the student's armor (below 1.0 the
 /// armor holds), `terrain` the adaptation grade 0..=4 when the terrain is known.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -162,12 +162,12 @@ pub fn fit_tier(m: Matchup) -> Fit {
     }
 }
 
-/// Mission's enemy armor types with their share of the enemies.
+/// Mission's enemy armor types with their share of the enemy weight (HP, see docs/enemy-weighting.md).
 pub fn enemy_armors(brief: &MissionBrief) -> Vec<(&str, f64)> {
     shares(&brief.armor)
 }
 
-/// Mission's enemy attack types with their share of the enemies.
+/// Mission's enemy attack types with their share of the enemy weight.
 pub fn enemy_attacks(brief: &MissionBrief) -> Vec<(&str, f64)> {
     shares(&brief.attack)
 }
@@ -203,12 +203,13 @@ pub fn rate(s: &StudentBrief, brief: &MissionBrief, terrain: Option<&str>, types
 const FAVORABLE_AT: f64 = 1.08;
 const UNFAVORABLE_AT: f64 = 0.94;
 
-fn shares(list: &[Tally]) -> Vec<(&str, f64)> {
-    let total: i64 = list.iter().map(|t| t.n).sum();
-    if total <= 0 {
+/// The shares of a list, which the database gives summing to 1. A list of nothing stays nothing.
+fn shares(list: &[Share]) -> Vec<(&str, f64)> {
+    let total: f64 = list.iter().map(|t| t.share).sum();
+    if total <= 0.0 {
         return Vec::new();
     }
-    list.iter().map(|t| (t.code.as_str(), t.n as f64 / total as f64)).collect()
+    list.iter().map(|t| (t.code.as_str(), t.share / total)).collect()
 }
 
 fn mean(xs: impl Iterator<Item = f64>) -> Option<f64> {
@@ -306,7 +307,7 @@ mod tests {
     }
 
     fn mission() -> MissionBrief {
-        let tally = |code: &str, n: i64| Tally { code: code.into(), ko: code.into(), n };
+        let share = |code: &str, share: f64| Share { code: code.into(), ko: code.into(), share, heads: 1 };
         MissionBrief {
             stage_id: 1,
             name: "m".into(),
@@ -315,8 +316,8 @@ mod tests {
             difficulty: 0,
             terrain: None,
             recommended_level: None,
-            attack: vec![tally("Explosion", 4)],
-            armor: vec![tally("LightArmor", 4)],
+            attack: vec![share("Explosion", 1.0)],
+            armor: vec![share("LightArmor", 1.0)],
             best_attack: vec![],
         }
     }
@@ -340,6 +341,18 @@ mod tests {
         assert_eq!(good.verdict, Verdict::Favorable);
         assert_eq!(bad.verdict, Verdict::Unfavorable);
         assert!(good.members == 1);
+    }
+
+    #[test]
+    fn the_expected_damage_is_the_mean_over_the_armor_shares() {
+        let mut m = mission();
+        let share = |code: &str, share: f64| Share { code: code.into(), ko: code.into(), share, heads: 1 };
+        m.armor = vec![share("LightArmor", 0.8), share("HeavyArmor", 0.2)];
+        m.attack = vec![share("Explosion", 0.75), share("Pierce", 0.25)];
+        assert!((attack_multiplier(&m, "Explosion", &types()) - 1.8).abs() < 1e-9, "0.8 * 2.0 + 0.2 * 1.0");
+        assert!((attack_multiplier(&m, "Pierce", &types()) - 0.8).abs() < 1e-9, "0.8 * 0.5 + 0.2 * 2.0");
+        // the enemy's attacks against a light-armored student: 0.75 * 2.0 + 0.25 * 0.5
+        assert!((damage_taken(&m, "LightArmor", &types()) - 1.625).abs() < 1e-9);
     }
 
     #[test]

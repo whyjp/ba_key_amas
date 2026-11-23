@@ -121,10 +121,6 @@ pub fn pick_season(seasons: &[RaidSeason], now: i64) -> Option<SeasonPick> {
     Some(SeasonPick { season: nearest.2.clone(), relation })
 }
 
-/// Enemy ranks that are not something the squad attacks or is attacked by as a unit: summons,
-/// escorted transports and shootable projectiles are left out of a mission's type counts.
-const NOT_COUNTED_RANKS: [&str; 3] = ["Summoned", "Student", "DestructibleProjectile"];
-
 impl Wiki {
     /// Global-released raids whose name is `name` (spaces and punctuation ignored). When none
     /// has exactly that name, those whose name starts with it. The same name in several kinds
@@ -203,28 +199,29 @@ impl Wiki {
     }
 
     /// One difficulty of a raid as the mission shape the formation verdict reads. `None` when
-    /// there is no such difficulty. The enemies are counted as the missions are, per attack and
-    /// armor type, leaving out `NOT_COUNTED_RANKS`. The terrain is the season's; without a
-    /// season it is the raid's only terrain, or unknown when it can be played on several.
+    /// there is no such difficulty. Armor and attack types are the DB's shares of the encounter's
+    /// enemy weight (`v_raid_armor_share`, `v_raid_attack_share`), never what a screen shows. The terrain is
+    /// the season's; without a season it is the raid's only terrain, or unknown when it can be played on several.
     /// `stage_id` holds the raid id (not a stage) and `difficulty` the difficulty `idx`.
     pub fn raid_mission(&self, kind: RaidKind, id: i64, idx: i64, season: Option<&RaidSeason>) -> Result<Option<MissionBrief>> {
         let Some(difficulty) = self.raid_difficulties(kind, id)?.into_iter().find(|d| d.idx == idx) else { return Ok(None) };
         let (display, terrains): (String, Option<String>) = self.conn.query_row("SELECT display_ko, terrain FROM raid WHERE kind = ?1 AND id = ?2", params![kind.as_str(), id], |r| Ok((r.get(0)?, r.get(1)?)))?;
         let terrains: Vec<String> = terrains.map_or_else(|| Ok(Vec::new()), |t| serde_json::from_str(&t))?;
         let terrain = season.map(|s| s.terrain.clone()).or_else(|| (terrains.len() == 1).then(|| terrains[0].clone()));
-        let excluded = NOT_COUNTED_RANKS.map(|r| format!("'{r}'")).join(", ");
-        let count_by = |column: &str, kind_of_label: &str| -> Result<Vec<Tally>> {
-            let sql = format!(
-                "SELECT e.{column}, COUNT(*) FROM raid_difficulty_enemy de JOIN enemy e ON e.id = de.enemy_id
-                 WHERE de.raid_kind = ?1 AND de.raid_id = ?2 AND de.idx = ?3 AND e.{column} IS NOT NULL AND e.rank NOT IN ({excluded})
-                 GROUP BY e.{column} ORDER BY COUNT(*) DESC, e.{column}"
-            );
-            let mut st = self.conn.prepare(&sql)?;
-            let rows = st.query_map(params![kind.as_str(), id, idx], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
-            rows.map(|r| r.map(|(code, n)| Tally { ko: self.label(kind_of_label, &code), code, n }).map_err(Into::into)).collect()
-        };
-        let armor = count_by("armor_type", "ArmorType")?;
-        let attack = count_by("bullet_type", "BulletType")?;
+        let key: [&dyn rusqlite::ToSql; 3] = [&kind.as_str(), &id, &idx];
+        let filter = "raid_kind = ?1 AND raid_id = ?2 AND idx = ?3";
+        let armor = self.read_shares("v_raid_armor_share", "armor_type", "ArmorType", filter, &key)?;
+        let attack = self.read_shares("v_raid_attack_share", "bullet_type", "BulletType", filter, &key)?;
+        // the level the encounter gives its lead enemy (the source's own list, else SchaleDB's default for the difficulty)
+        let lead_level: Option<i64> = self
+            .conn
+            .query_row(
+                "SELECT level FROM v_raid_enemy WHERE raid_kind = ?1 AND raid_id = ?2 AND idx = ?3 AND rank IN ('Boss', 'Champion') ORDER BY rank = 'Boss' DESC, ordinal LIMIT 1",
+                params![kind.as_str(), id, idx],
+                |r| r.get(0),
+            )
+            .ok()
+            .flatten();
         let title = match (&difficulty.label, difficulty.level, difficulty.floor_start) {
             (Some(label), _, _) => format!("{display} ({label})"),
             (None, _, Some(floor)) => format!("{display} ({floor}층~)"),
@@ -238,68 +235,11 @@ impl Wiki {
             stage_no: None,
             difficulty: idx,
             terrain: terrain.map(|code| Tally { ko: self.label("Terrain", &code), code, n: 0 }),
-            recommended_level: difficulty.level,
+            recommended_level: difficulty.level.or(lead_level),
             best_attack: self.best_attack_against(&armor)?,
             attack,
             armor,
         }))
-    }
-
-    /// The brief with the boss's armor and attack type taken from what the screen shows instead of
-    /// from the database: the screen is what the player sees. `db_boss` is the lead enemy the brief
-    /// counted; it is replaced by the screen's armor codes (a boss with two armors counts for both)
-    /// and attack code, and the best attack types are worked out again from the new armors. Codes
-    /// that agree with the database change nothing; an empty `armors` or no `attack` leaves that
-    /// part as it was.
-    pub fn with_screen_types(&self, mut brief: MissionBrief, db_boss: Option<&RaidBoss>, armors: &[String], attack: Option<&str>) -> Result<MissionBrief> {
-        let swap = |tallies: &mut Vec<Tally>, kind: &str, out: Option<&str>, add: &[String]| {
-            let agrees = out.is_some_and(|o| add.iter().any(|a| a == o));
-            if add.is_empty() {
-                return;
-            }
-            if !agrees {
-                if let Some(i) = out.and_then(|o| tallies.iter().position(|t| t.code == o)) {
-                    tallies[i].n -= 1;
-                    if tallies[i].n <= 0 {
-                        tallies.remove(i);
-                    }
-                }
-            }
-            for code in add.iter().filter(|c| Some(c.as_str()) != out) {
-                match tallies.iter_mut().find(|t| &t.code == code) {
-                    // the boss agrees with the database: a second armor it shows is only counted when the encounter has none of it yet
-                    Some(_) if agrees => {}
-                    Some(t) => t.n += 1,
-                    None => tallies.push(Tally { ko: self.label(kind, code), code: code.clone(), n: 1 }),
-                }
-            }
-            tallies.sort_by(|a, b| b.n.cmp(&a.n).then_with(|| a.code.cmp(&b.code)));
-        };
-        swap(&mut brief.armor, "ArmorType", db_boss.and_then(|b| b.armor_type.as_deref()), armors);
-        let attacks: Vec<String> = attack.map(str::to_string).into_iter().collect();
-        swap(&mut brief.attack, "BulletType", db_boss.and_then(|b| b.bullet_type.as_deref()), &attacks);
-        brief.best_attack = self.best_attack_against(&brief.armor)?;
-        Ok(brief)
-    }
-
-    /// Student attack types ranked by average damage multiplier against `armor` (n in percent).
-    fn best_attack_against(&self, armor: &[Tally]) -> Result<Vec<Tally>> {
-        let total: i64 = armor.iter().map(|a| a.n).sum();
-        if total == 0 {
-            return Ok(Vec::new());
-        }
-        let table = self.type_table()?;
-        let mut st = self.conn.prepare("SELECT DISTINCT bullet_type FROM student")?;
-        let bullets: Vec<String> = st.query_map([], |r| r.get(0))?.collect::<std::result::Result<_, _>>()?;
-        let mut out: Vec<Tally> = bullets
-            .into_iter()
-            .map(|code| {
-                let mean = armor.iter().map(|a| a.n as f64 * table.get(&code, &a.code)).sum::<f64>() / total as f64;
-                Tally { ko: self.label("BulletType", &code), code, n: (mean * 100.0).round() as i64 }
-            })
-            .collect();
-        out.sort_by(|a, b| b.n.cmp(&a.n).then_with(|| a.code.cmp(&b.code)));
-        Ok(out)
     }
 }
 
@@ -351,6 +291,8 @@ mod tests {
                     ('TimeAttack',1,0,NULL,25,NULL,180,NULL,1);
              INSERT INTO raid_difficulty_enemy VALUES ('Raid',1,0,0,10),('Raid',1,5,0,11),('Raid',1,5,1,13),('Raid',1,5,2,14),('Raid',1,5,3,14),
                     ('InteractiveWorldRaid',8540000,0,0,10),('InteractiveWorldRaid',8540000,0,1,12),('TimeAttack',1,0,0,14);
+             INSERT INTO raid_difficulty_enemy_weight VALUES ('Raid',1,0,0,1,1,100,100,NULL),('Raid',1,5,0,1,1,100,100,NULL),('Raid',1,5,1,1,1,100,0,'rank'),('Raid',1,5,2,1,1,100,100,NULL),('Raid',1,5,3,1,1,100,100,NULL),
+                    ('InteractiveWorldRaid',8540000,0,0,17,1,100,100,NULL),('InteractiveWorldRaid',8540000,0,1,17,1,100,0,'rank'),('TimeAttack',1,0,0,25,1,100,100,NULL);
              INSERT INTO raid_season (mode, season_id, season_display, raid_kind, raid_id, terrain, start_at, end_at, open_difficulty) VALUES
                     ('Raid',3,'1','Raid',1,'Outdoor',100,200,NULL),('Raid',9,'7','Raid',1,'Street',300,400,NULL),('Eliminate',2,'BETA','Raid',1,'Street',500,600,'{\"LightArmor\":5}');",
         )
@@ -404,39 +346,19 @@ mod tests {
         let s = w.raid_seasons(1).unwrap().into_iter().find(|s| s.season_id == 9).unwrap();
         let m = w.raid_mission(RaidKind::Raid, 1, 5, Some(&s)).unwrap().unwrap();
         assert_eq!((m.name.as_str(), m.difficulty, m.terrain.as_ref().map(|t| t.ko.as_str())), ("비나 (Insane)", 5, Some("시가지")), "the season's terrain");
-        // summons are left out: the boss and two minions remain
-        assert_eq!(m.attack.iter().map(|t| (t.code.as_str(), t.n)).collect::<Vec<_>>(), vec![("Pierce", 3)]);
-        assert_eq!(m.armor.iter().map(|t| (t.code.as_str(), t.n)).collect::<Vec<_>>(), vec![("LightArmor", 2), ("HeavyArmor", 1)]);
+        // summons are left out: the boss and two minions remain, all of the same weight
+        let mix = |v: &[crate::wiki::Share]| v.iter().map(|t| (t.code.clone(), t.heads, (t.share * 100.0).round() as i64)).collect::<Vec<_>>();
+        assert_eq!(mix(&m.attack), vec![("Pierce".to_string(), 3, 100)]);
+        assert_eq!(mix(&m.armor), vec![("LightArmor".to_string(), 2, 67), ("HeavyArmor".to_string(), 1, 33)]);
         // 2 light + 1 heavy: explosion (200+200+100)/3 = 167 %, pierce (50+50+200)/3 = 100 %
         assert_eq!(m.best_attack.iter().map(|t| (t.code.as_str(), t.n)).collect::<Vec<_>>(), vec![("Explosion", 167), ("Pierce", 100)]);
         let normal = w.raid_mission(RaidKind::Raid, 1, 0, None).unwrap().unwrap();
         assert_eq!(normal.terrain, None, "two possible terrains and no season: unknown");
         let students = w.raid_mission(RaidKind::InteractiveWorldRaid, 8540000, 0, None).unwrap().unwrap();
         assert_eq!(students.terrain.map(|t| t.code), Some("Outdoor".into()), "a single possible terrain");
-        assert_eq!(students.armor.iter().map(|t| t.n).sum::<i64>(), 1, "the escorted transport is not an enemy");
+        assert_eq!(students.armor.iter().map(|t| t.heads).sum::<i64>(), 1, "the escorted transport is not an enemy");
         assert_eq!(w.raid_mission(RaidKind::TimeAttack, 1, 0, None).unwrap().unwrap().name, "사격 시험 · 야외 · 경장갑 (Lv.25)");
         assert!(w.raid_mission(RaidKind::Raid, 1, 3, None).unwrap().is_none(), "no such difficulty");
-    }
-
-    #[test]
-    fn what_the_screen_shows_replaces_the_lead_enemys_types_and_the_best_attacks_follow() {
-        let w = fixture();
-        let m = w.raid_mission(RaidKind::Raid, 1, 5, None).unwrap().unwrap();
-        let boss = w.raid_difficulties(RaidKind::Raid, 1).unwrap().into_iter().find(|d| d.idx == 5).and_then(|d| d.boss);
-        let codes = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        // the same as the database says: nothing changes
-        assert_eq!(w.with_screen_types(m.clone(), boss.as_ref(), &codes(&["HeavyArmor"]), Some("Pierce")).unwrap(), m);
-        // nothing on the screen: nothing changes
-        assert_eq!(w.with_screen_types(m.clone(), boss.as_ref(), &[], None).unwrap(), m);
-        // a boss with two armors counts for both and the heavy one it replaced is gone: 3 light, 1 unarmed
-        let dual = w.with_screen_types(m.clone(), boss.as_ref(), &codes(&["LightArmor", "Unarmed"]), Some("Explosion")).unwrap();
-        assert_eq!(dual.armor.iter().map(|t| (t.code.as_str(), t.n)).collect::<Vec<_>>(), vec![("LightArmor", 3), ("Unarmed", 1)]);
-        assert_eq!(dual.attack.iter().map(|t| (t.code.as_str(), t.n)).collect::<Vec<_>>(), vec![("Pierce", 2), ("Explosion", 1)]);
-        assert_eq!(dual.best_attack.first().map(|t| t.code.as_str()), Some("Explosion"), "recomputed against light armor");
-        // the boss keeps its heavy armor and the screen adds an armor the encounter has none of: one more; one it has: no change
-        let more = w.with_screen_types(m.clone(), boss.as_ref(), &codes(&["HeavyArmor", "Unarmed"]), None).unwrap();
-        assert_eq!(more.armor.iter().map(|t| (t.code.as_str(), t.n)).collect::<Vec<_>>(), vec![("LightArmor", 2), ("HeavyArmor", 1), ("Unarmed", 1)]);
-        assert_eq!(w.with_screen_types(m.clone(), boss.as_ref(), &codes(&["HeavyArmor", "LightArmor"]), None).unwrap().armor, m.armor, "both armors are already in the encounter");
     }
 
     #[test]

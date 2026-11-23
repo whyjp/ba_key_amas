@@ -2,7 +2,7 @@
 -- Reference data only, rebuilt from sources by the collectors. The user's own roster stays
 -- in the scan output (index.json) and joins to this DB by student.id.
 -- Local assist use only: the DB file is not distributed (see source.note).
--- Version 3. Bump meta.schema_version on every incompatible change.
+-- Version 4 (3 plus the enemy weight tables and share views). Bump meta.schema_version on every incompatible change.
 
 PRAGMA foreign_keys = ON;
 
@@ -201,26 +201,17 @@ CREATE TABLE furniture_interaction (
 );
 CREATE INDEX furniture_interaction_student ON furniture_interaction (student_id);
 
--- What a stage's enemies are made of: how many enemies of each armor type it holds.
-CREATE VIEW v_stage_armor AS
-SELECT f.stage_id AS stage_id, e.armor_type AS armor_type, COUNT(*) AS enemies
-FROM stage_formation f
-JOIN formation_enemy fe ON fe.formation_id = f.id
-JOIN enemy e ON e.id = fe.enemy_id
-WHERE e.armor_type IS NOT NULL AND e.rank <> 'Summoned'
-GROUP BY f.stage_id, e.armor_type;
-
 -- How well each student's attack type does against a stage's enemies (average multiplier,
--- weighted by enemy count, in basis points) and how well the student fits the terrain.
+-- weighted by the enemies' share of the stage, in basis points) and how well the student fits the terrain.
 CREATE VIEW v_student_vs_stage AS
 SELECT s.id AS stage_id,
        st.id AS student_id,
-       CAST(ROUND(1.0 * SUM(a.enemies * te.multiplier_bp) / SUM(a.enemies)) AS INTEGER) AS effectiveness_bp,
+       CAST(ROUND(SUM(a.share * te.multiplier_bp)) AS INTEGER) AS effectiveness_bp,
        CASE s.terrain WHEN 'Street' THEN st.street_adapt
                       WHEN 'Outdoor' THEN st.outdoor_adapt
                       WHEN 'Indoor' THEN st.indoor_adapt END AS terrain_adapt
 FROM stage s
-JOIN v_stage_armor a ON a.stage_id = s.id
+JOIN v_stage_armor_share a ON a.stage_id = s.id
 JOIN student st ON st.released_global = 1
 JOIN type_effectiveness te ON te.bullet_type = st.bullet_type AND te.armor_type = a.armor_type
 GROUP BY s.id, st.id;
@@ -231,4 +222,76 @@ SELECT d.raid_kind, d.raid_id, d.idx, d.label, d.level, d.floor_start, d.battle_
        d.boss_enemy_id, b.name_ko AS boss_name_ko, b.bullet_type AS boss_bullet_type, b.armor_type AS boss_armor_type
 FROM raid_difficulty d LEFT JOIN enemy b ON b.id = d.boss_enemy_id;
 
-INSERT INTO meta (key, value) VALUES ('schema_version', '3');
+-- How much each enemy of an encounter counts toward its armor and attack type mix. Derived by the
+-- collector (rust/crates/wikidb/src/weight.rs, model in docs/enemy-weighting.md), never read from a
+-- screen: the weight is the enemy's HP at the level and grade the encounter gives it, 0 when the
+-- squad does not fight it as an enemy of its own (`excluded` says why: rank | mirror | no-hp).
+CREATE TABLE formation_enemy_weight (
+    formation_id INTEGER NOT NULL,
+    ordinal      INTEGER NOT NULL,
+    level        INTEGER,
+    grade        INTEGER,
+    hp           INTEGER,
+    weight       REAL NOT NULL CHECK (weight >= 0),
+    excluded     TEXT,
+    PRIMARY KEY (formation_id, ordinal),
+    FOREIGN KEY (formation_id, ordinal) REFERENCES formation_enemy(formation_id, ordinal) ON DELETE CASCADE
+);
+
+CREATE TABLE raid_difficulty_enemy_weight (
+    raid_kind TEXT NOT NULL,
+    raid_id   INTEGER NOT NULL,
+    idx       INTEGER NOT NULL,
+    ordinal   INTEGER NOT NULL,
+    level     INTEGER,
+    grade     INTEGER,
+    hp        INTEGER,
+    weight    REAL NOT NULL CHECK (weight >= 0),
+    excluded  TEXT,
+    PRIMARY KEY (raid_kind, raid_id, idx, ordinal),
+    FOREIGN KEY (raid_kind, raid_id, idx, ordinal) REFERENCES raid_difficulty_enemy(raid_kind, raid_id, idx, ordinal) ON DELETE CASCADE
+);
+
+-- Every weighted enemy of an encounter in one shape (`wave` is the formation's position in its stage).
+CREATE VIEW v_stage_enemy AS
+SELECT f.stage_id AS stage_id, f.id AS formation_id, f.ordinal AS wave, fe.ordinal AS ordinal, e.id AS enemy_id, e.name_ko AS name_ko, e.rank AS rank,
+       e.armor_type AS armor_type, e.bullet_type AS bullet_type, w.level AS level, w.hp AS hp, w.weight AS weight, w.excluded AS excluded
+FROM stage_formation f
+JOIN formation_enemy fe ON fe.formation_id = f.id
+JOIN formation_enemy_weight w ON w.formation_id = fe.formation_id AND w.ordinal = fe.ordinal
+JOIN enemy e ON e.id = fe.enemy_id;
+
+CREATE VIEW v_raid_enemy AS
+SELECT de.raid_kind AS raid_kind, de.raid_id AS raid_id, de.idx AS idx, de.ordinal AS ordinal, e.id AS enemy_id, e.name_ko AS name_ko, e.rank AS rank,
+       e.armor_type AS armor_type, e.bullet_type AS bullet_type, w.level AS level, w.hp AS hp, w.weight AS weight, w.excluded AS excluded
+FROM raid_difficulty_enemy de
+JOIN raid_difficulty_enemy_weight w ON w.raid_kind = de.raid_kind AND w.raid_id = de.raid_id AND w.idx = de.idx AND w.ordinal = de.ordinal
+JOIN enemy e ON e.id = de.enemy_id;
+
+-- Armor and attack type mix per stage, per stage formation (wave) and per raid difficulty: the
+-- counted enemies (`enemies`), their weight and its share of the encounter (0..1).
+CREATE VIEW v_stage_armor_share AS
+SELECT stage_id, armor_type, COUNT(*) AS enemies, SUM(weight) AS weight, SUM(weight) / SUM(SUM(weight)) OVER (PARTITION BY stage_id) AS share
+FROM v_stage_enemy WHERE weight > 0 AND armor_type IS NOT NULL GROUP BY stage_id, armor_type;
+
+CREATE VIEW v_stage_attack_share AS
+SELECT stage_id, bullet_type, COUNT(*) AS enemies, SUM(weight) AS weight, SUM(weight) / SUM(SUM(weight)) OVER (PARTITION BY stage_id) AS share
+FROM v_stage_enemy WHERE weight > 0 AND bullet_type IS NOT NULL GROUP BY stage_id, bullet_type;
+
+CREATE VIEW v_formation_armor_share AS
+SELECT stage_id, formation_id, wave, armor_type, COUNT(*) AS enemies, SUM(weight) AS weight, SUM(weight) / SUM(SUM(weight)) OVER (PARTITION BY formation_id) AS share
+FROM v_stage_enemy WHERE weight > 0 AND armor_type IS NOT NULL GROUP BY formation_id, armor_type;
+
+CREATE VIEW v_formation_attack_share AS
+SELECT stage_id, formation_id, wave, bullet_type, COUNT(*) AS enemies, SUM(weight) AS weight, SUM(weight) / SUM(SUM(weight)) OVER (PARTITION BY formation_id) AS share
+FROM v_stage_enemy WHERE weight > 0 AND bullet_type IS NOT NULL GROUP BY formation_id, bullet_type;
+
+CREATE VIEW v_raid_armor_share AS
+SELECT raid_kind, raid_id, idx, armor_type, COUNT(*) AS enemies, SUM(weight) AS weight, SUM(weight) / SUM(SUM(weight)) OVER (PARTITION BY raid_kind, raid_id, idx) AS share
+FROM v_raid_enemy WHERE weight > 0 AND armor_type IS NOT NULL GROUP BY raid_kind, raid_id, idx, armor_type;
+
+CREATE VIEW v_raid_attack_share AS
+SELECT raid_kind, raid_id, idx, bullet_type, COUNT(*) AS enemies, SUM(weight) AS weight, SUM(weight) / SUM(SUM(weight)) OVER (PARTITION BY raid_kind, raid_id, idx) AS share
+FROM v_raid_enemy WHERE weight > 0 AND bullet_type IS NOT NULL GROUP BY raid_kind, raid_id, idx, bullet_type;
+
+INSERT INTO meta (key, value) VALUES ('schema_version', '4');
