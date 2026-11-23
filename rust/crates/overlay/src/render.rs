@@ -132,12 +132,32 @@ pub(crate) fn over(dst: &mut Rgba<u8>, rgb: [u8; 3], alpha: f32) {
     dst[3] = (out_a * 255.0).round().clamp(0.0, 255.0) as u8;
 }
 
-/// Coverage (0..1) of pixel centre (px,py) by a rounded rect, anti-aliased by a 1px ramp.
-fn rrect_cov(px: f32, py: f32, x: f32, y: f32, w: f32, h: f32, r: f32) -> f32 {
+/// Signed distance of (px,py) to a rounded rect's edge: negative inside.
+fn rrect_dist(px: f32, py: f32, x: f32, y: f32, w: f32, h: f32, r: f32) -> f32 {
     let (cx, cy) = (x + w / 2.0, y + h / 2.0);
     let (qx, qy) = ((px - cx).abs() - (w / 2.0 - r), (py - cy).abs() - (h / 2.0 - r));
-    let d = (qx.max(0.0).powi(2) + qy.max(0.0).powi(2)).sqrt() + qx.max(qy).min(0.0) - r;
-    (0.5 - d).clamp(0.0, 1.0)
+    (qx.max(0.0).powi(2) + qy.max(0.0).powi(2)).sqrt() + qx.max(qy).min(0.0) - r
+}
+
+/// Coverage (0..1) of pixel centre (px,py) by a rounded rect, anti-aliased by a 1px ramp.
+fn rrect_cov(px: f32, py: f32, x: f32, y: f32, w: f32, h: f32, r: f32) -> f32 {
+    (0.5 - rrect_dist(px, py, x, y, w, h, r)).clamp(0.0, 1.0)
+}
+
+/// The outline of a rounded rect, `stroke` px thick, drawn inward from its edge.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn stroke_rrect(img: &mut RgbaImage, x: f32, y: f32, w: f32, h: f32, r: f32, stroke: f32, rgb: [u8; 3], alpha: f32) {
+    let (x0, y0) = ((x.floor() as i32 - 1).max(0), (y.floor() as i32 - 1).max(0));
+    let (x1, y1) = (((x + w).ceil() as i32 + 1).min(img.width() as i32), ((y + h).ceil() as i32 + 1).min(img.height() as i32));
+    for py in y0..y1 {
+        for px in x0..x1 {
+            let d = rrect_dist(px as f32 + 0.5, py as f32 + 0.5, x, y, w, h, r);
+            let cov = (0.5 - d).clamp(0.0, 1.0) * (0.5 + d + stroke).clamp(0.0, 1.0);
+            if cov > 0.0 {
+                over(img.get_pixel_mut(px as u32, py as u32), rgb, alpha * cov);
+            }
+        }
+    }
 }
 
 pub(crate) fn fill_rrect(img: &mut RgbaImage, x: f32, y: f32, w: f32, h: f32, r: f32, color: impl Fn(f32, f32) -> ([u8; 3], f32)) {

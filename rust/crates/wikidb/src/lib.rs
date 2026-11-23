@@ -5,7 +5,10 @@ pub mod formation;
 pub mod raid;
 pub mod schaledb;
 pub mod wiki;
-pub use formation::{adaptation_factor, evaluate, FormationScore, TypeTable, Verdict};
+pub use formation::{
+    adaptation_factor, attack_multiplier, damage_taken, enemy_armors, enemy_attacks, evaluate, fit_tier, matchup, rate, rates_by_type, special_role, Fit, FormationScore, Matchup, Rating, SupportRole, TypeTable,
+    Verdict,
+};
 pub use raid::{pick_season, RaidBoss, RaidCandidate, RaidDifficulty, RaidKind, RaidSeason, SeasonMode, SeasonPick, SeasonRelation};
 pub use wiki::{FurnitureBrief, FurnitureStudent, MissionBrief, StudentBrief, Tally, Wiki};
 

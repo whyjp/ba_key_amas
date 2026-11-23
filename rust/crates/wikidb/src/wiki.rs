@@ -45,6 +45,8 @@ pub struct StudentBrief {
     pub indoor: u8,
     /// "Main" (STRIKER) or "Support" (SPECIAL).
     pub squad_type: String,
+    /// The source's tactic role (DamageDealer | Tanker | Healer | Supporter | Vehicle), "" if unknown.
+    pub role: String,
 }
 
 impl StudentBrief {
@@ -128,7 +130,7 @@ impl Wiki {
     /// Every Global-released student.
     pub fn students(&self) -> Result<Vec<StudentBrief>> {
         let mut st = self.conn.prepare(
-            "SELECT id, name_ko, bullet_type, armor_type, COALESCE(street_adapt, 0), COALESCE(outdoor_adapt, 0), COALESCE(indoor_adapt, 0), squad_type
+            "SELECT id, name_ko, bullet_type, armor_type, COALESCE(street_adapt, 0), COALESCE(outdoor_adapt, 0), COALESCE(indoor_adapt, 0), squad_type, COALESCE(tactic_role, '')
              FROM student WHERE released_global = 1 ORDER BY id",
         )?;
         let rows = st.query_map([], |r| {
@@ -141,6 +143,7 @@ impl Wiki {
                 outdoor: r.get::<_, i64>(5)?.clamp(0, 4) as u8,
                 indoor: r.get::<_, i64>(6)?.clamp(0, 4) as u8,
                 squad_type: r.get(7)?,
+                role: r.get(8)?,
             })
         })?;
         rows.collect::<std::result::Result<_, _>>().map_err(Into::into)
@@ -398,7 +401,7 @@ mod tests {
 
     #[test]
     fn ocr_names_are_matched_to_students_and_ambiguity_gives_none() {
-        let mk = |id: i64, name: &str| StudentBrief { id, name: name.into(), bullet_type: "Pierce".into(), armor_type: "Light".into(), street: 4, outdoor: 2, indoor: 0, squad_type: "Main".into() };
+        let mk = |id: i64, name: &str| StudentBrief { id, name: name.into(), bullet_type: "Pierce".into(), armor_type: "Light".into(), street: 4, outdoor: 2, indoor: 0, squad_type: "Main".into(), role: String::new() };
         let all = vec![mk(1, "시로코*테러"), mk(2, "시로코"), mk(3, "호시노(무장)"), mk(4, "호시노"), mk(5, "슌"), mk(6, "하나코(수영복)")];
         let id = |t: &str| Wiki::match_student(&all, t).map(|s| s.id);
         assert_eq!(id("시로코테러"), Some(1), "the star is lost in OCR");

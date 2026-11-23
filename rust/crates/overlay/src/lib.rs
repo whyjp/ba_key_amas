@@ -15,10 +15,10 @@ mod scan;
 #[cfg(windows)]
 mod win;
 
-pub use marks::{render_marks, Icon, Mark};
+pub use marks::{render_marks, Frame, Icon, Mark};
 pub use dock::{dock_from_drop, dock_origin, Dock, Side};
 pub use input_block::set_escape_target;
-pub use panel::{ingame_origin, ingame_panel_width, panel_origin, panel_width, render_panel, render_panel_hits, render_tooltip, Chip, Hit, PanelState, Row, Tone, PANEL_BASE_W};
+pub use panel::{ingame_origin, ingame_panel_width, panel_origin, panel_width, render_panel, render_panel_hits, render_tooltip, Chip, FitEntry, Grade, Hit, MatrixRow, PanelState, Row, Tone, PANEL_BASE_W};
 
 pub use render::{load_fonts, BannerState, Fonts, Ltrb, Phase};
 pub use scan::{scan_card, scan_rows};
