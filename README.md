@@ -1,3 +1,16 @@
+# Blue Archive add-on
+
+An add-on app for Blue Archive (Windows, Global/Korean, 4:3 windowed). Run `baocr` with no arguments:
+it finds the game window whenever it appears (start it before or after the game, or restart the
+game), docks a small card against the window's left or right side (drag its header to move it; it
+snaps to the nearest side and remembers where), and hides while another window covers the game.
+It only looks at the game (screenshots + OCR): guide cards and icons (below) never send input.
+The student scan is one of its features, started by hand from the card's 설정 menu (the only
+thing that sends input to the game): the menu shows when the stored student list was last updated,
+the scan reads every student, and "상세 포함" also reads the stat popup and the two tabs (slower).
+Output is JSON only (`students.json`, `index.json`, `details/NNN/student.json`) in
+`%APPDATA%\baocr\students` (or `--out`). Settings: `%APPDATA%\baocr\overlay.json`.
+
 # Blue Archive student data extractor
 
 ## Rust implementation (current)
@@ -10,7 +23,8 @@ no C compiler, no Tesseract: PP-OCRv5 (Korean) runs in process through ONNX Runt
 cd rust
 cargo build --release
 target/release/baocr --image ../fixtures/detail-shun.png --out out-one        # parse a saved screenshot
-target/release/baocr --scan-arrows --from-first --out scan                    # scan the roster (HCU drives the game)
+target/release/baocr                                                          # the add-on (see above)
+target/release/baocr --scan-arrows --from-first --out scan                    # scan the roster from the command line (HCU drives the game)
 target/release/baocr --scan-arrows --from-first --fast --out scan             # skip the menu pass
 target/release/baocr --reextract scan [--ids 003,007]                         # retry from saved frames, no game input
 target/release/baocr --watch --out db                                         # passive background updater
