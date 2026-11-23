@@ -107,6 +107,8 @@ pub struct Hcu {
     /// Size of the GUI frame last reported by HCU (screenshots and input results both carry it).
     frame: std::sync::Mutex<(i64, i64)>,
     retrying: std::sync::atomic::AtomicBool,
+    /// Raised to stop everything: while set, every call fails at once (the player pressed ESC).
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Hcu {
@@ -115,7 +117,7 @@ impl Hcu {
     }
 
     pub fn with_runner(runner: Box<dyn Runner>) -> Self {
-        Self { runner, no_sleep: false, stats: Default::default(), frame: Default::default(), retrying: Default::default() }
+        Self { runner, no_sleep: false, stats: Default::default(), frame: Default::default(), retrying: Default::default(), cancel: Default::default() }
     }
 
     /// Binary from `$HCU_BIN`, else `vendor/hcu/computer-use[.exe]` beside the
@@ -180,7 +182,15 @@ impl Hcu {
         self.stats.lock().unwrap().clear();
     }
 
+    /// The flag that cancels this handle: once it is set every call fails with "cancelled".
+    pub fn cancel_token(&self) -> std::sync::Arc<std::sync::atomic::AtomicBool> {
+        self.cancel.clone()
+    }
+
     pub fn call(&self, args: &[&str]) -> Result<Record> {
+        if self.cancel.load(std::sync::atomic::Ordering::SeqCst) {
+            bail!("cancelled by the user");
+        }
         let started = std::time::Instant::now();
         let r = self.call_inner(args);
         if let Ok(rec) = &r {
@@ -347,6 +357,23 @@ mod tests {
     use super::*;
 
     const APPS: &str = "w22 \"New Tab - Aside\"  app=Aside\nw13 \"Blue Archive\"  app=BlueArchive  active\nw15 \"Main Page - Blue Archive Wiki - Chrome\"  app=chrome\n";
+
+    #[test]
+    fn a_raised_cancel_token_stops_every_call_before_it_runs() {
+        struct Never;
+        impl Runner for Never {
+            fn run(&self, _: &[String]) -> Result<String> {
+                panic!("a cancelled handle must not run anything")
+            }
+        }
+        let h = Hcu::with_runner(Box::new(Never));
+        h.cancel_token().store(true, std::sync::atomic::Ordering::SeqCst);
+        let e = h.call(&["gui", "screenshot"]).unwrap_err();
+        assert!(format!("{e:#}").contains("cancelled"), "{e:#}");
+        // and it can be lowered again for the next scan
+        h.cancel_token().store(false, std::sync::atomic::Ordering::SeqCst);
+        assert!(!h.cancel.load(std::sync::atomic::Ordering::SeqCst));
+    }
 
     #[test]
     fn exact_title_picks_game_window() {

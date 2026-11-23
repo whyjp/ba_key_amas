@@ -4,6 +4,10 @@
 //! on screen, asks every `Widget` what it would show, and sends each output where the
 //! `Settings` say (beside the game, inside it, nowhere) through the `Surface`. Clicks on
 //! the card's buttons come back as events and change the settings.
+//!
+//! The main card is always there while the add-on runs and says what the add-on is doing and
+//! what it can do: the game's state, what is on screen, how stale the student list is, the
+//! scan, the display switches and the way to close it. While a scan runs the card shows the scan.
 use crate::library::LibraryInfo;
 use crate::observe::{Observation, Observer};
 use crate::settings::{Placement, Settings};
@@ -12,23 +16,28 @@ use crate::widget::{is_mission_screen, Context, Kind, Lookup, Output, Widget, Wi
 use crate::widgets;
 use baocr_core::ocr_api::TextBox;
 use baocr_extract::scene::Scene;
-use baocr_overlay::{BannerState, Dock, PanelState, Row};
+use baocr_overlay::{scan_rows, BannerState, Dock, PanelState, Row};
 use baocr_wikidb::{StudentBrief, TypeTable, Wiki};
 use image::RgbImage;
+use std::cell::RefCell;
 use std::path::PathBuf;
+use std::time::SystemTime;
 
-const BUTTON_MENU: &str = "menu";
 const BUTTON_INGAME: &str = "ingame";
 const BUTTON_PLACE: &str = "place:";
 const BUTTON_SCAN: &str = "scan:start";
 const BUTTON_SCAN_DEEP: &str = "scan:deep";
+/// Sent by the card's 종료 button and by the tray icon's 종료.
+const BUTTON_QUIT: &str = "quit";
 
 /// Something the player asked for that the add-on itself does not do: the program's main loop
-/// carries it out (it is the only thing that sends input to the game).
+/// carries it out (the scan is the only thing that sends input to the game).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Command {
     /// Scan the student list; `deep` also reads the popup and the two tabs of each student.
     StartScan { deep: bool },
+    /// End the add-on.
+    Quit,
 }
 
 pub struct Assistant<'a, S: Surface> {
@@ -40,10 +49,16 @@ pub struct Assistant<'a, S: Surface> {
     settings: Settings,
     settings_path: Option<PathBuf>,
     surface: S,
-    menu_open: bool,
     last: Observation,
     library: LibraryInfo,
+    game_present: bool,
+    now: SystemTime,
+    /// The age line last shown, to redraw only when the minute it names changes.
+    age_shown: String,
     scanning: bool,
+    scan_state: RefCell<BannerState>,
+    /// The player's mouse and keyboard are blocked while the scan runs.
+    input_locked: bool,
     commands: Vec<Command>,
 }
 
@@ -64,37 +79,85 @@ fn lookup(wiki: &Wiki, obs: &Observation) -> Lookup {
 impl<'a, S: Surface> Assistant<'a, S> {
     pub fn new(observer: Observer<'a>, wiki: &'a Wiki, students: &'a [StudentBrief], types: &'a TypeTable, settings: Settings, settings_path: Option<PathBuf>, surface: S) -> Self {
         surface.set_dock(settings.dock());
-        Assistant { observer, wiki, students, types, widgets: widgets::all(), settings, settings_path, surface, menu_open: false, last: Observation::new(Scene::Unknown), library: LibraryInfo::default(), scanning: false, commands: Vec::new() }
+        Assistant {
+            observer,
+            wiki,
+            students,
+            types,
+            widgets: widgets::all(),
+            settings,
+            settings_path,
+            surface,
+            last: Observation::new(Scene::Unknown),
+            library: LibraryInfo::default(),
+            game_present: false,
+            now: SystemTime::now(),
+            age_shown: String::new(),
+            scanning: false,
+            scan_state: RefCell::new(BannerState::counting(0)),
+            input_locked: false,
+            commands: Vec::new(),
+        }
     }
 
-    /// The game went away: forget everything read from it and show nothing.
+    /// The game went away: forget everything read from it and show nothing of it.
     pub fn forget(&mut self) {
         self.observer.forget();
         self.show(Observation::new(Scene::Unknown));
     }
 
-    /// What is stored about the player's students (shown in the menu).
+    /// Whether the game window is there (the card says so).
+    pub fn set_game_present(&mut self, present: bool) {
+        if self.game_present != present {
+            self.game_present = present;
+            self.present();
+        }
+    }
+
+    /// What is stored about the player's students (shown on the card).
     pub fn set_library(&mut self, info: LibraryInfo) {
         self.library = info;
         self.present();
     }
 
-    /// Requests made through the menu since the last call.
+    /// Time moves on: the age of the student list is redrawn when the minute it shows changes.
+    pub fn tick(&mut self, now: SystemTime) {
+        self.now = now;
+        if self.library.age_text(now) != self.age_shown {
+            self.present();
+        }
+    }
+
+    /// Requests made through the card since the last call.
     pub fn take_commands(&mut self) -> Vec<Command> {
         std::mem::take(&mut self.commands)
     }
 
-    /// A scan is starting: the card gives way to the progress banner.
+    /// A scan is starting: the card shows it, and the player's mouse and keyboard are blocked
+    /// (ESC stops the scan and gives them back).
     pub fn begin_scan(&mut self) {
         self.scanning = true;
+        *self.scan_state.borrow_mut() = BannerState::counting(0);
+        self.input_locked = self.surface.lock_input(true);
+        self.present();
     }
 
     pub fn scan_progress(&self, state: BannerState) {
-        self.surface.banner(state);
+        *self.scan_state.borrow_mut() = state;
+        self.present();
     }
 
-    /// The scan is over: the card comes back, with the new state of the list.
+    /// Give the player's input back (the scan ended or was stopped).
+    pub fn release_input(&mut self) {
+        if self.input_locked {
+            self.surface.lock_input(false);
+            self.input_locked = false;
+        }
+    }
+
+    /// The scan is over: the card is the main card again, with the new state of the list.
     pub fn scan_finished(&mut self, info: LibraryInfo) {
+        self.release_input();
         self.scanning = false;
         self.library = info;
         self.forget();
@@ -146,14 +209,17 @@ impl<'a, S: Surface> Assistant<'a, S> {
             self.settings.set_dock(dock);
             return true;
         }
-        if event == BUTTON_MENU {
-            self.menu_open = !self.menu_open;
-            return true;
+        if event == BUTTON_QUIT {
+            if !self.commands.contains(&Command::Quit) {
+                self.commands.push(Command::Quit);
+            }
+            return false;
         }
         if event == BUTTON_SCAN {
             // one scan at a time; a click while scanning is ignored
-            if !self.scanning && !self.commands.contains(&Command::StartScan { deep: self.settings.scan_deep }) {
-                self.commands.push(Command::StartScan { deep: self.settings.scan_deep });
+            let start = Command::StartScan { deep: self.settings.scan_deep };
+            if !self.scanning && !self.commands.contains(&start) {
+                self.commands.push(start);
             }
             return false;
         }
@@ -174,22 +240,34 @@ impl<'a, S: Surface> Assistant<'a, S> {
         false
     }
 
-    fn menu_rows(&self) -> Vec<Row> {
-        let mut rows = vec![Row::Button { id: BUTTON_INGAME.into(), label: "인게임 표시".into(), value: if self.settings.ingame_visible { "켜짐" } else { "꺼짐" }.into(), on: self.settings.ingame_visible }];
+    /// The controls: the student list and its scan, the display switches, closing.
+    fn control_rows(&self) -> Vec<Row> {
+        let on_off = |on: bool| if on { "켜짐" } else { "꺼짐" }.to_string();
+        let mut rows = vec![
+            Row::Heading("학생 정보".into()),
+            Row::Hint { label: "갱신".into(), value: self.library.age_text(self.now), tip: self.library.exact_text() },
+            Row::Button { id: BUTTON_SCAN_DEEP.into(), label: "스캔 · 상세 포함".into(), value: on_off(self.settings.scan_deep), on: self.settings.scan_deep },
+            Row::Button { id: BUTTON_SCAN.into(), label: "학생 정보 스캔".into(), value: "시작".into(), on: false },
+            Row::Heading("표시".into()),
+            Row::Button { id: BUTTON_INGAME.into(), label: "인게임 표시".into(), value: on_off(self.settings.ingame_visible), on: self.settings.ingame_visible },
+        ];
         for w in &self.widgets {
             let p = self.settings.placement(w.id());
             rows.push(Row::Button { id: format!("{BUTTON_PLACE}{}", w.id().key()), label: w.title().into(), value: p.label(w.kind()).into(), on: p != Placement::Off });
         }
-        // the student list: when it was last refreshed, and the scan the player starts by hand
-        rows.push(Row::Info { label: "학생 정보".into(), value: self.library.describe() });
-        rows.push(Row::Button { id: BUTTON_SCAN_DEEP.into(), label: "스캔 · 상세 포함".into(), value: if self.settings.scan_deep { "켜짐" } else { "꺼짐" }.into(), on: self.settings.scan_deep });
-        rows.push(Row::Button { id: BUTTON_SCAN.into(), label: "학생 정보 스캔".into(), value: "시작".into(), on: false });
+        rows.push(Row::Heading("애드온".into()));
+        rows.push(Row::Button { id: BUTTON_QUIT.into(), label: "애드온 종료".into(), value: "종료".into(), on: false });
         rows
     }
 
     fn present(&self) {
         if self.scanning {
-            return; // the progress banner is up
+            // the card is the scan: how far it is, and that the player's input is locked
+            let (title, rows) = scan_rows(&self.scan_state.borrow(), self.input_locked);
+            self.surface.main_card(PanelState { scene: "학생 스캔".into(), title, rows });
+            self.surface.ingame_card(None);
+            self.surface.marks(Vec::new());
+            return;
         }
         let obs = &self.last;
         let cx = Context { obs, lookup: lookup(self.wiki, obs), students: self.students, types: self.types };
@@ -218,22 +296,23 @@ impl<'a, S: Surface> Assistant<'a, S> {
                 _ => {}
             }
         }
-        // the main card: the settings button always, so the menu can always be reached
-        let mut rows = vec![Row::Button { id: BUTTON_MENU.into(), label: "설정".into(), value: if self.menu_open { "닫기" } else { "열기" }.into(), on: self.menu_open }];
-        if self.menu_open {
-            rows.extend(self.menu_rows());
-        }
+        // The main card: first what the add-on sees (the game, then the screen's own information),
+        // then what it can do. It is shown whatever the screen, so it can always be used and closed.
+        let mut rows = vec![Row::Info { label: "게임".into(), value: if self.game_present { "연결됨" } else { "대기 중" }.into() }];
         rows.extend(outside);
         let icons_wanted = self.widgets.iter().any(|w| w.kind() == Kind::Marks && self.settings.effective(w.id()) != Placement::Off);
         if obs.grid_without_names() && icons_wanted {
             rows.push(Row::Note("학생 이름이 보이는 보기(목록 오른쪽 위 버튼)에서 아이콘이 표시됩니다".into()));
         }
+        rows.extend(self.control_rows());
         if std::env::var_os("BAOCR_DEBUG_ASSIST").is_some() {
             eprintln!("assist: scene={:?} squad={:?} cards={:?} marks={} kind={:?}", obs.scene, obs.squad, obs.cards.iter().map(|c| c.text.as_str()).collect::<Vec<_>>(), marks.len(), obs.grid_kind);
         }
-        self.surface.main_card(PanelState { scene: obs.scene.label().to_string(), title: outside_title, rows });
+        let scene = if self.game_present { obs.scene.label().to_string() } else { "게임 대기 중".to_string() };
+        self.surface.main_card(PanelState { scene, title: outside_title, rows });
         self.surface.ingame_card((!ingame.is_empty()).then(|| PanelState { scene: String::new(), title: ingame_title, rows: ingame }));
         self.surface.marks(marks);
+        // (`age_shown` is only read by `tick`, which takes `&mut self`; it is set there when shown)
     }
 }
 
@@ -247,6 +326,7 @@ mod tests {
     use rusqlite::Connection;
     use std::cell::RefCell;
     use std::rc::Rc;
+    use std::time::Duration;
 
     struct NoOcr;
     impl Ocr for NoOcr {
@@ -268,7 +348,7 @@ mod tests {
         marks: Vec<Mark>,
         clicks: Vec<String>,
         docks: Vec<Dock>,
-        banners: Vec<BannerState>,
+        locks: Vec<bool>,
     }
 
     #[derive(Clone, Default)]
@@ -290,8 +370,9 @@ mod tests {
         fn set_dock(&self, dock: Dock) {
             self.0.borrow_mut().docks.push(dock);
         }
-        fn banner(&self, state: BannerState) {
-            self.0.borrow_mut().banners.push(state);
+        fn lock_input(&self, on: bool) -> bool {
+            self.0.borrow_mut().locks.push(on);
+            on
         }
     }
 
@@ -342,33 +423,53 @@ mod tests {
         format!("{:?}", p.rows)
     }
 
+    fn click(r: &Rig, id: &str) {
+        r.fake.0.borrow_mut().clicks.push(id.into());
+    }
+
+    #[test]
+    fn the_main_card_always_says_what_the_game_and_the_add_on_are_doing_and_what_it_can_do() {
+        let (r, ocr) = (rig(), NoOcr);
+        let mut a = assistant(&r, &ocr);
+        a.show(Observation::new(Scene::Lobby));
+        let shown = r.fake.0.borrow();
+        let main = shown.main.as_ref().unwrap();
+        let text = rows_of(main);
+        assert_eq!(main.scene, "게임 대기 중", "no game found yet");
+        for needed in ["대기 중", "스캔 기록 없음", "scan:start", "scan:deep", "ingame", "place:formation", "quit"] {
+            assert!(text.contains(needed), "{needed} in {text}");
+        }
+        drop(shown);
+        a.set_game_present(true);
+        let shown = r.fake.0.borrow();
+        let main = shown.main.as_ref().unwrap();
+        assert_eq!(main.scene, "메인 메뉴");
+        assert!(rows_of(main).contains("연결됨"));
+    }
+
     #[test]
     fn by_default_the_mission_and_verdict_are_beside_the_game_and_nothing_is_inside() {
         let (r, ocr) = (rig(), NoOcr);
         let mut a = assistant(&r, &ocr);
+        a.set_game_present(true);
         a.show(squad_obs(Scene::Squad));
         let shown = r.fake.0.borrow();
         let main = shown.main.as_ref().unwrap();
         assert_eq!((main.scene.as_str(), main.title.as_str()), ("편성", "19-3 설원 지구 제2 지역"));
-        assert!(rows_of(main).contains("야외") && rows_of(main).contains("편성 판정"), "{main:?}");
+        assert!(rows_of(main).contains("야외") && rows_of(main).contains("Verdict"), "{main:?}");
         assert!(shown.ingame.is_none() && shown.marks.is_empty());
-        assert!(matches!(&main.rows[0], Row::Button { id, .. } if id == "menu"), "the settings button comes first");
     }
 
     #[test]
-    fn the_menu_opens_and_a_widget_moves_inside_the_game() {
+    fn a_widget_moves_inside_the_game_by_its_button() {
         let (r, ocr) = (rig(), NoOcr);
         let mut a = assistant(&r, &ocr);
         a.show(squad_obs(Scene::Squad));
-        r.fake.0.borrow_mut().clicks.push("menu".into());
-        assert!(a.poll());
-        assert!(rows_of(r.fake.0.borrow().main.as_ref().unwrap()).contains("place:formation"), "menu rows appear");
-        // the formation card goes inside the game, the mission card stays beside it
-        r.fake.0.borrow_mut().clicks.push("place:formation".into());
+        click(&r, "place:formation");
         a.poll();
         let shown = r.fake.0.borrow();
         assert!(rows_of(shown.ingame.as_ref().expect("an in-game card")).contains("Verdict"));
-        // (the menu's own button is also called "편성 판정", so look for the verdict row itself)
+        // (the button of the same name stays on the main card, so look for the verdict row itself)
         assert!(!rows_of(shown.main.as_ref().unwrap()).contains("Verdict") && rows_of(shown.main.as_ref().unwrap()).contains("야외"));
     }
 
@@ -376,11 +477,11 @@ mod tests {
     fn the_master_switch_removes_everything_inside_the_game_but_not_the_card_beside_it() {
         let (r, ocr) = (rig(), NoOcr);
         let mut a = assistant(&r, &ocr);
-        r.fake.0.borrow_mut().clicks.push("place:formation".into());
+        click(&r, "place:formation");
         a.show(squad_obs(Scene::QuickFormation));
         a.poll();
         assert!(r.fake.0.borrow().ingame.is_some() && !r.fake.0.borrow().marks.is_empty(), "icons and the moved card are inside the game");
-        r.fake.0.borrow_mut().clicks.push("ingame".into());
+        click(&r, "ingame");
         a.poll();
         let shown = r.fake.0.borrow();
         assert!(shown.ingame.is_none() && shown.marks.is_empty());
@@ -397,14 +498,21 @@ mod tests {
         a.show(obs);
         {
             let shown = r.fake.0.borrow();
-            // one icon column on the grid card, one per squad member on the strip at the bottom
             assert_eq!(shown.marks.len(), 4, "{:?}", shown.marks);
             assert!(shown.marks.iter().any(|m| m.cx == 111 && m.top() == 700), "first striker slot");
             assert!(shown.marks.iter().any(|m| m.cx == 490), "first special slot");
         }
-        r.fake.0.borrow_mut().clicks.push("place:slot_stats".into());
+        click(&r, "place:slot_stats");
         a.poll();
         assert_eq!(r.fake.0.borrow().marks.len(), 1, "only the grid card's icons are left");
+    }
+
+    #[test]
+    fn a_grid_without_names_says_how_to_get_icons() {
+        let (r, ocr) = (rig(), NoOcr);
+        let mut a = assistant(&r, &ocr);
+        a.show(Observation::new(Scene::QuickFormation));
+        assert!(rows_of(r.fake.0.borrow().main.as_ref().unwrap()).contains("이름이 보이는 보기"));
     }
 
     #[test]
@@ -418,60 +526,6 @@ mod tests {
     }
 
     #[test]
-    fn a_grid_without_names_says_how_to_get_icons_and_other_screens_show_only_the_scene() {
-        let (r, ocr) = (rig(), NoOcr);
-        let mut a = assistant(&r, &ocr);
-        a.show(Observation::new(Scene::QuickFormation));
-        assert!(rows_of(r.fake.0.borrow().main.as_ref().unwrap()).contains("이름이 보이는 보기"));
-        a.show(Observation::new(Scene::Lobby));
-        let shown = r.fake.0.borrow();
-        let main = shown.main.as_ref().unwrap();
-        assert_eq!((main.scene.as_str(), main.rows.len()), ("메인 메뉴", 1), "just the settings button");
-    }
-
-    #[test]
-    fn the_menu_shows_when_the_student_list_was_updated_and_the_scan_is_started_by_hand() {
-        let (r, ocr) = (rig(), NoOcr);
-        let mut a = assistant(&r, &ocr);
-        a.set_library(LibraryInfo { updated: Some("2026-11-23 18:02".into()), count: 106 });
-        r.fake.0.borrow_mut().clicks.push("menu".into());
-        a.poll();
-        let menu = rows_of(r.fake.0.borrow().main.as_ref().unwrap());
-        assert!(menu.contains("2026-11-23 18:02 갱신 · 106명") && menu.contains("scan:start") && menu.contains("scan:deep"), "{menu}");
-        // nothing is scanned until the player asks; the detail option is off by default
-        assert!(a.take_commands().is_empty());
-        r.fake.0.borrow_mut().clicks.push("scan:start".into());
-        a.poll();
-        assert_eq!(a.take_commands(), vec![Command::StartScan { deep: false }]);
-        // the option changes what is asked for, and is kept
-        r.fake.0.borrow_mut().clicks.push("scan:deep".into());
-        a.poll();
-        r.fake.0.borrow_mut().clicks.push("scan:start".into());
-        a.poll();
-        assert_eq!(a.take_commands(), vec![Command::StartScan { deep: true }]);
-        assert!(a.settings().scan_deep);
-    }
-
-    #[test]
-    fn during_a_scan_the_banner_stays_up_and_new_requests_are_ignored_until_it_ends() {
-        let (r, ocr) = (rig(), NoOcr);
-        let mut a = assistant(&r, &ocr);
-        a.begin_scan();
-        let before = r.fake.0.borrow().main.clone();
-        a.scan_progress(BannerState::scanning(5, Some(106)));
-        a.show(squad_obs(Scene::Squad));
-        assert_eq!(r.fake.0.borrow().main, before, "the card is not redrawn over the banner");
-        assert_eq!(r.fake.0.borrow().banners, vec![BannerState::scanning(5, Some(106))]);
-        r.fake.0.borrow_mut().clicks.push("scan:start".into());
-        a.poll();
-        assert!(a.take_commands().is_empty(), "one scan at a time");
-        a.scan_finished(LibraryInfo { updated: Some("2026-11-23 19:00".into()), count: 106 });
-        r.fake.0.borrow_mut().clicks.push("menu".into());
-        a.poll();
-        assert!(rows_of(r.fake.0.borrow().main.as_ref().unwrap()).contains("2026-11-23 19:00"), "the card is back with the new time");
-    }
-
-    #[test]
     fn closing_the_game_forgets_the_mission_so_the_next_session_starts_clean() {
         let (r, ocr) = (rig(), NoOcr);
         let mut a = assistant(&r, &ocr);
@@ -481,6 +535,7 @@ mod tests {
         let shown = r.fake.0.borrow();
         let main = shown.main.as_ref().unwrap();
         assert!(main.title.is_empty() && shown.marks.is_empty() && shown.ingame.is_none(), "{main:?}");
+        assert!(!rows_of(main).contains("야외"));
     }
 
     #[test]
@@ -491,7 +546,7 @@ mod tests {
         settings.set_dock(Dock { side: baocr_overlay::Side::Left });
         let mut a = Assistant::new(Observer::new(&ocr, &r.students), &r.wiki, &r.students, &r.types, settings, Some(path.clone()), r.fake.clone());
         assert_eq!(r.fake.0.borrow().docks, vec![Dock { side: baocr_overlay::Side::Left }], "the saved place is applied first");
-        r.fake.0.borrow_mut().clicks.push("dock:r".into());
+        click(&r, "dock:r");
         assert!(a.poll());
         assert_eq!(a.settings().dock(), Dock { side: baocr_overlay::Side::Right });
         assert_eq!(Settings::load(&path).dock(), a.settings().dock(), "and saved");
@@ -503,14 +558,98 @@ mod tests {
         let (r, ocr) = (rig(), NoOcr);
         let mut a = assistant(&r, &ocr);
         a.show(squad_obs(Scene::Squad));
-        // beside -> inside -> off
         for _ in 0..2 {
-            r.fake.0.borrow_mut().clicks.push("place:mission_info".into());
+            click(&r, "place:mission_info");
             a.poll();
         }
         assert!(!rows_of(r.fake.0.borrow().main.as_ref().unwrap()).contains("야외"));
         assert!(r.fake.0.borrow().ingame.is_none());
-        r.fake.0.borrow_mut().clicks.push("nonsense".into());
+        click(&r, "nonsense");
         assert!(!a.poll());
+    }
+
+    #[test]
+    fn the_age_of_the_student_list_is_shown_with_its_exact_time_as_a_tooltip_and_moves_on_with_time() {
+        let (r, ocr) = (rig(), NoOcr);
+        let mut a = assistant(&r, &ocr);
+        let now = SystemTime::now();
+        a.set_library(LibraryInfo { updated: Some(now - Duration::from_secs(3 * 86_400 + 2 * 3600)), count: 106 });
+        a.tick(now);
+        let hint = |r: &Rig| {
+            r.fake.0.borrow().main.as_ref().unwrap().rows.iter().find_map(|row| match row {
+                Row::Hint { value, tip, .. } => Some((value.clone(), tip.clone())),
+                _ => None,
+            })
+        };
+        let (value, tip) = hint(&r).expect("a hint row for the student list");
+        assert_eq!(value, "3일 2시간 경과 · 106명");
+        assert!(tip.starts_with("마지막 스캔\n20"), "{tip}");
+        // a day later the card says so without any other event
+        a.tick(now + Duration::from_secs(86_400));
+        assert_eq!(hint(&r).unwrap().0, "4일 2시간 경과 · 106명");
+    }
+
+    #[test]
+    fn the_scan_is_started_by_hand_and_its_option_is_kept() {
+        let (r, ocr) = (rig(), NoOcr);
+        let mut a = assistant(&r, &ocr);
+        assert!(a.take_commands().is_empty(), "nothing is scanned until the player asks");
+        click(&r, "scan:start");
+        a.poll();
+        assert_eq!(a.take_commands(), vec![Command::StartScan { deep: false }]);
+        click(&r, "scan:deep");
+        a.poll();
+        click(&r, "scan:start");
+        a.poll();
+        assert_eq!(a.take_commands(), vec![Command::StartScan { deep: true }]);
+        assert!(a.settings().scan_deep);
+    }
+
+    #[test]
+    fn during_a_scan_the_card_shows_the_scan_blocks_input_and_says_how_to_get_control_back() {
+        let (r, ocr) = (rig(), NoOcr);
+        let mut a = assistant(&r, &ocr);
+        a.show(squad_obs(Scene::Squad));
+        a.begin_scan();
+        assert_eq!(r.fake.0.borrow().locks, vec![true], "the player's input is blocked");
+        a.scan_progress(BannerState::scanning(5, Some(106)));
+        {
+            let shown = r.fake.0.borrow();
+            let main = shown.main.as_ref().unwrap();
+            assert_eq!((main.scene.as_str(), main.title.as_str()), ("학생 스캔", "학생 정보를 스캔하는 중"));
+            let text = rows_of(main);
+            assert!(text.contains("5/106") && text.contains("ESC") && text.contains("직접 조작"), "{text}");
+            assert!(!text.contains("scan:start"), "no second scan, no other controls while it runs");
+            assert!(shown.ingame.is_none() && shown.marks.is_empty());
+        }
+        // a click or a screen change does not bring the normal card back over the scan
+        click(&r, "scan:start");
+        a.poll();
+        a.show(squad_obs(Scene::Squad));
+        assert!(a.take_commands().is_empty(), "one scan at a time");
+        assert_eq!(r.fake.0.borrow().main.as_ref().unwrap().scene, "학생 스캔");
+        // pressing ESC ends the scan: the input comes back first, then the card says why
+        a.release_input();
+        assert_eq!(r.fake.0.borrow().locks, vec![true, false]);
+        a.scan_progress(BannerState::failed(5, Some(106), "ESC로 중단했습니다. 입력 제어권이 돌아왔습니다"));
+        assert!(rows_of(r.fake.0.borrow().main.as_ref().unwrap()).contains("제어권이 돌아왔습니다"));
+        a.scan_finished(LibraryInfo { updated: Some(SystemTime::now()), count: 106 });
+        let shown = r.fake.0.borrow();
+        assert_eq!(shown.locks, vec![true, false], "released once, not twice");
+        assert!(rows_of(shown.main.as_ref().unwrap()).contains("scan:start"), "the main card is back with the new state of the list");
+    }
+
+    #[test]
+    fn the_card_and_the_tray_can_both_close_the_add_on() {
+        let (r, ocr) = (rig(), NoOcr);
+        let mut a = assistant(&r, &ocr);
+        click(&r, "quit");
+        a.poll();
+        assert_eq!(a.take_commands(), vec![Command::Quit]);
+        // asking twice does not stack requests
+        click(&r, "quit");
+        click(&r, "quit");
+        a.poll();
+        assert_eq!(a.take_commands(), vec![Command::Quit]);
     }
 }

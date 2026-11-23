@@ -5,15 +5,19 @@
 //! excluded from screen capture (when the OS supports it) so it never appears in
 //! the frames being read. On non-Windows targets it is a no-op.
 mod dock;
+mod input_block;
 mod marks;
 mod panel;
 mod render;
+#[cfg(windows)]
+mod tray;
 mod scan;
 #[cfg(windows)]
 mod win;
 
 pub use marks::{render_marks, Icon, Mark};
 pub use dock::{dock_from_drop, dock_origin, Dock, Side};
+pub use input_block::set_escape_target;
 pub use panel::{ingame_origin, ingame_panel_width, panel_origin, panel_width, render_panel, render_panel_hits, render_tooltip, Chip, Hit, PanelState, Row, Tone, PANEL_BASE_W};
 
 pub use render::{load_fonts, BannerState, Fonts, Ltrb, Phase};
@@ -47,6 +51,12 @@ pub struct Overlay {
     events: Arc<Mutex<Vec<String>>>,
     #[cfg(windows)]
     worker: Option<win::Worker>,
+    /// The hooks that keep the player's hands off the game while a scan runs.
+    #[cfg(windows)]
+    block: Mutex<Option<input_block::InputBlock>>,
+    /// The tray icon, with its own 종료: independent of every window above.
+    #[cfg(windows)]
+    _tray: Option<tray::Tray>,
 }
 
 impl Overlay {
@@ -66,11 +76,17 @@ impl Overlay {
         let events = Arc::new(Mutex::new(Vec::new()));
         #[cfg(windows)]
         let worker = win::Worker::start(state.clone(), events.clone());
+        #[cfg(windows)]
+        let tray = tray::Tray::start(events.clone());
         Overlay {
             state,
             events,
             #[cfg(windows)]
             worker,
+            #[cfg(windows)]
+            block: Mutex::new(None),
+            #[cfg(windows)]
+            _tray: tray,
         }
     }
 
@@ -78,6 +94,24 @@ impl Overlay {
         if let Ok(mut g) = self.state.lock() {
             g.card = c;
         }
+    }
+
+    /// Block (or free) the player's mouse and keyboard; only the scan's own input gets through, and
+    /// ESC raises the flag given to `set_escape_target`. Returns whether the block is in force.
+    pub fn block_input(&self, on: bool) -> bool {
+        #[cfg(windows)]
+        {
+            if let Ok(mut b) = self.block.lock() {
+                if on && b.is_none() {
+                    *b = input_block::InputBlock::start();
+                } else if !on {
+                    *b = None;
+                }
+                return b.is_some();
+            }
+        }
+        let _ = on;
+        false
     }
 
     /// Where the card sits against the game window.

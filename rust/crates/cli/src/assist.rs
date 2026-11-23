@@ -12,13 +12,14 @@ use baocr_core::ocr_api::Ocr;
 use baocr_extract::scene::Scene;
 use baocr_extract::Options;
 use baocr_hcu::{check_aspect, detect_region, game_capture, parse_frame_region, screen_kind, Hcu, Screen};
-use baocr_overlay::Overlay;
+use baocr_overlay::{set_escape_target, BannerState, Overlay};
 use baocr_pixels::{frame_distance, frame_key};
 use baocr_wikidb::Wiki;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::cell::RefCell;
+use std::time::{Duration, SystemTime};
 
 /// Frames this alike are the same view; two such frames in a row mean the screen has settled.
 const STILL: f64 = 1.5;
@@ -50,6 +51,9 @@ pub fn run(ocr: Arc<dyn Ocr>, hcu: &Hcu, region_spec: &str, wiki_path: &Path, ou
     let stop = Arc::new(AtomicBool::new(false));
     let flag = stop.clone();
     ctrlc::set_handler(move || flag.store(true, Ordering::Relaxed))?;
+    // ESC during a scan (or the tray's 종료) cancels every HCU call, which stops the scan at once
+    let cancel = hcu.cancel_token();
+    set_escape_target(cancel.clone());
     println!("add-on running (it only looks at the game, never sends input); settings: {}; Ctrl-C to stop", settings_path.display());
 
     let (mut region, mut prev, mut handled, mut still, mut loops, mut failures) = (None::<[f64; 4]>, None, None, 0u32, 0u32, 0u32);
@@ -57,21 +61,38 @@ pub fn run(ocr: Arc<dyn Ocr>, hcu: &Hcu, region_spec: &str, wiki_path: &Path, ou
     while !stop.load(Ordering::Relaxed) {
         loops += 1;
         assistant.poll();
+        assistant.tick(SystemTime::now());
         for command in assistant.take_commands() {
             match command {
+                Command::Quit => {
+                    println!("add-on closed");
+                    return Ok(());
+                }
                 Command::StartScan { deep } => {
                     let Some(r) = region else {
                         println!("scan: the game window is not found");
                         continue;
                     };
                     // the one thing here that sends input to the game: only because the player asked
+                    cancel.store(false, Ordering::SeqCst);
                     assistant.begin_scan();
+                    let last = RefCell::new(BannerState::counting(0));
                     let req = ScanRequest { out, deep, workers, max_students: 300, from_first: true };
-                    match scan::scan_students(ocr.clone(), hcu, r, &req, Options::default(), &|s| assistant.scan_progress(s)) {
+                    match scan::scan_students(ocr.clone(), hcu, r, &req, Options::default(), &|s| {
+                        *last.borrow_mut() = s.clone();
+                        assistant.scan_progress(s)
+                    }) {
                         Ok(s) => println!("scan finished: {} students, complete={}, reason={}", s.entries, s.complete, s.stop_reason),
                         Err(e) => eprintln!("scan failed: {e:#}"),
                     }
-                    std::thread::sleep(Duration::from_secs(4)); // let the final banner be read
+                    // the player's input comes back before anything else is said
+                    assistant.release_input();
+                    if cancel.swap(false, Ordering::SeqCst) {
+                        let l = last.borrow().clone();
+                        assistant.scan_progress(BannerState::failed(l.done, l.total, "ESC로 중단했습니다. 입력 제어권이 돌아왔습니다"));
+                        println!("scan stopped by the player; input control returned");
+                    }
+                    std::thread::sleep(Duration::from_secs(4)); // let the final state be read
                     assistant.scan_finished(read_library(out));
                     (prev, handled, still) = (None, None, 0);
                 }
@@ -86,6 +107,7 @@ pub fn run(ocr: Arc<dyn Ocr>, hcu: &Hcu, region_spec: &str, wiki_path: &Path, ou
                         said_waiting = false;
                     }
                     region = Some(r);
+                    assistant.set_game_present(true);
                 }
                 Err(e) => {
                     if region.take().is_some() || !said_waiting {
@@ -94,6 +116,7 @@ pub fn run(ocr: Arc<dyn Ocr>, hcu: &Hcu, region_spec: &str, wiki_path: &Path, ou
                     }
                     // nothing known about a window that is gone: forget its views, show no icons
                     (prev, handled, still) = (None, None, 0);
+                    assistant.set_game_present(false);
                     assistant.forget();
                     std::thread::sleep(WAIT_PAUSE);
                     continue;

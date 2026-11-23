@@ -1,6 +1,6 @@
 //! The output port: where the assistant's cards and icons go. The assistant only knows
 //! this trait; the Windows overlay implements it, and tests use a recording fake.
-use baocr_overlay::{BannerState, Dock, Mark, Overlay, PanelState};
+use baocr_overlay::{Dock, Mark, Overlay, PanelState};
 
 pub trait Surface {
     /// The add-on's main card, beside the game window (with the settings buttons).
@@ -13,8 +13,9 @@ pub trait Surface {
     fn take_events(&self) -> Vec<String>;
     /// Where the main card sits against the game window.
     fn set_dock(&self, dock: Dock);
-    /// A progress banner in place of the card (the scan).
-    fn banner(&self, state: BannerState);
+    /// Keep the player's mouse and keyboard off the game (only the scan's own input gets through;
+    /// ESC raises the stop flag). Returns whether the block is in force.
+    fn lock_input(&self, on: bool) -> bool;
 }
 
 impl Surface for Overlay {
@@ -33,7 +34,7 @@ impl Surface for Overlay {
     fn set_dock(&self, dock: Dock) {
         Overlay::set_dock(self, dock);
     }
-    fn banner(&self, state: BannerState) {
-        self.set(state);
+    fn lock_input(&self, on: bool) -> bool {
+        self.block_input(on)
     }
 }
