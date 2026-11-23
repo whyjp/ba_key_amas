@@ -232,6 +232,7 @@ dependencies = [
  "baocr-ocr",
  "baocr-overlay",
  "baocr-pipeline",
+ "baocr-pixels",
  "chrono",
  "clap",
  "ctrlc",

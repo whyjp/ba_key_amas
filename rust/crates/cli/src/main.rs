@@ -51,6 +51,12 @@ struct Args {
     /// Save the current game region to this PNG (no input, no OCR).
     #[arg(long)]
     grab: Option<PathBuf>,
+    /// Print the text boxes OCR reads on this saved 1280x960 frame (no game access).
+    #[arg(long)]
+    boxes: Option<PathBuf>,
+    /// Learn screens: while you play, save every new stable screen (PNG + the text read on it) into this folder. Screenshots only, no input.
+    #[arg(long)]
+    learn: Option<PathBuf>,
     #[arg(long, default_value_t = 300)]
     max_students: usize,
     /// Do not show the progress banner over the game while scanning.
@@ -79,14 +85,21 @@ fn load_ocr(args: &Args) -> Result<PpOcr> {
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    let modes = [args.image.is_some(), args.reextract.is_some(), args.scan_arrows, args.watch, args.grab.is_some()];
+    let modes = [args.boxes.is_some(), args.image.is_some(), args.reextract.is_some(), args.scan_arrows, args.watch, args.grab.is_some(), args.learn.is_some()];
     if modes.iter().filter(|m| **m).count() != 1 {
-        bail!("choose exactly one of --image, --reextract, --scan-arrows, --watch, --grab");
+        bail!("choose exactly one of --image, --reextract, --scan-arrows, --watch, --grab, --learn");
     }
     if args.from_first && !args.scan_arrows {
         bail!("--from-first requires --scan-arrows");
     }
     let opts = Options { verify_fixed: args.verify_fixed };
+    if let Some(png) = &args.boxes {
+        let img = image::open(png)?.to_rgb8();
+        for b in load_ocr(&args)?.boxes(&img)? {
+            println!("{:.0},{:.0},{:.0},{:.0}	{}", b.x0, b.y0, b.x1, b.y1, b.text.trim());
+        }
+        return Ok(());
+    }
 
     if let Some(path) = &args.image {
         return run_image(&args, path, &opts);
@@ -116,6 +129,9 @@ fn main() -> Result<()> {
         hcu.activate()?;
         game_capture(&hcu, region)?.save(path)?;
         return Ok(());
+    }
+    if let Some(dir) = &args.learn {
+        return run_learn(&args, &hcu, region, dir);
     }
     if args.watch {
         return run_watch(&args, &hcu, region, opts);
@@ -247,6 +263,44 @@ fn run_scan(args: &Args, hcu: &Hcu, region: [f64; 4], opts: Options) -> Result<(
     }
     if let Some(e) = outcome.error {
         bail!(e);
+    }
+    Ok(())
+}
+
+/// Passive screen learning: every stable frame that differs from the last saved one is
+/// written with the text boxes read on it, so screen layouts can be studied offline.
+fn run_learn(args: &Args, hcu: &Hcu, region: [f64; 4], dir: &std::path::Path) -> Result<()> {
+    use baocr_pixels::{frame_distance, frame_key};
+    let ocr = load_ocr(args)?;
+    std::fs::create_dir_all(dir)?;
+    let stop = Arc::new(AtomicBool::new(false));
+    let flag = stop.clone();
+    ctrlc::set_handler(move || flag.store(true, Ordering::Relaxed))?;
+    println!("learning screens (screenshots only, no input); play normally, Ctrl-C to stop; saving to {}", dir.display());
+    let (mut prev, mut saved, mut still, mut n) = (None, None, 0u32, 0usize);
+    while !stop.load(Ordering::Relaxed) {
+        let img = game_capture(hcu, region)?;
+        let key = frame_key(&img);
+        still = match &prev {
+            Some(p) if frame_distance(p, &key) < 1.5 => still + 1,
+            _ => 0,
+        };
+        prev = Some(key);
+        let new_view = saved.as_ref().map_or(true, |s| frame_distance(s, &key) > 5.0);
+        if still >= 2 && new_view {
+            n += 1;
+            let stem = dir.join(format!("{n:03}"));
+            img.save(stem.with_extension("png"))?;
+            let mut boxes = ocr.boxes(&img)?;
+            boxes.sort_by(|a, b| (a.y0 as i32 / 20, a.x0 as i32).cmp(&(b.y0 as i32 / 20, b.x0 as i32)));
+            let lines: Vec<String> = boxes.iter().map(|b| format!("{:.0},{:.0},{:.0},{:.0}	{}", b.x0, b.y0, b.x1, b.y1, b.text.trim())).collect();
+            std::fs::write(stem.with_extension("txt"), lines.join("
+"))?;
+            let title = boxes.iter().find(|b| b.y1 < 60.0 && b.x0 > 80.0).map(|b| b.text.trim().to_string()).unwrap_or_default();
+            println!("saved {n:03}  title: {title:?}  ({} texts)", boxes.len());
+            saved = Some(key);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(args.interval.min(600)));
     }
     Ok(())
 }

@@ -7,6 +7,7 @@
 //! best candidate is not clearly ahead stays empty and carries a warning.
 use anyhow::Result;
 mod deep;
+pub mod scene;
 pub use deep::{apply_cell, match_label};
 use baocr_core::model::*;
 use baocr_core::ocr_api::{text_in, Ocr, TextBox};
