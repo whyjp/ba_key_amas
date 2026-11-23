@@ -2,12 +2,16 @@
 
 An add-on app for Blue Archive (Windows, Global/Korean, 4:3 windowed). Run `baocr` with no arguments:
 it finds the game window whenever it appears (start it before or after the game, or restart the
-game), docks a small card against the window's left or right side (drag its header to move it; it
-snaps to the nearest side and remembers where), and hides while another window covers the game.
+game), docks a small card against the window's left or right side, or inside the game at its top
+left or top right corner when the monitor has no room beside it (drag the header, or the folded tab, to
+move it; it snaps to the nearest of those places and remembers where), and hides while another window
+covers the game. Inside the game the card is a small bookmark tab that unfolds toward the middle while the
+pointer is on it; the pin button in its header keeps it open (or folds it beside the game too); see
+`docs/card-dock.md`.
 It only looks at the game (screenshots + OCR): guide cards and icons (below) never send input.
 The card is always visible while the add-on runs and shows its state and functions: whether
 the game is found, the screen's information, the student list ("스캔으로부터 3일 2시간 경과";
-hover for the exact date and time), the scan, the display switches and 애드온 종료. It docks level
+hover for the exact date and time), the scan, the display switches and 애드온 종료. It sits level
 with the top of the game window. The student scan is one of its features, started by hand from the
 card (the only thing that sends input to the game); "상세 포함" also reads the stat popup and the two
 tabs (slower). While it runs the card shows its progress, the player's mouse and keyboard are blocked
