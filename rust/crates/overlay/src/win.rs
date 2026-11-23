@@ -9,7 +9,7 @@ use crate::dock::{Anchor, Corner, Dock, Presentation};
 use crate::fold::{Fold, Intent};
 use crate::panel::{ingame_origin, ingame_panel_width, inside_card_width, panel_width, render_panel, render_panel_hits, render_tooltip, Hit, PanelState, PANEL_BASE_W, PIN_BUTTON};
 use crate::placement::{available, contains, dropped, effective_anchor, resolve, slot, snap, strip, Frame, Unfold};
-use crate::tab::{pick, render_snap_hint, render_tab, tab_size, Press};
+use crate::tab::{pick, render_snap_hint, render_tab, tab_label, tab_size, Press};
 use crate::render::{load_fonts, Fonts, Ltrb};
 use crate::marks::{render_marks, Mark};
 use crate::wake::Wake;
@@ -530,7 +530,7 @@ fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, wake: Arc<Wake
         let mut ingame_memo: Memo<(u64, u32), image::RgbaImage> = Memo::new();
         let mut marks_memo: Memo<(u64, i32, i32), image::RgbaImage> = Memo::new();
         let mut tip_memo: Memo<(String, i32), image::RgbaImage> = Memo::new();
-        let mut tab_memo: Memo<(i32, i32, bool, bool, u32), image::RgbaImage> = Memo::new();
+        let mut tab_memo: Memo<(i32, i32, bool, bool, u32, String), image::RgbaImage> = Memo::new();
         let mut hint_memo: Memo<(i32, i32, u32), image::RgbaImage> = Memo::new();
         let mut hits_gen = 0u64;
         prof::enable();
@@ -700,7 +700,7 @@ fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, wake: Arc<Wake
                         let cut = |x: u32, w: u32, h: u32| image::imageops::crop_imm(img, x.min(img.width()), 0, w.min(img.width()), h.min(img.height())).to_image();
                         match shape {
                             Shape::Tab => {
-                                let (timg, _) = tab_memo.get((tab_dim.0, tab_dim.1, r.unfold == Unfold::Left, locked, width), || render_tab(tab_dim, r.unfold, locked, card_scale));
+                                let (timg, _) = tab_memo.get((tab_dim.0, tab_dim.1, r.unfold == Unfold::Left, locked, width, tab_label(&p.scene)), || render_tab(tab_dim, r.unfold, locked, &tab_label(&p.scene), &fonts, card_scale));
                                 card.show(screen_dc, timg, at, key);
                             }
                             Shape::Card if open_size == size => card.show(screen_dc, img, at, key),
