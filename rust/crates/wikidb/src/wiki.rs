@@ -332,6 +332,20 @@ impl Wiki {
         Ok(out)
     }
 
+    /// The mission of one stage row, whatever its category.
+    pub fn mission_by_id(&self, stage_id: i64) -> Result<Option<MissionBrief>> {
+        let row = self.conn.query_row(
+            "SELECT COALESCE(name_ko, type, ''), area, stage_no, COALESCE(difficulty, 0), terrain, level FROM stage WHERE id = ?1",
+            params![stage_id],
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<i64>>(1)?, r.get::<_, Option<i64>>(2)?, r.get::<_, i64>(3)?, r.get::<_, Option<String>>(4)?, r.get::<_, Option<i64>>(5)?)),
+        );
+        match row {
+            Ok((name, area, stage_no, difficulty, terrain, level)) => Ok(Some(self.brief(stage_id, name, area, stage_no, difficulty, terrain, level)?)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
     /// Missions of 현상수배, 특별의뢰 and 학원교류회: a place as the game names it
     /// ("현상수배-고가도로", "거점 방어", "트리니티") and a stage number in it.
     pub fn dungeon_missions(&self, place: &str, stage_no: u32) -> Result<Vec<MissionBrief>> {

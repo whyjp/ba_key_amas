@@ -93,3 +93,106 @@ The mirror rule is an inference from the Drum Crab data and the `TotalHP` dev na
 Kaitenger elites are untouched (their HP differs from the Boss). Per-raid extra HP buffs (`EnemyExtraStats`) and floor
 `StatChange` are not applied. The expected-damage figure is a weighted arithmetic mean of the multipliers; the
 time-based mean (harmonic) would sit lower when a weak match covers much HP.
+
+## Tool and its output
+
+`cargo run -p baocr-wikidb --example weight_report -- <wiki.db>` prints, for a list of stages and raid
+difficulties, the head count mix against the HP-weighted mix and what each does to the fit tier of one sample
+striker per attack type (same armor and terrain, so only the mix differs; `x1.25→x2.00` is the expected damage
+multiplier under heads then under HP, `*` marks a tier change). "heads" here counts the enemies the model counts, so
+on 드럼통 게 the six bodies of the shared bar are already left out of it (the old rule counted them: 특수 78 / 경 22).
+
+```
+wiki.db  (* = the tier changes with the weighting)
+
+stage 30501 현상수배 - 고저택 (Lv.10)
+  armor  heads: 중장갑 75% / 경장갑 25%
+  armor  HP   : 경장갑 100% / 중장갑 0%
+  attack heads: 일반 100%
+  attack HP   : 일반 100%
+  fit (heads→HP): Explosion x1.25→x2.00 보통 | Pierce x1.62→x0.50 강적합→부적합 * | Mystic x0.62→x1.00 부적합→보통 * | Sonic x0.62→x1.00 부적합
+
+stage 30401 현상수배 - 파괴된 도로 (Lv.10)
+  armor  heads: 중장갑 60% / 특수장갑 20% / 경장갑 20%
+  armor  HP   : 중장갑 97% / 특수장갑 3% / 경장갑 0%
+  attack heads: 일반 80% / 신비 20%
+  attack HP   : 일반 97% / 신비 3%
+  fit (heads→HP): Explosion x1.10→x0.99 보통 | Pierce x1.50→x1.97 보통 | Mystic x0.90→x0.55 부적합 | Sonic x0.80→x0.53 부적합
+
+stage 1031401 KV 하이웨이 35번 도로 (Lv.20)
+  armor  heads: 경장갑 60% / 중장갑 40%
+  armor  HP   : 중장갑 80% / 경장갑 20%
+  attack heads: 일반 80% / 폭발 20%
+  attack HP   : 폭발 70% / 일반 30%
+  fit (heads→HP): Explosion x1.60→x1.20 강적합→보통 * | Pierce x1.10→x1.70 부적합→보통 * | Mystic x0.80→x0.60 부적합 | Sonic x0.80→x0.60 부적합
+
+stage 1141102 (구) 사립 히아신스 학원 (Lv.67)
+  armor  heads: 경장갑 52% / 특수장갑 48%
+  armor  HP   : 경장갑 83% / 특수장갑 17%
+  attack heads: 일반 100%
+  attack HP   : 일반 100%
+  fit (heads→HP): Explosion x1.29→x1.75 보통 | Pierce x0.74→x0.58 부적합 | Mystic x1.48→x1.17 보통 | Sonic x1.24→x1.08 보통→부적합 *
+
+stage 60304 학원교류회 - 밀레니엄 (Lv.95)
+  armor  heads: 경장갑 40% / 중장갑 40% / 특수장갑 20%
+  armor  HP   : 특수장갑 55% / 경장갑 24% / 중장갑 21%
+  attack heads: 관통 70% / 폭발 20% / 신비 10%
+  attack HP   : 관통 73% / 신비 19% / 폭발 8%
+  fit (heads→HP): Explosion x1.30→x0.96 보통 | Pierce x1.20→x1.09 보통 | Mystic x1.00→x1.45 부적합→보통 * | Sonic x0.90→x1.17 부적합
+
+raid Raid 14 드럼통 게 (Normal) (Lv.17)
+  armor  heads: 특수장갑 50% / 경장갑 50%
+  armor  HP   : 특수장갑 64% / 경장갑 36%
+  attack heads: 일반 100%
+  attack HP   : 일반 100%
+  fit (heads→HP): Explosion x1.25→x1.04 적합→보통 * | Pierce x0.75→x0.82 부적합 | Mystic x1.50→x1.64 강적합 | Sonic x1.25→x1.32 적합
+
+raid Raid 14 드럼통 게 (Insane) (Lv.80)
+  armor  heads: 특수장갑 50% / 경장갑 50%
+  armor  HP   : 특수장갑 68% / 경장갑 32%
+  attack heads: 관통 100%
+  attack HP   : 관통 100%
+  fit (heads→HP): Explosion x1.25→x0.99 적합→보통 * | Pierce x0.75→x0.84 부적합 | Mystic x1.50→x1.68 적합 | Sonic x1.25→x1.34 보통
+
+raid Raid 1 비나 (Normal) (Lv.17)
+  armor  heads: 중장갑 100%
+  armor  HP   : 중장갑 100%
+  attack heads: 일반 100%
+  attack HP   : 일반 100%
+  fit (heads→HP): Explosion x1.00→x1.00 보통 | Pierce x2.00→x2.00 적합 | Mystic x0.50→x0.50 부적합 | Sonic x0.50→x0.50 부적합
+
+raid Raid 1 비나 (Insane) (Lv.80)
+  armor  heads: 중장갑 100%
+  armor  HP   : 중장갑 100%
+  attack heads: 관통 100%
+  attack HP   : 관통 100%
+  fit (heads→HP): Explosion x1.00→x1.00 보통 | Pierce x2.00→x2.00 보통 | Mystic x0.50→x0.50 부적합 | Sonic x0.50→x0.50 부적합
+
+raid Raid 4 예로니무스 (Insane) (Lv.80)
+  armor  heads: 경장갑 100%
+  armor  HP   : 경장갑 100%
+  attack heads: 폭발 100%
+  attack HP   : 폭발 100%
+  fit (heads→HP): Explosion x2.00→x2.00 보통 | Pierce x0.50→x0.50 부적합 | Mystic x1.00→x1.00 보통 | Sonic x1.00→x1.00 보통
+
+raid Raid 12 게부라 (Normal) (Lv.17)
+  armor  heads: 경장갑 50% / 일반장갑 50%
+  armor  HP   : 경장갑 96% / 일반장갑 4%
+  attack heads: 일반 100%
+  attack HP   : 일반 100%
+  fit (heads→HP): Explosion x1.50→x1.96 적합 | Pierce x0.75→x0.52 부적합 | Mystic x1.00→x1.00 부적합 | Sonic x1.00→x1.00 보통
+
+raid Raid 5 KAITEN FX Mk.0 (Lunatic) (Lv.90)
+  armor  heads: 경장갑 100%
+  armor  HP   : 경장갑 100%
+  attack heads: 관통 100%
+  attack HP   : 관통 100%
+  fit (heads→HP): Explosion x2.00→x2.00 강적합 | Pierce x0.50→x0.50 부적합 | Mystic x1.00→x1.00 부적합 | Sonic x1.00→x1.00 부적합
+```
+
+Where the weighting changes the conclusion: 현상수배 고저택 (ChaserE), where heads say 관통 is a strong fit and HP
+says 폭발; KV 하이웨이 (the heavy champion outweighs the light minions); 드럼통 게, where 폭발 is a strong fit by
+heads and an average one with the light parts weighed in. Where it does not: single-boss raids.
+To check against the live game: the HP-weighted share is not time; confirm on 드럼통 게 that the 경장갑 parts
+(hull, steel pincer) are what the squad spends the second phase on, and that the 현상수배 gating minions die as quickly
+as the model assumes.
