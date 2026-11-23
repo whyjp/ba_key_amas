@@ -78,7 +78,7 @@ pub struct FurnitureBrief {
 }
 
 pub struct Wiki {
-    conn: Connection,
+    pub(crate) conn: Connection,
 }
 
 /// Edit distance between two short strings.
@@ -95,7 +95,7 @@ fn distance(a: &[char], b: &[char]) -> usize {
 }
 
 /// Name without spaces and punctuation, so OCR spacing differences do not matter.
-fn norm(s: &str) -> String {
+pub(crate) fn norm(s: &str) -> String {
     s.chars().filter(|c| c.is_alphanumeric()).collect()
 }
 
@@ -258,7 +258,7 @@ impl Wiki {
         settle(near)
     }
 
-    fn label(&self, kind: &str, code: &str) -> String {
+    pub(crate) fn label(&self, kind: &str, code: &str) -> String {
         self.conn.query_row("SELECT ko FROM label WHERE kind = ?1 AND code = ?2", params![kind, code], |r| r.get(0)).unwrap_or_else(|_| code.to_string())
     }
 

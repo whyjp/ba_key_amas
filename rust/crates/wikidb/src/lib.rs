@@ -2,9 +2,11 @@
 //! data sources. Each source has its own module, so a source that disappears or
 //! changes shape does not touch the others. The schema lives in `wikidb/schema.sql`.
 pub mod formation;
+pub mod raid;
 pub mod schaledb;
 pub mod wiki;
 pub use formation::{adaptation_factor, evaluate, FormationScore, TypeTable, Verdict};
+pub use raid::{pick_season, RaidBoss, RaidCandidate, RaidDifficulty, RaidKind, RaidSeason, SeasonMode, SeasonPick, SeasonRelation};
 pub use wiki::{FurnitureBrief, FurnitureStudent, MissionBrief, StudentBrief, Tally, Wiki};
 
 use anyhow::{Context, Result};
