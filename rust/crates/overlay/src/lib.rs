@@ -6,9 +6,12 @@
 //! the frames being read. On non-Windows targets it is a no-op.
 mod cache;
 mod dock;
+mod fold;
 mod input_block;
 mod marks;
 mod panel;
+mod placement;
+mod tab;
 mod render;
 #[cfg(windows)]
 mod tray;
@@ -17,7 +20,7 @@ mod scan;
 mod win;
 
 pub use marks::{render_marks, Frame, Icon, Mark};
-pub use dock::{dock_from_drop, dock_origin, Dock, Side};
+pub use dock::{Anchor, Corner, Dock, Presentation, Side};
 pub use input_block::set_escape_target;
 pub use panel::{ingame_origin, ingame_panel_width, panel_origin, panel_width, render_panel, render_panel_hits, render_tooltip, Chip, FitEntry, Grade, Hit, MatrixRow, PanelState, Row, Tone, PANEL_BASE_W};
 
@@ -43,6 +46,8 @@ pub struct Shown {
     pub marks: Vec<Mark>,
     /// Where the card sits against the game window (the player can drag it).
     pub dock: Dock,
+    /// A scan holds the player's input: the card then keeps out of the game's way.
+    pub locked: bool,
 }
 
 /// Handle to the running banner. Dropping it closes the window.
@@ -73,7 +78,7 @@ impl Overlay {
     }
 
     fn start_with(first: Card) -> Overlay {
-        let state = Arc::new(Mutex::new(Shown { card: first, ingame: None, marks: Vec::new(), dock: Dock::default() }));
+        let state = Arc::new(Mutex::new(Shown { card: first, ingame: None, marks: Vec::new(), dock: Dock::default(), locked: false }));
         let events = Arc::new(Mutex::new(Vec::new()));
         #[cfg(windows)]
         let worker = win::Worker::start(state.clone(), events.clone());
@@ -108,14 +113,18 @@ impl Overlay {
                 } else if !on {
                     *b = None;
                 }
-                return b.is_some();
+                let on = b.is_some();
+                if let Ok(mut g) = self.state.lock() {
+                    g.locked = on;
+                }
+                return on;
             }
         }
         let _ = on;
         false
     }
 
-    /// Where the card sits against the game window.
+    /// Where the card sits against the game window, and how it shows itself.
     pub fn set_dock(&self, dock: Dock) {
         if let Ok(mut g) = self.state.lock() {
             g.dock = dock;

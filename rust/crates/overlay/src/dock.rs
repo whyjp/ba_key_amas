@@ -1,8 +1,6 @@
-//! Where the add-on's card sits against the game window: against its right or left side, with
-//! its top level with the top of the game. The player moves it by dragging its header sideways;
-//! on release it snaps to the nearest side. All of this is geometry on plain numbers, so it is
-//! tested without a window.
-use crate::render::Ltrb;
+//! The vocabulary of where the card lives: against a side of the game window or inside one of
+//! its top corners, and whether it is always open or folded into a bookmark tab. Plain data and
+//! the short codes they travel as (events, the settings file); the geometry is in `placement`.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Side {
@@ -10,101 +8,150 @@ pub enum Side {
     Right,
 }
 
-/// The card's place: a side of the game window. (Its height is not a choice: the card always
-/// starts at the top of the game's client area.)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Dock {
-    pub side: Side,
+pub enum Corner {
+    TopLeft,
+    TopRight,
 }
 
-impl Default for Dock {
+/// Where the card is anchored: beside the game window (its top level with the game's client
+/// top) or inside the game window at one of its top corners.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Anchor {
+    Outside(Side),
+    Inside(Corner),
+}
+
+impl Default for Anchor {
     fn default() -> Self {
-        Dock { side: Side::Right }
+        Anchor::Outside(Side::Right)
     }
 }
 
-impl Dock {
+impl Anchor {
+    /// The code a drag reports and the settings file keeps: "l" / "r" beside the game (the
+    /// original "dock:l" and "dock:r"), "il" / "ir" inside its top left / top right corner.
+    pub fn code(self) -> &'static str {
+        match self {
+            Anchor::Outside(Side::Left) => "l",
+            Anchor::Outside(Side::Right) => "r",
+            Anchor::Inside(Corner::TopLeft) => "il",
+            Anchor::Inside(Corner::TopRight) => "ir",
+        }
+    }
+
+    pub fn from_code(code: &str) -> Option<Anchor> {
+        match code {
+            "l" => Some(Anchor::Outside(Side::Left)),
+            "r" => Some(Anchor::Outside(Side::Right)),
+            "il" => Some(Anchor::Inside(Corner::TopLeft)),
+            "ir" => Some(Anchor::Inside(Corner::TopRight)),
+            _ => None,
+        }
+    }
+
     /// "dock:r": the form a finished drag is reported in.
     pub fn encode(self) -> String {
-        format!("dock:{}", if self.side == Side::Left { 'l' } else { 'r' })
+        format!("dock:{}", self.code())
     }
 
-    pub fn decode(event: &str) -> Option<Dock> {
-        match event.strip_prefix("dock:")? {
-            "l" => Some(Dock { side: Side::Left }),
-            "r" => Some(Dock { side: Side::Right }),
+    pub fn decode(event: &str) -> Option<Anchor> {
+        Anchor::from_code(event.strip_prefix("dock:")?)
+    }
+
+    pub fn is_inside(self) -> bool {
+        matches!(self, Anchor::Inside(_))
+    }
+}
+
+/// How the card shows itself: always open, or folded into a small tab that opens while the
+/// pointer is on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Presentation {
+    Pinned,
+    Bookmark,
+}
+
+impl Presentation {
+    pub fn code(self) -> &'static str {
+        match self {
+            Presentation::Pinned => "pinned",
+            Presentation::Bookmark => "bookmark",
+        }
+    }
+
+    pub fn from_code(code: &str) -> Option<Presentation> {
+        match code {
+            "pinned" => Some(Presentation::Pinned),
+            "bookmark" => Some(Presentation::Bookmark),
             _ => None,
+        }
+    }
+
+    /// "present:bookmark": reported when the player presses the pin button.
+    pub fn encode(self) -> String {
+        format!("present:{}", self.code())
+    }
+
+    pub fn decode(event: &str) -> Option<Presentation> {
+        Presentation::from_code(event.strip_prefix("present:")?)
+    }
+
+    pub fn toggled(self) -> Presentation {
+        match self {
+            Presentation::Pinned => Presentation::Bookmark,
+            Presentation::Bookmark => Presentation::Pinned,
+        }
+    }
+
+    /// What the card does when the player has not chosen: open beside the game (nothing is
+    /// covered), a tab inside it (an open card would cover the game).
+    pub fn default_for(anchor: Anchor) -> Presentation {
+        if anchor.is_inside() {
+            Presentation::Bookmark
+        } else {
+            Presentation::Pinned
         }
     }
 }
 
-/// Where a card of `size` goes in screen coordinates: against the preferred side of the game
-/// window, else against the other side, its top level with the game's client area. None when
-/// neither side has room on the monitor.
-pub fn dock_origin(client: Ltrb, outer: Ltrb, work: Ltrb, size: (i32, i32), dock: Dock) -> Option<(i32, i32)> {
-    let (pw, ph) = size;
-    let gap = (((client.3 - client.1) as f32 * 0.012).round() as i32).max(6);
-    let y = client.1.clamp(work.1, (work.3 - ph).max(work.1));
-    let right = (outer.2 + gap + pw <= work.2).then_some((outer.2 + gap, y));
-    let left = (outer.0 - gap - pw >= work.0).then_some((outer.0 - gap - pw, y));
-    match dock.side {
-        Side::Right => right.or(left),
-        Side::Left => left.or(right),
-    }
+/// What the player prefers. The anchor is a preference: with no room beside the game the card is
+/// shown inside it, and goes back when the room is there again. `presentation` None means
+/// "the default for wherever the card really is".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Dock {
+    pub anchor: Anchor,
+    pub presentation: Option<Presentation>,
 }
 
-/// The dock a card dropped with its top-left corner at `at` means: the side whose half of the
-/// game window the card's middle is over.
-pub fn dock_from_drop(client: Ltrb, at: (i32, i32), size: (i32, i32)) -> Dock {
-    let cw = client.2 - client.0;
-    let middle = at.0 + size.0 / 2;
-    Dock { side: if middle < client.0 + cw / 2 { Side::Left } else { Side::Right } }
+impl Default for Dock {
+    fn default() -> Self {
+        Dock { anchor: Anchor::Outside(Side::Right), presentation: None }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const WORK: Ltrb = (0, 0, 1920, 1040);
-    const OUTER: Ltrb = (592, 70, 1068, 458);
-    const CLIENT: Ltrb = (600, 100, 1060, 450);
-
     #[test]
-    fn the_card_sits_against_the_chosen_side_with_its_top_level_with_the_game() {
-        let size = (300, 400);
-        let (x, y) = dock_origin(CLIENT, OUTER, WORK, size, Dock::default()).unwrap();
-        assert!(x >= OUTER.2 && x - OUTER.2 < 20, "against the right edge: {x}");
-        assert_eq!(y, CLIENT.1, "level with the top of the game");
-        let (x, y) = dock_origin(CLIENT, OUTER, WORK, size, Dock { side: Side::Left }).unwrap();
-        assert!(x + size.0 <= OUTER.0 && OUTER.0 - (x + size.0) < 20, "against the left edge: {x}");
-        assert_eq!(y, CLIENT.1);
-    }
-
-    #[test]
-    fn a_full_side_falls_back_to_the_other_and_no_room_gives_none() {
-        let size = (300, 400);
-        let (x, _) = dock_origin((1500, 100, 1900, 400), (1492, 70, 1908, 408), WORK, size, Dock::default()).unwrap();
-        assert!(x + size.0 <= 1492, "moved to the left: {x}");
-        assert_eq!(dock_origin((0, 31, 1920, 1040), (0, 0, 1920, 1040), WORK, size, Dock::default()), None);
-        // a card taller than the room below the game's top is pushed up, never off the monitor
-        let (_, y) = dock_origin((600, 900, 1060, 1030), (592, 870, 1068, 1038), WORK, size, Dock::default()).unwrap();
-        assert!(y + size.1 <= WORK.3, "{y}");
-    }
-
-    #[test]
-    fn a_drop_snaps_to_the_side_its_middle_is_over_whatever_the_height() {
-        let size = (300, 200);
-        assert_eq!(dock_from_drop(CLIENT, (500, 275), size).side, Side::Left);
-        assert_eq!(dock_from_drop(CLIENT, (1100, 20), size).side, Side::Right);
-        assert_eq!(dock_from_drop(CLIENT, (900, 5000), size).side, Side::Right, "dropping low does not move it down");
-    }
-
-    #[test]
-    fn a_dock_survives_being_sent_as_an_event() {
-        for d in [Dock::default(), Dock { side: Side::Left }] {
-            assert_eq!(Dock::decode(&d.encode()), Some(d));
+    fn an_anchor_survives_being_sent_as_an_event_and_the_old_codes_still_work() {
+        for a in [Anchor::Outside(Side::Left), Anchor::Outside(Side::Right), Anchor::Inside(Corner::TopLeft), Anchor::Inside(Corner::TopRight)] {
+            assert_eq!(Anchor::decode(&a.encode()), Some(a));
         }
-        assert_eq!(Dock::decode("dock:x"), None);
-        assert_eq!(Dock::decode("menu"), None);
+        assert_eq!(Anchor::decode("dock:l"), Some(Anchor::Outside(Side::Left)), "the first version's event");
+        assert_eq!(Anchor::decode("dock:r"), Some(Anchor::Outside(Side::Right)));
+        assert_eq!(Anchor::decode("dock:x"), None);
+        assert_eq!(Anchor::decode("menu"), None);
+        assert_eq!(Presentation::decode("present:bookmark"), Some(Presentation::Bookmark));
+        assert_eq!(Presentation::decode(&Presentation::Pinned.encode()), Some(Presentation::Pinned));
+        assert_eq!(Presentation::decode("present:x"), None);
+    }
+
+    #[test]
+    fn the_default_presentation_follows_where_the_card_really_is() {
+        assert_eq!(Presentation::default_for(Anchor::Outside(Side::Right)), Presentation::Pinned);
+        assert_eq!(Presentation::default_for(Anchor::Inside(Corner::TopRight)), Presentation::Bookmark);
+        assert_eq!(Presentation::Pinned.toggled(), Presentation::Bookmark);
     }
 }
