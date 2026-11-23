@@ -1,5 +1,5 @@
 //! Read side of the wiki DB: what the overlay shows about a mission.
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use rusqlite::{params, Connection, OpenFlags};
 use std::path::Path;
 
@@ -102,7 +102,16 @@ fn norm(s: &str) -> String {
 impl Wiki {
     pub fn open(path: &Path) -> Result<Wiki> {
         let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY).with_context(|| format!("opening {}", path.display()))?;
-        Ok(Wiki { conn })
+        let version: Option<String> = conn.query_row("SELECT value FROM meta WHERE key = 'schema_version'", [], |r| r.get(0)).ok();
+        match version {
+            Some(v) if v == crate::SCHEMA_VERSION.to_string() => Ok(Wiki { conn }),
+            found => bail!(
+                "{} has schema version {}, this build needs {}: rebuild it with `cargo run -p baocr-wikidb --release`",
+                path.display(),
+                found.as_deref().unwrap_or("none"),
+                crate::SCHEMA_VERSION
+            ),
+        }
     }
 
     pub fn from_connection(conn: Connection) -> Wiki {
