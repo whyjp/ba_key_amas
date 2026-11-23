@@ -128,8 +128,10 @@ fn page_geometry(img: &RgbImage) -> Option<(i32, f64)> {
 
 /// Height of the list area on screen (frame px).
 const LIST_HEIGHT: i32 = 750;
+/// Marks the error of a first scroll that went further than a line-safe distance.
+const OVERSHOOT: &str = "scroll overshoot";
 /// Wheel movements per call used to measure how far one movement goes.
-const PROBE_MOVES: usize = 2;
+const PROBE_MOVES: usize = 1;
 /// Most movements sent in one call.
 const MAX_MOVES: usize = 12;
 
@@ -137,7 +139,7 @@ const MAX_MOVES: usize = 12;
 /// The number of wheel movements per call follows the measured travel, so every
 /// scroll advances nearly a screen minus one line (so every line is shown whole once).
 /// Stops at the "미보유" banner or the end of the list. Returns the movements used last.
-fn capture_pages(h: &Hcu, region: R4, first: RgbImage, lines: Option<i32>, tx: &Sender<(RgbImage, i32, bool)>, counts: &Receiver<usize>, on_count: &mut dyn FnMut(usize)) -> Result<usize> {
+fn capture_pages(h: &Hcu, region: R4, first: RgbImage, lines: Option<i32>, delta: i32, tx: &Sender<(RgbImage, i32, bool)>, counts: &Receiver<usize>, on_count: &mut dyn FnMut(usize)) -> Result<usize> {
     let mut img = first;
     let (_, pitch) = page_geometry(&img).ok_or_else(|| anyhow!("no student lines visible"))?;
     // A line is seen whole on some page as long as one scroll is at most the list's
@@ -166,12 +168,14 @@ fn capture_pages(h: &Hcu, region: R4, first: RgbImage, lines: Option<i32>, tx: &
         if banner.is_some() || thumb.top < 0 || thumb.bottom >= THUMB_END {
             return Ok(moves);
         }
-        // the wheel call itself returns after ~1.3 s, so the list has stopped: no extra wait
-        wheel(h, region, SCROLL_MAX, moves)?;
+        wheel(h, region, delta, moves)?;
+        // the list keeps easing out after the call returns; a frame taken too early
+        // measures a short travel and the next scroll overshoots (measured: 603 px vs 478 px)
+        sleep(Duration::from_millis(450));
         let next = game_capture(h, region)?;
         let moved = list_shift(&img, &next, 760).ok_or_else(|| anyhow!("lost track of the scroll position"))?;
         if moved > max_shift {
-            bail!("the scroll went {moved}px, more than the {max_shift}px that keeps every line in view");
+            bail!("{OVERSHOOT}: the scroll went {moved}px, more than the {max_shift}px that keeps every line in view");
         }
         offset += moved;
         // closed loop: size the next scroll from the distance one movement really went
@@ -182,7 +186,7 @@ fn capture_pages(h: &Hcu, region: R4, first: RgbImage, lines: Option<i32>, tx: &
     bail!("the roster has more than {MAX_PAGES} pages; stopping the count")
 }
 
-fn count_pages(h: &Hcu, region: R4, lines: Option<i32>, on_count: &mut dyn FnMut(usize)) -> Result<usize> {
+fn count_pages(h: &Hcu, region: R4, lines: Option<i32>, delta: i32, on_count: &mut dyn FnMut(usize)) -> Result<usize> {
     let first = scroll_to_top(h, region)?;
     if !roster_visible_pixels(&first) {
         bail!("the student roster (All) is not visible");
@@ -199,7 +203,7 @@ fn count_pages(h: &Hcu, region: R4, lines: Option<i32>, on_count: &mut dyn FnMut
             }
             tally
         });
-        let captured = capture_pages(h, region, first, lines, &tx, &counts, on_count);
+        let captured = capture_pages(h, region, first, lines, delta, &tx, &counts, on_count);
         drop(tx);
         // back to the top while the last frames are still being tallied
         let to_top = match &captured {
@@ -222,14 +226,26 @@ fn count_pages(h: &Hcu, region: R4, lines: Option<i32>, on_count: &mut dyn FnMut
 /// Fast path: several lines per scroll. If a page shares no line with the previous
 /// one (the scroll skipped lines) the count is redone one line at a time.
 pub fn count_roster(h: &Hcu, region: R4, mut on_count: impl FnMut(usize)) -> Result<usize> {
-    match count_pages(h, region, None, &mut on_count) {
-        Ok(n) => Ok(n),
-        Err(e) => {
-            // the count always restarts from the top, so a half-way result is never reused
-            eprintln!("fast roster count failed ({e:#}); counting one line per scroll");
-            count_pages(h, region, Some(1), &mut on_count)
+    // How far a wheel movement goes differs between machines and game sessions: when the
+    // first scroll goes too far, start over from the top with a smaller movement.
+    let mut delta = SCROLL_MAX;
+    let mut last = None;
+    for _ in 0..4 {
+        match count_pages(h, region, None, delta, &mut on_count) {
+            Ok(n) => return Ok(n),
+            Err(e) if format!("{e:#}").contains(OVERSHOOT) => {
+                eprintln!("{e:#}; retrying with a smaller wheel movement");
+                last = Some(e);
+                delta /= 2;
+            }
+            Err(e) => {
+                // the count always restarts from the top, so a half-way result is never reused
+                eprintln!("fast roster count failed ({e:#}); counting one line per scroll");
+                return count_pages(h, region, Some(1), delta, &mut on_count);
+            }
         }
     }
+    Err(last.unwrap())
 }
 
 /// From a profile, go back to the roster list.
