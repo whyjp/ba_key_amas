@@ -5,6 +5,7 @@
 //! it), the student cards in the 빠른 편성 grid, and who is in the squad. It knows
 //! nothing about how any of that is shown.
 use baocr_core::ocr_api::{Ocr, TextBox};
+use baocr_extract::raid::{RaidRef, RaidTracker};
 use baocr_extract::scene::{classify, squad_names, MissionRef, MissionTracker, Scene};
 use baocr_extract::{read_card_names, CardName};
 use baocr_pixels::{quick_card_selected, quick_tab_is_striker};
@@ -17,6 +18,8 @@ pub struct Observation {
     pub scene: Scene,
     /// The mission in play, remembered from its 임무 정보 popup.
     pub mission: Option<MissionRef>,
+    /// The raid encounter in play (총력전, 모의 총력전, 제약해제결전), remembered from the screens that name it.
+    pub raid: Option<RaidRef>,
     /// The student cards whose name is whole in the 빠른 편성 grid.
     pub cards: Vec<CardName>,
     /// The squad being edited, strikers and specials in slot order, as far as it has been seen.
@@ -27,7 +30,7 @@ pub struct Observation {
 
 impl Observation {
     pub fn new(scene: Scene) -> Observation {
-        Observation { scene, mission: None, cards: Vec::new(), squad: Vec::new(), grid_kind: None }
+        Observation { scene, mission: None, raid: None, cards: Vec::new(), squad: Vec::new(), grid_kind: None }
     }
 
     /// The 빠른 편성 popup is up but its grid shows no names (compact view).
@@ -43,6 +46,7 @@ pub struct Observer<'a> {
     ocr: &'a dyn Ocr,
     students: &'a [StudentBrief],
     tracker: MissionTracker,
+    raid_tracker: RaidTracker,
     squad: Vec<i64>,
     /// The last screen that was recognised (the idle lobby is told from it: it has no text of its own).
     last: Scene,
@@ -50,12 +54,13 @@ pub struct Observer<'a> {
 
 impl<'a> Observer<'a> {
     pub fn new(ocr: &'a dyn Ocr, students: &'a [StudentBrief]) -> Observer<'a> {
-        Observer { ocr, students, tracker: MissionTracker::default(), squad: Vec::new(), last: Scene::Unknown }
+        Observer { ocr, students, tracker: MissionTracker::default(), raid_tracker: RaidTracker::default(), squad: Vec::new(), last: Scene::Unknown }
     }
 
     /// Forget the mission and the squad (the game was closed: what was known is not true any more).
     pub fn forget(&mut self) {
         self.tracker = MissionTracker::default();
+        self.raid_tracker = RaidTracker::default();
         self.squad.clear();
         self.last = Scene::Unknown;
     }
@@ -75,13 +80,15 @@ impl<'a> Observer<'a> {
             self.last = scene;
         }
         let mission = self.tracker.update(scene, boxes).cloned();
+        let raid = self.raid_tracker.update(scene, boxes).cloned();
         // A squad belongs to the mission or edit session in progress: leaving for a screen that
         // has nothing to do with one forgets it, so the next mission never inherits it.
-        if !matches!(scene, Scene::Squad | Scene::QuickFormation | Scene::MissionMap | Scene::MissionInfo | Scene::EnemyInfo | Scene::Unknown) {
+        if !matches!(scene, Scene::Squad | Scene::QuickFormation | Scene::MissionMap | Scene::MissionInfo | Scene::EnemyInfo | Scene::RaidFormation(_) | Scene::Unknown) {
             self.squad.clear();
         }
         let mut obs = Observation::new(scene);
         obs.mission = mission;
+        obs.raid = raid;
         match scene {
             Scene::Squad => {
                 self.squad = squad_names(boxes).iter().filter_map(|(n, special)| Wiki::match_student_as(self.students, n, Some(if *special { "Support" } else { "Main" }))).map(|s| s.id).collect();
@@ -205,6 +212,25 @@ mod tests {
         o.observe(&img, &lobby, Scene::Unknown);
         o.forget();
         assert_eq!(o.observe(&img, &idle, Scene::Unknown).scene, Scene::Unknown);
+    }
+
+    #[test]
+    fn the_raid_encounter_follows_the_player_from_the_boss_list_to_the_formation_and_is_dropped_for_a_mission() {
+        let ocr = NoOcr;
+        let mut o = Observer::new(&ocr, &[]);
+        let img = RgbImage::new(1280, 960);
+        let mut see = |file: &str| o.observe(&img, &boxes_of(file), Scene::Unknown);
+        let list = see("raid-mock-m11");
+        assert_eq!((list.scene, list.mission.is_none()), (Scene::MockRaidBosses, true));
+        assert_eq!(list.raid.as_ref().map(|r| (r.boss.as_str(), r.armors.len())), Some(("드럼통게", 2)));
+        let room = see("raid-mock-room-info");
+        assert_eq!(room.raid.as_ref().map(|r| (r.boss.as_str(), r.difficulty)), Some(("시로&쿠로", Some(0))), "another boss's popup replaces the list's");
+        let formation = see("raid-formation-empty");
+        assert_eq!(formation.scene, Scene::RaidFormation(baocr_extract::scene::RaidMode::MockTotalAssault));
+        assert_eq!(formation.raid, room.raid, "the formation names nothing and keeps the room");
+        let mission = see("mission-info");
+        assert!(mission.raid.is_none() && mission.mission.is_some(), "a mission screen forgets the raid");
+        assert!(see("raid-formation-empty").mission.is_none(), "and a raid screen the mission");
     }
 
     #[test]

@@ -47,6 +47,7 @@ impl Default for Settings {
             ingame_visible: true,
             placements: BTreeMap::from([
                 (WidgetId::MissionInfo, Placement::Outside),
+                (WidgetId::RaidInfo, Placement::Outside),
                 (WidgetId::Formation, Placement::Outside),
                 (WidgetId::PortraitIcons, Placement::InGame),
                 (WidgetId::SlotStats, Placement::InGame),

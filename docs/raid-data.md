@@ -107,3 +107,71 @@ To use the lookup the reader must supply:
 
 Rebuild the DB (`cargo run -p baocr-wikidb --release`) whenever `Wiki::open` reports a schema version mismatch.
 `cargo run -p baocr-wikidb --example raid_report -- <wiki.db>` prints the row counts and checks the invariants.
+
+## Raid screens
+
+What the add-on reads on screen and how it reaches the lookup above. Code: `extract/src/scene.rs` (screens),
+`extract/src/raid.rs` (encounter from screen text), `assist/src/raid_lookup.rs` (screen to `MissionBrief`),
+`assist/src/widgets.rs` (`RaidInfo` card, the formation verdict). All of it is read from fixtures in
+`fixtures/screens/` (`*.boxes.txt` OCR boxes, PNG for some); nothing here was driven live. 4:3 frames only.
+
+| Screen | Scene | What it yields | Evidence |
+| --- | --- | --- | --- |
+| 업무 (all modes) | `WorkHub` | nothing | `work-hub-full` |
+| 총력전 "Battle Select" | `RaidSelect` | boss, difficulty rows Normal..Extreme | `raid-select` (png: `raid-select-hieronymus`) |
+| 모의 총력전 boss list | `MockRaidBosses` | boss, armor words (a dual armor is two), the boss's two terrain tabs | `raid-mock-m00..m14` (14 bosses, m14 repeats m00) |
+| 방 정보 popup | `RaidRoomInfo` | difficulty, boss, level, attack, armor | `raid-mock-room-info` |
+| 편성 of 총력전, 모의 총력전, 제약해제결전 | `RaidFormation(mode)` | the mode, from the header only; no boss and no student name on screen | `raid-formation-empty`, `unrestricted-raid-formation` |
+| 제약해제결전 select, 단계 bands, one stage | `UnrestrictedRaidSelect`, `Stages`, `Stage` | boss; boss, level, attack, armor (stage screen) | `unrestricted-raid-select`, `-stages`, `-stage01` |
+| 종합전술시험, "다음 시즌 정보" popup | `TimeAttackSelect`, `TimeAttackNextSeason` | scene label only | `timeattack-select`, `timeattack-next-season` |
+| 대결전 between seasons | `EliminateClosed` | scene label only | `eliminate-closed` |
+| Warning before 제약해제결전 | `SpoilerWarning` | scene label only | `spoiler-warning` |
+
+Scenes are told by the header text plus words only that screen has (e.g. "Battle Select", "보스 선택", the popup titles
+"방 정보" and "다음 시즌 정보"), never by position alone. The mode of a formation comes from its header
+(`총력전 편성`, `모의 총력전 편성`, `제약해제결전 편성`), because a mock screen also shows "총력전" as a side button.
+
+### From screen text to the card
+
+1. `RaidTracker` remembers the encounter (`RaidRef`: mode, boss text, difficulty position, armor words, attack word, level,
+   terrain tabs) from the list, the popup or the stage screen, so the formation, which names none of it, knows it. A mission
+   screen forgets the raid and a raid screen forgets the mission. The mode of a formation must match the remembered encounter.
+2. `raid_lookup::lookup` finds the raid by boss name among the raids of the mode's kind (총력전 and 모의 총력전: `Raid`,
+   제약해제결전: `MultiFloorRaid`), decodes the armor and attack words through the `label` table (`Wiki::decode_labels`, per
+   kind: 일반 is an attack type, 일반장갑 an armor type; a word the table lacks is reported, not guessed), maps the
+   difficulty word to `idx` by its position (Normal 0 .. Lunatic 7; the game writes `Hardcore`, the DB `HardCore`), takes the
+   terrain from the 총력전 season (only a `Raid` mode season; 대결전 seasons are ignored), and builds the brief with
+   `raid_mission`.
+3. The screen is the truth for what the player sees. Where it names the boss's armor, attack type or level, those replace the
+   wiki's (`Wiki::with_screen_types` swaps the lead enemy's types in the tally and recomputes the best attack types), and a
+   difference is shown on the card ("화면 ... / 위키 ...").
+4. Nothing is picked silently. Several raids of one name stay `Ambiguous` unless the on-screen armor tells them apart (the two
+   세트의 분노 differ by armor: 경장갑 is id 1000001). A screen that names no difficulty (the boss lists) is not given Normal:
+   the card says "선택 전", lists the attack type per difficulty range, and the formation card says which difficulty its verdict used.
+
+### Findings in the data
+
+- The armor read from the 14 mock bosses equals the DB armor of the Normal lead enemy for 13. 드럼통게 shows
+  `특수장갑/경장갑` and the DB lead enemy is `Unarmed` only; its other enemies (파손된 선체, 강철 집게) are `LightArmor`, so
+  the dual armor is the boss plus its parts, and the screen is consistent with the whole enemy list. Checked on the real DB:
+  `BAOCR_WIKI_DB=<wiki.db> cargo test -p baocr-assist real_database -- --nocapture`.
+- `raid_seasons` returns 대결전 seasons of the same raid id too; use only `SeasonMode::Raid` for a total assault.
+
+### Formation card
+
+The formation widget is the existing one over the raid's brief. 총력전 and 모의 총력전 use up to four parties (1부대 .. 4부대); the
+card says so and that the verdict judges the one party last read. The formation screen shows no student names (the
+제약해제결전 one shows portraits and levels), so the squad is read through the 빠른 편성 popup as for missions. Which party
+tab is being edited is not read. No multi-party optimisation.
+
+### Not handled
+
+- 대결전 while a season runs (no fixture; any 대결전 header that is not the closed one is `EliminateSelect`, untested), and its
+  armor runs. 전술 대회 (PvP). 종합전술시험 and 대결전 have no card, only the scene label.
+- The Insane, Torment and Lunatic rows of the 총력전 list below the fold (the list scrolls); the 모의 총력전 list shows them
+  as far as they are on screen. The row chosen on the 제약해제결전 단계 bands (a highlight, not text) and the terrain of
+  its stage (an icon). Which of a boss's two terrain tabs is highlighted (a colour).
+- The real 총력전 entry popup and 총력전 formation (not recorded; `총력전 편성` is classified by its header by inference).
+- 빠른 편성 opened over a raid formation was not recorded. Its student grid is assumed to be the mission one (icons are drawn);
+  the strip of slots below it is not known for raids, so the slot icons are off there.
+- Frames that are not 4:3.

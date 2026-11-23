@@ -11,6 +11,13 @@ pub struct Tally {
     pub n: i64,
 }
 
+/// Words read from a screen, decoded through the `label` table: the codes found, in order, and the words that are no label.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DecodedLabels {
+    pub codes: Vec<String>,
+    pub unknown: Vec<String>,
+}
+
 /// What the player wants to know before sending a squad into a mission.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MissionBrief {
@@ -261,8 +268,27 @@ impl Wiki {
         settle(near)
     }
 
-    pub(crate) fn label(&self, kind: &str, code: &str) -> String {
+    /// The Korean name of a code (the code itself when the table lacks it).
+    pub fn label(&self, kind: &str, code: &str) -> String {
         self.conn.query_row("SELECT ko FROM label WHERE kind = ?1 AND code = ?2", params![kind, code], |r| r.get(0)).unwrap_or_else(|_| code.to_string())
+    }
+
+    /// What the words a screen shows stand for in one closed code set of the `label` table
+    /// (`kind` is `ArmorType`, `BulletType` or `Terrain`), spaces and punctuation ignored. A word
+    /// the table does not know is returned as such, never guessed or dropped: the same Korean word
+    /// can be another thing in another kind (`일반` is an attack type, `일반장갑` an armor type).
+    pub fn decode_labels(&self, kind: &str, words: &[String]) -> Result<DecodedLabels> {
+        let mut st = self.conn.prepare("SELECT code, ko FROM label WHERE kind = ?1")?;
+        let rows: Vec<(String, String)> = st.query_map(params![kind], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<std::result::Result<_, _>>()?;
+        let mut out = DecodedLabels::default();
+        for word in words {
+            match rows.iter().find(|(_, ko)| norm(ko) == norm(word)) {
+                Some((code, _)) if !out.codes.contains(code) => out.codes.push(code.clone()),
+                Some(_) => {}
+                None => out.unknown.push(word.clone()),
+            }
+        }
+        Ok(out)
     }
 
     /// Campaign missions matching what the game shows. With the number ("19-3") the
@@ -377,6 +403,17 @@ mod tests {
         )
         .unwrap();
         Wiki::from_connection(conn)
+    }
+
+    #[test]
+    fn screen_words_are_decoded_per_kind_and_an_unknown_word_is_reported_not_guessed() {
+        let w = wiki();
+        let words = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let armor = w.decode_labels("ArmorType", &words(&["중장갑", "경 장갑", "경장갑", "복합장갑"])).unwrap();
+        assert_eq!((armor.codes, armor.unknown), (words(&["HeavyArmor", "LightArmor"]), words(&["복합장갑"])), "a repeated armor counts once; the word the table lacks is named");
+        assert_eq!(w.decode_labels("BulletType", &words(&["일반"])).unwrap().codes, ["Normal"]);
+        assert_eq!(w.decode_labels("ArmorType", &words(&["일반"])).unwrap().unknown, ["일반"], "an attack word is not an armor");
+        assert_eq!(w.decode_labels("Nothing", &[]).unwrap(), DecodedLabels::default());
     }
 
     #[test]

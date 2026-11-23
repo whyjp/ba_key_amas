@@ -10,18 +10,20 @@
 //! scan, the display switches and the way to close it. While a scan runs the card shows the scan.
 use crate::library::LibraryInfo;
 use crate::observe::{Observation, Observer};
+use crate::raid_lookup::{self, RaidLookup};
 use crate::settings::{Placement, Settings};
 use crate::surface::Surface;
 use crate::widget::{is_mission_screen, Context, Kind, Lookup, Output, Widget, WidgetId};
 use crate::widgets;
 use baocr_core::ocr_api::TextBox;
+use baocr_extract::raid::RaidRef;
 use baocr_extract::scene::{MissionRef, Scene};
 use baocr_overlay::{scan_rows, BannerState, Dock, Mark, PanelState, Row};
 use baocr_wikidb::{StudentBrief, TypeTable, Wiki};
 use image::RgbImage;
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
-use std::time::SystemTime;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const BUTTON_INGAME: &str = "ingame";
 const BUTTON_PLACE: &str = "place:";
@@ -87,6 +89,8 @@ pub struct Assistant<'a, S: Surface> {
     view_moving: Cell<bool>,
     /// The wiki's answer for the last mission asked about (the same mission is asked about on every redraw).
     looked_up: RefCell<Option<(MissionRef, Lookup)>>,
+    /// The same for the raid encounter, and the hour it was asked in (the season it falls in can change).
+    looked_up_raid: RefCell<Option<(RaidRef, i64, RaidLookup)>>,
 }
 
 fn lookup(wiki: &Wiki, obs: &Observation) -> Lookup {
@@ -127,6 +131,7 @@ impl<'a, S: Surface> Assistant<'a, S> {
             sent: RefCell::default(),
             looked_up: RefCell::new(None),
             view_moving: Cell::new(false),
+            looked_up_raid: RefCell::new(None),
         }
     }
 
@@ -348,6 +353,19 @@ impl<'a, S: Surface> Assistant<'a, S> {
         found
     }
 
+    fn raid_lookup_cached(&self, obs: &Observation) -> RaidLookup {
+        let Some(raid) = obs.raid.as_ref() else { return RaidLookup::None };
+        let now = self.now.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
+        if let Some((cached, hour, found)) = self.looked_up_raid.borrow().as_ref() {
+            if cached == raid && *hour == now / 3600 {
+                return found.clone();
+            }
+        }
+        let found = raid_lookup::lookup(self.wiki, raid, now).unwrap_or(RaidLookup::NotFound);
+        *self.looked_up_raid.borrow_mut() = Some((raid.clone(), now / 3600, found.clone()));
+        found
+    }
+
     fn present(&self) {
         if self.scanning {
             // the card is the scan: how far it is, and that the player's input is locked
@@ -362,7 +380,7 @@ impl<'a, S: Surface> Assistant<'a, S> {
             return;
         }
         let obs = &self.last;
-        let cx = Context { obs, lookup: self.lookup_cached(obs), students: self.students, types: self.types };
+        let cx = Context { obs, lookup: self.lookup_cached(obs), raid: self.raid_lookup_cached(obs), students: self.students, types: self.types };
         let (mut outside, mut ingame): (Vec<Row>, Vec<Row>) = (Vec::new(), Vec::new());
         let (mut outside_title, mut ingame_title) = (String::new(), String::new());
         let mut marks = Vec::new();
@@ -476,8 +494,14 @@ mod tests {
         baocr_wikidb::create(&conn).unwrap();
         conn.execute_batch(
             "INSERT INTO source VALUES (1,'t','u','2026-11-23',NULL,'n');
-             INSERT INTO label VALUES ('Terrain','Outdoor','야외'),('ArmorType','HeavyArmor','중장갑'),('BulletType','Mystic','신비'),('BulletType','Normal','일반');
-             INSERT INTO type_effectiveness VALUES ('Mystic','HeavyArmor',20000),('Pierce','HeavyArmor',5000);
+             INSERT INTO label VALUES ('Terrain','Outdoor','야외'),('Terrain','Indoor','실내'),('ArmorType','HeavyArmor','중장갑'),('ArmorType','Unarmed','특수장갑'),('BulletType','Mystic','신비'),('BulletType','Normal','일반'),('BulletType','Explosion','폭발');
+             INSERT INTO type_effectiveness VALUES ('Mystic','HeavyArmor',20000),('Pierce','HeavyArmor',5000),('Mystic','Unarmed',20000),('Pierce','Unarmed',10000);
+             INSERT INTO enemy VALUES (20,'b','시로&쿠로','Boss','Main','Normal','Unarmed','S',1,'{}'),(21,'b','시로&쿠로','Boss','Main','Explosion','Unarmed','S',1,'{}'),(22,'s','세트의 분노','Boss','Main','Normal','Unarmed','S',1,'{}');
+             INSERT INTO raid (id, kind, path_name, name_ko, display_ko, dungeon_type, terrain, released_global, source_id, raw) VALUES
+               (3,'Raid','s','시로&쿠로','시로&쿠로',NULL,'[\"Street\",\"Indoor\"]',1,1,'{}'),(1000000,'MultiFloorRaid','set','세트의 분노','세트의 분노',NULL,'[\"Outdoor\"]',1,1,'{}');
+             INSERT INTO raid_difficulty (raid_kind, raid_id, idx, label, level, floor_start, battle_duration, boss_enemy_id, released_global) VALUES
+               ('Raid',3,0,'Normal',NULL,NULL,180,20,1),('Raid',3,5,'Insane',NULL,NULL,180,21,1),('MultiFloorRaid',1000000,0,NULL,NULL,1,180,22,1);
+             INSERT INTO raid_difficulty_enemy VALUES ('Raid',3,0,0,20),('Raid',3,5,0,21),('MultiFloorRaid',1000000,0,0,22);
              INSERT INTO enemy VALUES (1,'a','중장갑병','Minion','Main','Normal','HeavyArmor','S',1,'{}');
              INSERT INTO stage VALUES (10,'Campaign',NULL,19,3,0,'설원 지구 제2 지역','Outdoor',85,NULL,NULL,NULL,1);
              INSERT INTO stage_formation VALUES (100,10,0,'Grade1',1,1);
@@ -508,6 +532,12 @@ mod tests {
 
     fn squad_obs(scene: Scene) -> Observation {
         Observation { mission: mission(), squad: vec![1, 2, 3], ..Observation::new(scene) }
+    }
+
+    fn raid_obs(scene: Scene, file_mode: baocr_extract::scene::RaidMode, difficulty: Option<usize>, squad: Vec<i64>) -> Observation {
+        let boss = if file_mode == baocr_extract::scene::RaidMode::UnrestrictedRaid { "세트의 분노" } else { "시로&쿠로" };
+        let raid = baocr_extract::raid::RaidRef { mode: file_mode, boss: boss.into(), difficulty, armors: vec!["특수장갑".into()], attack: None, level: Some(17), terrains: vec!["시가지".into(), "실내".into()] };
+        Observation { raid: Some(raid), squad, ..Observation::new(scene) }
     }
 
     fn assistant<'a>(r: &'a Rig, ocr: &'a NoOcr) -> Assistant<'a, Fake> {
@@ -553,6 +583,77 @@ mod tests {
         assert_eq!((main.scene.as_str(), main.title.as_str()), ("편성", "19-3 설원 지구 제2 지역"));
         assert!(rows_of(main).contains("야외") && rows_of(main).contains("Verdict"), "{main:?}");
         assert!(shown.ingame.is_none() && shown.marks.is_empty());
+    }
+
+    #[test]
+    fn the_boss_list_shows_the_encounter_the_difficulty_is_not_chosen_yet_and_no_squad_is_judged() {
+        use baocr_extract::scene::RaidMode::MockTotalAssault;
+        let (r, ocr) = (rig(), NoOcr);
+        let mut a = assistant(&r, &ocr);
+        a.set_game_present(true);
+        a.show(raid_obs(Scene::MockRaidBosses, MockTotalAssault, None, vec![]));
+        let shown = r.fake.0.borrow();
+        let main = shown.main.as_ref().unwrap();
+        assert_eq!((main.scene.as_str(), main.title.as_str()), ("모의 총력전 보스", "모의 총력전 시로&쿠로"));
+        let text = rows_of(main);
+        for needed in ["선택 전", "특수장갑", "시가지 · 실내 중 선택", "Lv", "Normal 일반", "Insane 폭발"] {
+            assert!(text.contains(needed), "{needed} in {text}");
+        }
+        assert!(!text.contains("Verdict"), "{text}");
+        assert!(text.contains("place:raid_info"), "the card can be moved or turned off");
+    }
+
+    #[test]
+    fn the_raid_formation_judges_the_party_read_and_says_that_it_is_one_of_several() {
+        use baocr_extract::scene::RaidMode::{MockTotalAssault, UnrestrictedRaid};
+        let (r, ocr) = (rig(), NoOcr);
+        let mut a = assistant(&r, &ocr);
+        a.set_game_present(true);
+        // difficulty known from the room popup, squad read through the quick formation popup
+        a.show(raid_obs(Scene::RaidFormation(MockTotalAssault), MockTotalAssault, Some(0), vec![1, 2, 3]));
+        {
+            let shown = r.fake.0.borrow();
+            let main = shown.main.as_ref().unwrap();
+            assert_eq!((main.scene.as_str(), main.title.as_str()), ("모의 총력전 편성", "모의 총력전 시로&쿠로 Normal"));
+            let text = rows_of(main);
+            assert!(text.contains("Verdict") && text.contains("1부대~4부대") && text.contains("한 부대만"), "{text}");
+            assert!(!text.contains("선택 전"), "the difficulty is known: {text}");
+        }
+        // the formation names no student: nothing to judge, and the card says how to get a reading
+        a.show(raid_obs(Scene::RaidFormation(MockTotalAssault), MockTotalAssault, Some(0), vec![]));
+        let text = rows_of(r.fake.0.borrow().main.as_ref().unwrap());
+        assert!(!text.contains("Verdict") && text.contains("빠른 편성 창을 열면"), "{text}");
+        // 제약해제결전 has one party: no talk of four
+        a.show(raid_obs(Scene::RaidFormation(UnrestrictedRaid), UnrestrictedRaid, None, vec![1, 2, 3]));
+        let text = rows_of(r.fake.0.borrow().main.as_ref().unwrap());
+        assert!(text.contains("Verdict") && !text.contains("1부대~4부대"), "{text}");
+        // a boss list screen without the difficulty judged against the first one says so
+        a.show(raid_obs(Scene::RaidFormation(MockTotalAssault), MockTotalAssault, None, vec![1, 2, 3]));
+        assert!(rows_of(r.fake.0.borrow().main.as_ref().unwrap()).contains("Normal 기준으로 판정"));
+    }
+
+    #[test]
+    fn a_raid_formation_reached_without_the_boss_having_been_seen_says_so_and_a_mission_card_is_not_drawn_for_a_raid() {
+        let (r, ocr) = (rig(), NoOcr);
+        let mut a = assistant(&r, &ocr);
+        a.show(Observation::new(Scene::RaidFormation(baocr_extract::scene::RaidMode::MockTotalAssault)));
+        let text = rows_of(r.fake.0.borrow().main.as_ref().unwrap());
+        assert!(text.contains("보스 정보를 읽지 못했습니다") && !text.contains("Verdict"), "{text}");
+        // the raid card is gone on a mission screen
+        a.show(squad_obs(Scene::Squad));
+        assert!(!rows_of(r.fake.0.borrow().main.as_ref().unwrap()).contains("선택 전"));
+    }
+
+    #[test]
+    fn an_unchanged_raid_card_is_not_sent_again() {
+        use baocr_extract::scene::RaidMode::MockTotalAssault;
+        let (r, ocr) = (rig(), NoOcr);
+        let counting = Counting::default();
+        let mut a = Assistant::new(Observer::new(&ocr, &r.students), &r.wiki, &r.students, &r.types, Settings::default(), None, &counting);
+        for _ in 0..4 {
+            a.show(raid_obs(Scene::RaidFormation(MockTotalAssault), MockTotalAssault, Some(0), vec![1, 2, 3]));
+        }
+        assert_eq!(counting.0.borrow()[0], 1, "one card, shown once");
     }
 
     #[test]
@@ -734,28 +835,29 @@ mod tests {
         assert!(rows_of(shown.main.as_ref().unwrap()).contains("scan:start"), "the main card is back with the new state of the list");
     }
 
+    #[derive(Default)]
+    struct Counting(RefCell<[u32; 3]>);
+    impl Surface for &Counting {
+        fn main_card(&self, _: PanelState) {
+            self.0.borrow_mut()[0] += 1;
+        }
+        fn ingame_card(&self, _: Option<PanelState>) {
+            self.0.borrow_mut()[1] += 1;
+        }
+        fn marks(&self, _: Vec<Mark>) {
+            self.0.borrow_mut()[2] += 1;
+        }
+        fn take_events(&self) -> Vec<String> {
+            Vec::new()
+        }
+        fn set_dock(&self, _: Dock) {}
+        fn lock_input(&self, _: bool) -> bool {
+            false
+        }
+    }
+
     #[test]
     fn an_unchanged_output_is_not_sent_to_the_surface_again() {
-        #[derive(Default)]
-        struct Counting(RefCell<[u32; 3]>);
-        impl Surface for &Counting {
-            fn main_card(&self, _: PanelState) {
-                self.0.borrow_mut()[0] += 1;
-            }
-            fn ingame_card(&self, _: Option<PanelState>) {
-                self.0.borrow_mut()[1] += 1;
-            }
-            fn marks(&self, _: Vec<Mark>) {
-                self.0.borrow_mut()[2] += 1;
-            }
-            fn take_events(&self) -> Vec<String> {
-                Vec::new()
-            }
-            fn set_dock(&self, _: Dock) {}
-            fn lock_input(&self, _: bool) -> bool {
-                false
-            }
-        }
         let (r, ocr) = (rig(), NoOcr);
         let counting = Counting::default();
         let mut a = Assistant::new(Observer::new(&ocr, &r.students), &r.wiki, &r.students, &r.types, Settings::default(), None, &counting);
