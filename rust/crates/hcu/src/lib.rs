@@ -10,6 +10,7 @@
 mod audit;
 mod capture;
 mod deep;
+mod doctor;
 mod guard;
 mod hcu;
 mod native;
@@ -23,6 +24,7 @@ mod fake;
 
 pub use capture::{check_aspect, game_capture, layout_looks_calibrated, new_capture, parse_frame_region, to_frame};
 pub use deep::{capture_deep, click_game, settle, settle_quiet};
+pub use doctor::{evaluate as evaluate_doctor, run as run_doctor, Facts, Report};
 pub use audit::{AuditSink, FileSink};
 pub use guard::{Refusal, SendError, WinInfo};
 pub use native::{delivered_size, to_absolute, to_native, zoom_geometry, Desktop, NativeRunner, Settle};

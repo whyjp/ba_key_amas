@@ -55,6 +55,9 @@ struct Args {
     /// Print the text boxes OCR reads on this saved 1280x960 frame (no game access).
     #[arg(long)]
     boxes: Option<PathBuf>,
+    /// Check the game window, DPI, monitors and permissions that sending input depends on, then exit. Sends no input.
+    #[arg(long)]
+    doctor: bool,
     /// Passive guide: recognise the game screen and show it, and for a picked mission its terrain and enemy types, on a card beside the game window. Screenshots only, no input.
     #[arg(long)]
     assist: bool,
@@ -151,6 +154,11 @@ fn load_ocr(args: &Args) -> Result<PpOcr> {
 
 fn real_main() -> Result<()> {
     let args = Args::parse();
+    if args.doctor {
+        let report = baocr_hcu::run_doctor();
+        println!("{}", report.render());
+        return Ok(());
+    }
     let modes = [args.boxes.is_some(), args.image.is_some(), args.reextract.is_some(), args.scan_arrows, args.watch, args.grab.is_some(), args.learn.is_some(), args.assist];
     let chosen = modes.iter().filter(|m| **m).count();
     if chosen > 1 {
