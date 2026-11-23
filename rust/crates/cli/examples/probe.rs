@@ -40,7 +40,17 @@ fn main() -> anyhow::Result<()> {
             input.click(fx, fy)?;
             println!("clicked client ({x},{y})");
         }
-        _ => anyhow::bail!("probe grab OUT.png | probe click X Y"),
+        Some("scroll") => {
+            let (x, y, d): (i32, i32, i32) = (args[1].parse()?, args[2].parse()?, args[3].parse()?);
+            let input = session.exclusive();
+            input.activate()?;
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            input.foreground()?;
+            let (fx, fy) = to_frame(region, x, y);
+            input.scroll(fx, fy, d)?;
+            println!("scrolled at client ({x},{y}) by {d}");
+        }
+        _ => anyhow::bail!("probe grab OUT.png | probe click X Y | probe scroll X Y DELTA"),
     }
     Ok(())
 }

@@ -70,6 +70,43 @@ pub fn parse_chapter_screen(boxes: &[TextBox]) -> Read<ChapterRead> {
     Read { value: ChapterRead { chapter: Some(Chapter { chapter: format!("{number}장"), title, cleared }) }, warnings }
 }
 
+/// One volume card of the volume map, with where its name plate is (frame pixels) so the caller can click it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct VolumeCard {
+    pub volume: StoryVolume,
+    pub plate: (f32, f32),
+}
+
+/// The cards of the volume map (`N. 이름 편`). A card's state is its badge: `클리어` is cleared, `New` is open but
+/// not cleared. The badge sits up and to the left of the name plate by fixed multiples of the plate's height
+/// (8.5 across, 3.8 up). A card with no badge in view is null, never false: the card the player has selected
+/// shows its synopsis instead of the badge, and a card cut off by the screen edge has its badge off screen.
+pub fn parse_volume_cards(boxes: &[TextBox]) -> Read<Vec<VolumeCard>> {
+    let mut warnings = Vec::new();
+    let plate_re = Regex::new(r"^((?:\d+|Ex)\s*\.\s*.+?)편$").unwrap();
+    let mut cards = Vec::new();
+    for b in boxes.iter().filter(|b| b.x0 < 900.0) {
+        let name = squashed(b);
+        let Some(c) = plate_re.captures(&name) else { continue };
+        let u = (b.y1 - b.y0).max(1.0);
+        let badge = boxes.iter().find(|k| {
+            let dy = b.y0 - k.y1;
+            let dx = b.x1 - cx(k);
+            let label = squashed(k);
+            (label == "클리어" || label == "New") && (dy - 2.8 * u).abs() < 1.2 * u && (dx - 8.5 * u).abs() < 1.5 * u
+        });
+        let cleared = badge.map(|k| squashed(k) == "클리어");
+        if cleared.is_none() {
+            warnings.push(format!("story: no badge in view for volume {}, cleared left null", &c[1]));
+        }
+        cards.push(VolumeCard { volume: StoryVolume { volume: c[1].to_string(), chapters: vec![], cleared }, plate: (cx(b), cy(b)) });
+    }
+    if cards.is_empty() {
+        warnings.push("story: no volume cards on the screen".into());
+    }
+    Read { value: cards, warnings }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -114,5 +151,32 @@ mod tests {
     #[test]
     fn other_screens_are_not_chapter_screens() {
         assert_eq!(parse_chapter_screen(&boxes("w169-main-story")).value.chapter, None);
+    }
+
+    fn states(name: &str) -> Vec<(String, Option<bool>)> {
+        parse_volume_cards(&boxes(name)).value.into_iter().map(|c| (c.volume.volume, c.volume.cleared)).collect()
+    }
+
+    #[test]
+    fn part_two_cards_show_their_badges() {
+        let s = states("menu-main-story-part2-4x3");
+        assert_eq!(
+            s,
+            vec![("5.백화요란".to_string(), None), ("Ex.데카그라마톤".to_string(), Some(true)), ("6.흘러간시간들의오라토리오".to_string(), Some(true))]
+        );
+    }
+
+    #[test]
+    fn part_one_new_card_is_not_cleared() {
+        let s = states("menu-main-story-part1-4x3");
+        assert!(s.contains(&("0.총학생회".to_string(), Some(true))), "{s:?}");
+        assert!(s.contains(&("1.불꽃과그림자".to_string(), Some(false))), "{s:?}");
+    }
+
+    #[test]
+    fn the_selected_card_shows_no_badge() {
+        let s = states("menu-main-story-part2-sel5-4x3");
+        assert_eq!(s[0], ("5.백화요란".to_string(), None));
+        assert_eq!(s[2], ("6.흘러간시간들의오라토리오".to_string(), Some(true)));
     }
 }

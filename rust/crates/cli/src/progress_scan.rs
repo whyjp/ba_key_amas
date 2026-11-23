@@ -12,7 +12,8 @@ use baocr_extract::scene::{classify_in, Scene};
 use baocr_hcu::{detect_layout, game_capture, settle, settle_quiet, to_frame, Exclusive, Layout};
 use baocr_overlay::BannerState;
 use baocr_progress::schema::{Events, PastEvent, ProgressSnapshot, Region};
-use baocr_progress::{account, bareceipt, event_past, schedule, scroll, Rect};
+use baocr_progress::schema::StoryVolume;
+use baocr_progress::{account, bareceipt, event_past, schedule, scroll, story, Rect};
 use image::RgbImage;
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -25,6 +26,14 @@ enum Target {
     Schedule,
     EventList,
     EventStoryTab,
+    WorkHub,
+    WorkStory,
+    MainStory,
+    /// From a volume screen back to the volume map.
+    ToVolumeMap,
+    /// The button that switches the volume map between its two parts.
+    PartSwitch,
+    FinalVolume,
 }
 
 impl Target {
@@ -46,6 +55,12 @@ impl Target {
                 }
             }
             Target::EventStoryTab => (b.x1 < 330.0 && t == "이벤트스토리").then_some(centre),
+            Target::WorkHub => (b.x0 > 1100.0 && b.y0 > frame_h - 100.0 && t == "업무").then_some(centre),
+            Target::WorkStory => (b.x0 > 1000.0 && b.y0 > 150.0 && t == "스토리").then_some(centre),
+            Target::MainStory => (b.x1 < 600.0 && b.y0 > 200.0 && t.contains("메인스토리")).then_some(centre),
+            Target::ToVolumeMap => (b.y1 < 130.0 && b.x1 < 330.0 && t.ends_with("메인스토리로이동")).then_some(centre),
+            Target::PartSwitch => (b.y1 < 130.0 && b.x1 < 330.0 && t.ends_with("부로이동")).then_some(centre),
+            Target::FinalVolume => (b.x0 > 700.0 && b.x1 < 950.0 && b.y0 > frame_h * 0.6 && t == "최종편").then_some(centre),
         }
     }
 }
@@ -179,7 +194,7 @@ pub struct ProgressSummary {
 type Section = fn(&Nav, &Look, &mut ProgressSnapshot) -> Result<()>;
 
 /// The lobby read counts as the first section.
-const SECTIONS: usize = 3;
+const SECTIONS: usize = 4;
 
 pub fn scan_progress(ocr: Arc<dyn Ocr>, hcu: &Exclusive, region: [f64; 4], out: &Path, report: &dyn Fn(BannerState)) -> Result<ProgressSummary> {
     let layout = detect_layout(region).ok_or_else(|| anyhow!("게임 창의 비율을 알 수 없습니다"))?;
@@ -193,7 +208,7 @@ pub fn scan_progress(ocr: Arc<dyn Ocr>, hcu: &Exclusive, region: [f64; 4], out: 
     snap.warnings.extend(acct.warnings);
 
     let mut read = 1;
-    let steps: [(&str, Section); 2] = [("스케줄", schedule_section), ("이벤트 스토리", past_events_section)];
+    let steps: [(&str, Section); 3] = [("스케줄", schedule_section), ("이벤트 스토리", past_events_section), ("메인 스토리", main_story_section)];
     for (name, step) in steps {
         report(BannerState::scanning(read, Some(SECTIONS)));
         let lobby = nav.to_lobby()?;
@@ -311,6 +326,75 @@ fn past_events_section(nav: &Nav, lobby: &Look, snap: &mut ProgressSnapshot) -> 
         open: snap.events.open.take(),
         past: found.into_iter().map(|(index, cleared)| PastEvent { index, cleared: Some(cleared), scanned_while_open: false }).collect(),
     };
+    Ok(())
+}
+
+/// 업무, 스토리, 1부 메인 스토리: the volume map in both of its parts, and the final volume. A volume is cleared
+/// when its card says so. Selecting a card hides its badge, so each part is read twice with another card selected.
+fn main_story_section(nav: &Nav, lobby: &Look, snap: &mut ProgressSnapshot) -> Result<()> {
+    let hub = nav.press(lobby, Target::WorkHub)?.ok_or_else(|| anyhow!("로비에서 업무 버튼을 찾지 못했습니다"))?;
+    let hub = nav.press(&hub, Target::WorkStory)?.ok_or_else(|| anyhow!("업무 화면에서 스토리 버튼을 찾지 못했습니다"))?;
+    let mut look = nav.press(&hub, Target::MainStory)?.ok_or_else(|| anyhow!("스토리 화면에서 1부 메인 스토리 버튼을 찾지 못했습니다"))?;
+    let mut warnings = Vec::new();
+    let mut volumes: Vec<StoryVolume> = Vec::new();
+    let merge = |cards: baocr_progress::Read<Vec<story::VolumeCard>>, volumes: &mut Vec<StoryVolume>| {
+        for c in cards.value {
+            match volumes.iter_mut().find(|v| v.volume == c.volume.volume) {
+                Some(v) => v.cleared = v.cleared.or(c.volume.cleared),
+                None => volumes.push(c.volume),
+            }
+        }
+        cards.warnings
+    };
+
+    // it opens on the volume that was open last: a single volume's screen shows its badge and chapters
+    let single = story::parse_main_volume(&look.boxes).value;
+    if let Some(map) = nav.press(&look, Target::ToVolumeMap)? {
+        volumes.extend(single);
+        look = map;
+    }
+    for _ in 0..2 {
+        // the wheel moves the map sideways: sweep it from its left end to its right end, reading every view
+        let (mx, my) = (640.0, nav.frame_h() * 0.62);
+        nav.scroll_list(mx, my, false, 8)?;
+        std::thread::sleep(Duration::from_millis(1500));
+        let mut quiet = 0;
+        for _ in 0..12 {
+            look = nav.look()?;
+            let before = volumes.len();
+            warnings.extend(merge(story::parse_volume_cards(&look.boxes), &mut volumes).into_iter().filter(|w| !w.contains("no badge")));
+            quiet = if volumes.len() == before { quiet + 1 } else { 0 };
+            if quiet >= 2 {
+                break;
+            }
+            nav.scroll_list(mx, my, true, 1)?;
+            std::thread::sleep(Duration::from_millis(1500));
+        }
+        // the selected card shows its synopsis instead of its badge: select another card and read again
+        let cards = story::parse_volume_cards(&look.boxes);
+        if let Some(c) = cards.value.iter().find(|c| c.volume.cleared.is_some()) {
+            nav.click_at(c.plate.0, c.plate.1)?;
+            std::thread::sleep(Duration::from_millis(1600));
+            look = nav.look()?;
+            warnings.extend(merge(story::parse_volume_cards(&look.boxes), &mut volumes).into_iter().filter(|w| !w.contains("no badge")));
+        }
+        if let Some(final_view) = nav.press(&look, Target::FinalVolume)? {
+            if let Some(v) = story::parse_main_volume(&final_view.boxes).value {
+                if !volumes.iter().any(|k| k.volume == v.volume) {
+                    volumes.push(v);
+                }
+            }
+            look = nav.press(&final_view, Target::ToVolumeMap)?.ok_or_else(|| anyhow!("볼륨 지도로 돌아오지 못했습니다"))?;
+        }
+        look = nav.press(&look, Target::PartSwitch)?.ok_or_else(|| anyhow!("부 전환 버튼을 찾지 못했습니다"))?;
+    }
+    for v in &volumes {
+        if v.cleared.is_none() {
+            warnings.push(format!("메인 스토리: {} 의 클리어 여부를 화면에서 읽지 못했습니다", v.volume));
+        }
+    }
+    snap.story.main = volumes;
+    snap.warnings.extend(warnings);
     Ok(())
 }
 
