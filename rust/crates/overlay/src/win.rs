@@ -428,12 +428,13 @@ fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, stop: Arc<Atom
                 rect = game_geometry(); // follow the window if it moves
             }
             // clicks on the card's buttons
+            let game_present_now = rect.is_some();
             let clicks: Vec<(isize, i32, i32)> = CLICKS.lock().map(|mut c| std::mem::take(&mut *c)).unwrap_or_default();
             for (h, x, y) in clicks {
                 if h == card.hwnd {
                     if let Some(hit) = card_hits.iter().find(|hit| hit.contains(x, y) && hit.tip.is_none()) {
                         if hit.id == DRAG_HANDLE {
-                            if left_button_down() {
+                            if left_button_down() && game_present_now {
                                 drag = Some((x, y));
                             }
                         } else if let Ok(mut e) = events.lock() {
@@ -468,7 +469,12 @@ fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, stop: Arc<Atom
                     let key = hash_of(&(format!("{p:?}"), cw, ch));
                     let size = (img.width() as i32, img.height() as i32);
                     // against the game on the docked side; with no room, inside it rather than nowhere
-                    let docked = dock_origin(client, outer, work, size, shown.dock).unwrap_or_else(|| ingame_origin(client, size));
+                    let docked = if game_present {
+                        dock_origin(client, outer, work, size, shown.dock).unwrap_or_else(|| ingame_origin(client, size))
+                    } else {
+                        // no game: wait at the top right of the screen
+                        ((work.2 - size.0 - 12).max(work.0), work.1 + 12)
+                    };
                     let at = match drag {
                         Some((gx, gy)) if left_button_down() => {
                             let (cx, cy) = cursor();

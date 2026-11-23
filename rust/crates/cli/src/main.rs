@@ -1,3 +1,4 @@
+#![cfg_attr(windows, windows_subsystem = "windows")]
 //! baocr: Blue Archive student profile extractor (Rust).
 //!
 //! Modes (choose exactly one):
@@ -58,8 +59,8 @@ struct Args {
     #[arg(long)]
     assist: bool,
     /// --assist: the wiki database (build it with the `wikidb` tool).
-    #[arg(long, default_value = "../wikidb/wiki.db")]
-    wiki: PathBuf,
+    #[arg(long)]
+    wiki: Option<PathBuf>,
     /// Learn screens: while you play, save every new stable screen (PNG + the text read on it) into this folder. Screenshots only, no input.
     #[arg(long)]
     learn: Option<PathBuf>,
@@ -92,11 +93,63 @@ impl Args {
     }
 }
 
+/// The wiki database: `--wiki`, else `wikidb/wiki.db` beside the exe (portable layout), else the
+/// source tree's.
+fn wiki_path(args: &Args) -> PathBuf {
+    if let Some(p) = &args.wiki {
+        return p.clone();
+    }
+    let beside = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join("wikidb").join("wiki.db")));
+    beside.into_iter().chain(["wikidb/wiki.db", "../wikidb/wiki.db"].map(PathBuf::from)).find(|p| p.exists()).unwrap_or_else(|| PathBuf::from("wikidb/wiki.db"))
+}
+
+#[cfg(windows)]
+#[link(name = "kernel32")]
+extern "system" {
+    fn AttachConsole(pid: u32) -> i32;
+}
+#[cfg(windows)]
+#[link(name = "user32")]
+extern "system" {
+    fn MessageBoxW(hwnd: isize, text: *const u16, caption: *const u16, kind: u32) -> i32;
+}
+
+/// The exe has no console of its own (it is an add-on); started from a terminal it prints there.
+fn attach_parent_console() {
+    #[cfg(windows)]
+    unsafe {
+        AttachConsole(u32::MAX); // ATTACH_PARENT_PROCESS
+    }
+}
+
+/// A failure of the windowless exe must not vanish: log it and tell the player.
+fn report_fatal(e: &anyhow::Error) {
+    eprintln!("error: {e:#}");
+    let text = format!("{e:#}");
+    if let Some(dir) = std::env::var_os("APPDATA").map(|d| PathBuf::from(d).join("baocr")) {
+        let _ = std::fs::create_dir_all(&dir);
+        let _ = std::fs::write(dir.join("error.log"), &text);
+    }
+    #[cfg(windows)]
+    unsafe {
+        let wide = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+        MessageBoxW(0, wide(&text).as_ptr(), wide("ba-scanner 애드온").as_ptr(), 0x10);
+    }
+}
+
+fn main() {
+    attach_parent_console();
+    if let Err(e) = real_main() {
+        report_fatal(&e);
+        std::process::exit(1);
+    }
+}
+
 fn load_ocr(args: &Args) -> Result<PpOcr> {
     PpOcr::new(&args.models.clone().unwrap_or_else(PpOcr::default_models_dir))
 }
 
-fn main() -> Result<()> {
+fn real_main() -> Result<()> {
     let args = Args::parse();
     let modes = [args.boxes.is_some(), args.image.is_some(), args.reextract.is_some(), args.scan_arrows, args.watch, args.grab.is_some(), args.learn.is_some(), args.assist];
     let chosen = modes.iter().filter(|m| **m).count();
@@ -131,7 +184,7 @@ fn main() -> Result<()> {
     // The add-on (the default): it finds the game window itself, whenever that appears.
     if chosen == 0 || args.assist {
         let ocr: Arc<dyn Ocr> = Arc::new(load_ocr(&args)?);
-        return assist::run(ocr, &Hcu::from_env(), &args.region, &args.wiki, &args.out_dir(), args.workers);
+        return assist::run(ocr, &Hcu::from_env(), &args.region, &wiki_path(&args), &args.out_dir(), args.workers);
     }
 
     // Everything below drives or watches the game.

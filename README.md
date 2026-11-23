@@ -5,11 +5,20 @@ it finds the game window whenever it appears (start it before or after the game,
 game), docks a small card against the window's left or right side (drag its header to move it; it
 snaps to the nearest side and remembers where), and hides while another window covers the game.
 It only looks at the game (screenshots + OCR): guide cards and icons (below) never send input.
-The student scan is one of its features, started by hand from the card's 설정 menu (the only
-thing that sends input to the game): the menu shows when the stored student list was last updated,
-the scan reads every student, and "상세 포함" also reads the stat popup and the two tabs (slower).
+The card is always visible while the add-on runs and shows its state and functions: whether
+the game is found, the screen's information, the student list ("스캔으로부터 3일 2시간 경과";
+hover for the exact date and time), the scan, the display switches and 애드온 종료. It docks level
+with the top of the game window. The student scan is one of its features, started by hand from the
+card (the only thing that sends input to the game); "상세 포함" also reads the stat popup and the two
+tabs (slower). While it runs the card shows its progress, the player's mouse and keyboard are blocked
+(only the scan's own input passes), and ESC stops it and gives control back (the card says so).
 Output is JSON only (`students.json`, `index.json`, `details/NNN/student.json`) in
-`%APPDATA%\baocr\students` (or `--out`). Settings: `%APPDATA%\baocr\overlay.json`.
+`%APPDATA%aocr\students` (or `--out`). Settings: `%APPDATA%aocr\overlay.json`.
+
+**Portable exe.** `pwsh scripts/package-portable.ps1` builds `D:\dista-scanner` (ba-scanner.exe with
+models/, wikidb/ and vendor/hcu/ beside it; no console window). A tray icon (right click, 종료) closes
+the add-on whatever state its windows are in; a fatal error is shown in a message box and written to
+`%APPDATA%aocr\error.log`.
 
 # Blue Archive student data extractor
 
@@ -72,7 +81,7 @@ and read closed-set against the student dictionary (cross-checked with free OCR)
 scrolling the grid works.
 
 **Settings menu.** The add-on's main card sits beside the game window and is clickable
-(it never takes focus from the game): "설정" opens a menu with a master switch for
+(it never takes focus from the game): the card has a master switch for
 everything drawn inside the game and, per widget (임무 카드, 편성 판정, 초상화 아이콘,
 슬롯 스탯), where it goes: beside the game, inside it, or off. The choice is saved in
 `%APPDATA%\baocr\overlay.json`.

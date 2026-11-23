@@ -68,9 +68,11 @@ impl PpOcr {
         if let Ok(p) = std::env::var("BAOCR_MODELS") {
             return PathBuf::from(p);
         }
-        for c in ["models", "../models", "../../models"] {
-            if Path::new(c).join("korean_PP-OCRv5_rec_mobile.onnx").exists() {
-                return PathBuf::from(c);
+        // the portable layout first (models/ beside the exe), then the source tree's
+        let beside_exe = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join("models")));
+        for c in beside_exe.into_iter().chain(["models", "../models", "../../models"].map(PathBuf::from)) {
+            if c.join("korean_PP-OCRv5_rec_mobile.onnx").exists() {
+                return c;
             }
         }
         PathBuf::from("models")
