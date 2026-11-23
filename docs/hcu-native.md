@@ -73,3 +73,23 @@ Passive code cannot send input: `Hcu` has screenshot, zoom, window list and fram
 ## Activating the game window
 
 `activate` asks Windows for the foreground with a plain `SetForegroundWindow` and waits up to 750 ms. It sends no key (an earlier version tapped Alt) and attaches no input queue, because those tricks take the focus from whatever the player is doing. If Windows refuses, the call fails with a message asking the player to click the game window once, and a scan does not start. Already being the foreground window is a success without any call.
+
+## Trying the input path without the game
+
+`baocr --doctor` reads the game window, DPI, monitors (including dead space in the virtual desktop), the
+game's and the add-on's elevation and the focus, and prints OK/경고 lines. It sends no input.
+
+Two examples in `rust/crates/hcu/examples` exercise the in-process input against a harmless window instead
+of the game. They are **not** run by `cargo test`, because `input_selftest` moves the real mouse:
+
+```
+cargo build -p baocr-hcu --examples
+cargo run -p baocr-hcu --example input_selftest     # starts input_target itself
+```
+
+`input_target` is a plain window titled "HCU Test Target" (coloured quadrants, a white marker square) that
+logs the screen position of every click and wheel turn it receives. `input_selftest` takes a screenshot and
+a zoom, clicks at three points, turns the wheel, and checks that the target saw each event where it was aimed.
+It also checks the refusals, which must reach nothing: the window moved after the frame, the point covered by
+another window, and a point on no monitor. Each check prints PASS/FAIL and the exit code is 1 on any FAIL.
+Every input call is also written to `%APPDATA%\baocr\input.log` (the selftest uses `%TEMP%\hcu-selftest-input.log`).

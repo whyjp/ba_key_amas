@@ -1,165 +1,104 @@
 # Blue Archive add-on
 
-An add-on app for Blue Archive (Windows, Global/Korean, 4:3 windowed). Run `baocr` with no arguments:
-it finds the game window whenever it appears (start it before or after the game, or restart the
-game), docks a small card against the window's left or right side, or inside the game at its top
-left or top right corner when the monitor has no room beside it (drag the header, or the folded tab, to
-move it; it snaps to the nearest of those places and remembers where), and hides while another window
-covers the game. Inside the game the card is a small bookmark tab that unfolds toward the middle while the
-pointer is on it; the pin button in its header keeps it open (or folds it beside the game too); see
-`docs/card-dock.md`.
-It only looks at the game (screenshots + OCR): guide cards and icons (below) never send input.
-The card is always visible while the add-on runs and shows its state and functions: whether
-the game is found, the screen's information, the student list ("스캔으로부터 3일 2시간 경과";
-hover for the exact date and time), the scan, the display switches and 애드온 종료. It sits level
-with the top of the game window. The student scan is one of its features, started by hand from the
-card (the only thing that sends input to the game); "상세 포함" also reads the stat popup and the two
-tabs (slower). While it runs the card shows its progress, the player's mouse and keyboard are blocked
-(only the scan's own input passes), and ESC stops it and gives control back (the card says so).
-Output is JSON only (`students.json`, `index.json`, `details/NNN/student.json`) in
-`%APPDATA%\baocr\students` (or `--out`). Settings: `%APPDATA%\baocr\overlay.json`.
+A Windows add-on for Blue Archive (Global server, Korean UI, 4:3 windowed). It reads the game screen,
+looks the mission or raid up in a local database, and shows a card and icons next to or over the game
+window. It can also scan the student roster into JSON when you press a button.
 
-**Portable exe.** `pwsh scripts/package-portable.ps1` builds `D:\dist\ba-scanner` (ba-scanner.exe with
-models/, wikidb/ and vendor/hcu/ beside it; no console window). A tray icon (right click, 종료) closes
-the add-on whatever state its windows are in; a fatal error is shown in a message box and written to
-`%APPDATA%\baocr\error.log`.
+![architecture](docs/diagrams/crates.svg)
 
-# Blue Archive student data extractor
+## What it does
 
-## Rust implementation (current)
+| Feature | Sends input to the game |
+|---|---|
+| Guide card: screen name, mission or raid facts, enemy armor and attack mix, squad verdict | no |
+| Icons on the quick formation popup: a fit grade and the terrain face per student and slot | no |
+| Raid screens: 총력전, 모의총력전, 제약해제결전, 종합전술시험, 대결전 (card with the raid's armor and attack mix) | no |
+| Battle mode: the add-on goes quiet during a fight | no |
+| Student roster scan (`students.json`, `index.json`, `details/NNN/student.json`) | yes, only after you press the scan button |
 
-`rust/` is a Cargo workspace that replaces the Go program. One binary, no Python,
-no C compiler, no Tesseract: PP-OCRv5 (Korean) runs in process through ONNX Runtime.
+The card always shows the add-on's state. Closing the add-on is the power icon in the card header,
+or the tray icon (right click, 종료), which works even when the windows are stuck.
 
-```text
-# one-time: put the OCR models in models/ (see models/README.md), then
-cd rust
-cargo build --release
-target/release/baocr --image ../fixtures/detail-shun.png --out out-one        # parse a saved screenshot
-target/release/baocr                                                          # the add-on (see above)
-target/release/baocr --scan-arrows --from-first --out scan                    # scan the roster from the command line (HCU drives the game)
-target/release/baocr --scan-arrows --from-first --fast --out scan             # skip the menu pass
-target/release/baocr --reextract scan [--ids 003,007]                         # retry from saved frames, no game input
-target/release/baocr --watch --out db                                         # passive background updater
-cargo run -p baocr-namedict                                                   # refresh the dictionary after a patch
-cargo run -p baocr-wikidb --release                                           # build ../wikidb/wiki.db (missions, enemies, students)
-target/release/baocr --assist                                                 # guide card beside the game window (no input)
-target/release/baocr --learn shots                                            # save every new screen + its text while you play (no input)
-```
+## Run it
 
-Build output goes to `CARGO_TARGET_DIR` (use a drive with space; C: was nearly full).
+1. Use the portable build: `pwsh scripts/package-portable.ps1` writes `D:\dist\ba-scanner` with
+   `ba-scanner.exe`, `models/`, `wikidb/` and `DirectML.dll`. Start `ba-scanner.exe`, before or after the game.
+2. Set the game to 4:3, windowed, and turn Windows HDR off (HDR washes out the colours the readers use).
+3. The card appears beside the game. If the monitor has no room beside it, the card becomes a bookmark
+   tab inside the game and unfolds when the pointer is on it.
 
-How names and the bond number are read: the ink-isolated line is scored against
-every dictionary name (or 1..=100) with the recogniser's own CTC probabilities
-and the most probable candidate wins, so the result can only be a student; a
-read that is not clearly ahead stays empty. On the 106 saved frames the Rust
-extractor matches the Go scan on name, bond, the four stats, skills, rarity,
-pin, role and weapon stars (all 106), and reads the level of the 67 students
-the Go/Tesseract path left empty. Known gap: equipment item names are only
-verified for tier 4 (icon catalog); Go and Rust disagree on tier 5/6 slots.
+Settings are in `%APPDATA%\baocr\overlay.json`, scan output in `%APPDATA%\baocr\students`, the input log in
+`%APPDATA%\baocr\input.log`, and fatal errors in `%APPDATA%\baocr\error.log`.
 
-## Guide card (`--assist`)
+## Card behaviour
 
-A passive assistant: it only takes screenshots (no clicks, keys or scrolls). It
-recognises the screen from the text OCR reads (main menu, 업무, 임무 list, 임무
-정보 popup, hex map, 편성, 현상수배 / 특별의뢰 / 학원교류회 lists, student list and
-profile), remembers the mission shown on the 임무 정보 popup (the hex map and the
-squad screen do not name it), and draws a card **beside** the game window (right,
-else left; never on it) with the screen, the mission, its terrain, the enemies'
-attack and armor types and the student attack types that do best against them.
-The card window is click-through and excluded from screen capture; if the OS
-cannot exclude it, it is not shown. Mission data comes from the wiki DB
-(`wikidb/schema.sql`, built by `baocr-wikidb` from SchaleDB's Global/Korean data).
-`wiki.db` is a local build artefact, not redistributed.
+- Placement is one of four anchors: outside left or right, inside top left or right. Drag the header, or
+  the folded tab, to move it. It snaps to the nearest anchor and remembers it. Details: [docs/card-dock.md](docs/card-dock.md).
+- The pin button in the header keeps the card open. Without it, an inside card folds into a tab.
+- The student list section folds. A folded section still shows how long ago the list was scanned, and a
+  tooltip shows the exact time.
+- While a scan runs, your mouse and keyboard are blocked except for the scan's own input. ESC stops the
+  scan and gives control back. The card says so.
 
-In the 빠른 편성 popup it also draws small icons **on** each student portrait (the
-mission terrain's adaptation face as the game shows it, attack type, armor type) from a
-second click-through layer over the game, and the card gains a squad verdict (유리 /
-평균 / 불리) with attack, defense and terrain bars. The verdict is a rough guide: it
-compares the squad's attack and armor types and terrain adaptation with the mission's
-enemies, relative to the average released student (adaptation grades are approximated as
-80/90/100/110/120 %; it is not a battle simulation). The squad is read from the 편성
-screen's name labels and the lime-outlined cards of the popup.
-Icons also go on the squad strip at the bottom of the popup, and cards are found by colour
-and read closed-set against the student dictionary (cross-checked with free OCR), so
-scrolling the grid works.
+## Commands
 
-**Settings menu.** The add-on's main card sits beside the game window and is clickable
-(it never takes focus from the game): the card has a master switch for
-everything drawn inside the game and, per widget (임무 카드, 편성 판정, 초상화 아이콘,
-슬롯 스탯), where it goes: beside the game, inside it, or off. The choice is saved in
-`%APPDATA%\baocr\overlay.json`.
+Build once with `cd rust && cargo build --release`, then:
 
-**Battle.** In a live battle the add-on goes quiet: it recognises the combat HUD from pixels alone
-(stage tag top left, cost gauge and AUTO button bottom right; two of the three must show, two frames
-in a row to enter or leave), removes the in-game card and icons, shows only 전투 중 with the
-in-game switch and 애드온 종료 on the card, runs no OCR and looks at the game about every 0.5 s.
-Limits: 4:3 only (the add-on refuses other aspects anyway), checked against one real frame (Normal
-campaign stage), so other battle types (raids, other HUD scales) are untested; a pause dialog or a
-skill cut-in that hides the HUD reads as not battle; leaving a battle is noticed in about one second.
-`BAOCR_PROFILE=1` prints stage timings (loop every 10 s, overlay thread every 5 s) and
-`cargo run --release -p baocr --example perf_loop` repeats the offline measurements.
+| Command | What it does |
+|---|---|
+| `baocr` or `baocr --assist` | the add-on |
+| `baocr --doctor` | checks the game window, DPI, monitors, elevation and focus; sends no input |
+| `baocr --scan-arrows --from-first --out scan` | scans the roster from the command line; add `--fast` to skip the menu pass |
+| `baocr --reextract scan [--ids 003,007]` | rereads saved frames, no game input |
+| `baocr --watch --out db` | passive updater |
+| `baocr --learn shots` | saves every new screen and its text while you play, no input |
+| `baocr --image fixtures/detail-shun.png --out out` | parses one saved screenshot |
+| `cargo run -p baocr-wikidb --release` | builds `wikidb/wiki.db` from SchaleDB |
+| `cargo run -p baocr-namedict` | refreshes the name dictionary after a patch |
 
-**Structure** (`baocr-assist`): `observe` (frame in, `Observation` out), `widgets` (each a
-`Widget`: observation in, rows or icons out), `settings`, `surface` (the output trait the
-overlay implements; tests use a fake), `assistant` (connects them). A widget can be added
-without touching the observer, and the overlay can be replaced without touching widgets.
+Environment variables: `BAOCR_MODELS` (model folder), `BAOCR_OCR_DEVICE=cpu` (skip the GPU),
+`BAOCR_HCU=process` (use the old helper program), `BAOCR_PROFILE=1` (stage timings),
+`BAOCR_INPUT_LOG=0` (no input log), `BAOCR_HCU_SETTLE_MS` (wait after input), `BAOCR_STATE_DUMP=<file>` (write
+the add-on's state for the live test), `BAOCR_OVERLAY_CAPTURABLE=1` (let screenshots include the overlay).
 
-Limits: students are identified by the name written on the card, so the popup must be in
-its list view (the compact view shows no names; the card says so); the mission is known
-only if `--assist` was running when its 임무 정보 popup was opened; the squad is known
-from the 편성 screen or from the cards outlined in the popup (a squad edited while
-`--assist` was not running is read from the visible cards and the specials' names).
+## Requirements
 
-Workspace crates: `core` (schema, OCR trait), `names`, `pixels`, `equipment`,
-`export` (CSV/HTML/store/index), `ocr` (engine), `extract` (profile + menu pass),
-`pipeline` (async workers, re-extraction), `hcu` (game control, scan loop, watcher),
-`cli`, `namedict`, `wikidb` (reference DB: build + read API), `overlay` (banner and guide card). Module contracts: `rust/PORTING.md`.
+- Windows 10 or 11, the game in 4:3 windowed mode, one game window.
+- OCR models in `models/` (see [models/README.md](models/README.md)) and the wiki database in `wikidb/wiki.db`
+  (a local build, not redistributed).
+- A GPU with DirectML speeds up OCR about 2.7 times; the CPU works too.
+- Build output: set `CARGO_TARGET_DIR` to a drive with space. The repository limits debug info and parallel
+  jobs so test builds fit in memory ([ADR 0009](docs/adr/0009-build-limits.md)).
 
-The Go program below is kept only until the Rust scan and watcher have been
-verified live against the game; it is superseded.
+## Documentation
 
-## Trying the input path without the game
+| Page | Contents |
+|---|---|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/architecture.html](docs/architecture.html) | modules, runtime flow, static and dynamic data, threads |
+| [docs/adr/](docs/adr/README.md) | nine decision records |
+| [docs/hcu-native.md](docs/hcu-native.md) | desktop control in process, input guards, `activate` policy |
+| [docs/raid-data.md](docs/raid-data.md) | raid tables, seasons, lookups, raid screens |
+| [docs/enemy-weighting.md](docs/enemy-weighting.md) | how armor and attack shares are weighted by HP, with sources |
+| [docs/card-dock.md](docs/card-dock.md) | anchors, bookmark tab, hover timings, snapping |
+| [docs/speed-research.md](docs/speed-research.md) | where the latency goes, measured options, DirectML |
+| [docs/live-e2e.md](docs/live-e2e.md) | the live test against the real game |
+| [rust/PORTING.md](rust/PORTING.md) | module contracts from the Go port |
+| [docs/history/](docs/history) | notes from the Go and Tesseract era |
 
-`baocr --doctor` reads the game window, DPI, monitors (including dead space in the virtual desktop), the
-game's and the add-on's elevation and the focus, and prints OK/경고 lines. It sends no input.
+## Status
 
-Two examples in `rust/crates/hcu/examples` exercise the in-process input against a harmless window instead
-of the game. They are **not** run by `cargo test`, because `input_selftest` moves the real mouse:
+Verified by tests and by live runs: scene recognition on the raid screens, boss cards against the database,
+the stale icon fix, fold, pin and hover, the input guards. Not yet verified live: the 106 student scan on
+the in-process input path, the CPU against DirectML comparison, click to card latency under 1 s (the last
+measurement was 1.7 s median, taken while a faulty touch screen was sending input), real ESC and the input
+lock, the tray menu, and DirectML's effect on the game's frame rate.
 
-```
-cargo build -p baocr-hcu --examples
-cargo run -p baocr-hcu --example input_selftest     # starts input_target itself
-```
-
-`input_target` is a plain window titled "HCU Test Target" (coloured quadrants, a white marker square) that
-logs the screen position of every click and wheel turn it receives. `input_selftest` takes a screenshot and
-a zoom, clicks at three points, turns the wheel, and checks that the target saw each event where it was aimed.
-It also checks the refusals, which must reach nothing: the window moved after the frame, the point covered by
-another window, and a point on no monitor. Each check prints PASS/FAIL and the exit code is 1 on any FAIL.
-Every input call is also written to `%APPDATA%\baocr\input.log` (the selftest uses `%TEMP%\hcu-selftest-input.log`).
-
-## Requirements and limits
-
-- Game in **4:3, windowed**, SDR. The window position is found automatically
-  (`--region auto`); pass `--region x0,y0,x1,y1` only to override. 16:9 and
-  fullscreen are not supported. **Turn Windows HDR off**: with HDR the game is
-  captured washed-out and the colour-based readers (locks, badges, terrain
-  faces, ink isolation) stop working.
-- Microsoft HCU (`vendor/hcu/computer-use.exe`, or `$HCU_BIN`) drives clicks; the
-  OCR models live in `models/` (see `models/README.md`).
-- Tested live: full-roster scan (106 students, 7.4 min fast / ~26 s per student
-  with the menu pass), passive `--watch`, window auto-detection.
-- Guide card verified live for campaign 19-3 (임무 정보, 임무 지도, 편성) and a 현상수배
-  stage popup; 특별의뢰 and 학원교류회 screens are recognised from recorded frames only.
-  Event missions and 종합전술시험 are not covered yet; 총력전 (모의 총력전, 제약해제결전) screens are
-  recognised from recorded frames only, see `docs/raid-data.md` ("Raid screens").
-- Not verified: 3-digit bond rank (no sample), 능력개방 unlocked state, equipment
-  icons beyond tier 4, a live level-up appearing in `--watch`.
+Known gaps: a raid has up to four parties but the verdict covers the party being edited; scrolled Insane and
+higher rows, the real 대결전 screen and the 종합전술시험 stages are not learned; the 3-digit bond rank has no
+sample; equipment icons beyond tier 4 are unverified; layouts other than 4:3 windowed are unsupported.
 
 ## History
 
-The first implementation was Go + Tesseract (commit `2847447`) with Python
-prototypes before it (both removed; see git history). The Rust port replaced the Go program after it matched it on all 106
-saved frames and in a live full scan (names, bond, stats, skills, rarity, pin,
-role identical; levels the Go version could not read are now read).
+The first implementation was Go with Tesseract. The Rust port replaced it after matching it on all 106 saved
+frames and in a live full scan. The helper-process desktop control was replaced by in-process Win32 calls
+([ADR 0003](docs/adr/0003-native-desktop-control.md)); `vendor/hcu` stays until the live scan comparison passes.
