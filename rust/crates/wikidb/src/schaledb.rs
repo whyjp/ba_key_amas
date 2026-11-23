@@ -7,6 +7,9 @@ use anyhow::{anyhow, bail, Context, Result};
 use rusqlite::{params, Connection, Transaction};
 use serde_json::Value;
 
+use crate::weight::{self, Entry, Growth, RankedLevels, Weight};
+use std::collections::HashMap;
+
 const SITE: &str = "https://schaledb.com/data/kr";
 /// The type-effectiveness table lives in the site's common config.
 const CONFIG_URLS: [&str; 2] = [
@@ -50,6 +53,9 @@ pub struct Counts {
     /// Difficulties of all raids and the enemy rows that belong to them.
     pub raid_difficulties: usize,
     pub raid_difficulty_enemies: usize,
+    /// Weight rows written: one per enemy of a formation and of a raid difficulty.
+    pub formation_weights: usize,
+    pub raid_weights: usize,
     pub raid_seasons: usize,
     pub eliminate_seasons: usize,
 }
@@ -250,6 +256,49 @@ fn furniture_interactions(tx: &Transaction, d: &Dataset, n: &mut Counts) -> Resu
     Ok(())
 }
 
+/// What an enemy's hit points are made from, read once from the source record.
+struct HpStats {
+    rank: String,
+    hp1: i64,
+    hp100: i64,
+    growth: Growth,
+    steps: Option<Vec<i64>>,
+}
+
+fn hp_stats(d: &Dataset) -> HashMap<i64, HpStats> {
+    d.enemies
+        .get("Enemies")
+        .and_then(|x| x.as_object())
+        .into_iter()
+        .flat_map(|m| m.values())
+        .filter_map(|e| {
+            let steps = e.get("Transcendence").and_then(|t| t.get(1)).and_then(|a| a.as_array()).map(|a| a.iter().filter_map(Value::as_i64).collect());
+            Some((int(e, "Id")?, HpStats { rank: text(e, "Rank")?, hp1: int(e, "MaxHP1")?, hp100: int(e, "MaxHP100")?, growth: Growth::parse(e.get("StatLevelUpType").and_then(|x| x.as_str())), steps }))
+        })
+        .collect()
+}
+
+/// Weights of one encounter's enemies, in order. `levels`: what the encounter gives each rank.
+/// The enemy table is read here and nowhere else, so an enemy without HP stats weighs nothing (`no-hp`).
+fn weigh(stats: &HashMap<i64, HpStats>, ranks: &HashMap<i64, String>, enemies: &[i64], levels: Option<&RankedLevels>, raid: bool) -> Vec<(Option<(i64, i64)>, Option<i64>, Weight)> {
+    let at: Vec<(Option<(i64, i64)>, Option<i64>)> = enemies
+        .iter()
+        .map(|id| {
+            let s = stats.get(id);
+            // level unknown: the stats at 100, which is the stat for enemies of a flat HP too
+            let lg = s.zip(levels).map(|(s, l)| l.for_rank(&s.rank));
+            let hp = s.map(|s| match lg {
+                Some((level, grade)) => weight::hp_at(s.hp1, s.hp100, level, grade, s.growth, s.steps.as_deref()),
+                None => s.hp100,
+            });
+            (lg, hp)
+        })
+        .collect();
+    let entries: Vec<Entry> = enemies.iter().zip(&at).map(|(id, (_, hp))| Entry { rank: ranks.get(id).cloned().unwrap_or_default(), hp: *hp }).collect();
+    let weights = if raid { weight::raid_weights(&entries) } else { weight::stage_weights(&entries) };
+    at.into_iter().zip(weights).map(|((lg, hp), w)| (lg, hp, w)).collect()
+}
+
 fn enemies(tx: &Transaction, d: &Dataset, n: &mut Counts) -> Result<()> {
     let all = d.enemies.get("Enemies").ok_or_else(|| anyhow!("enemies.json has no Enemies"))?;
     let mut st = tx.prepare(
@@ -282,6 +331,9 @@ fn stages(tx: &Transaction, d: &Dataset, n: &mut Counts) -> Result<()> {
     )?;
     let mut formation = tx.prepare("INSERT INTO stage_formation (id, stage_id, ordinal, unit_grade, level_minion, grade_minion) VALUES (?1,?2,?3,?4,?5,?6)")?;
     let mut member = tx.prepare("INSERT INTO formation_enemy (formation_id, ordinal, enemy_id) VALUES (?1,?2,?3)")?;
+    let mut weight_row = tx.prepare("INSERT INTO formation_enemy_weight (formation_id, ordinal, level, grade, hp, weight, excluded) VALUES (?1,?2,?3,?4,?5,?6,?7)")?;
+    let stats = hp_stats(d);
+    let ranks: HashMap<i64, String> = stats.iter().map(|(id, s)| (*id, s.rank.clone())).collect();
     for r in objects(&d.stages, "stages")? {
         let id = int(r, "Id").ok_or_else(|| anyhow!("stage without Id"))?;
         let kind = text(r, "Type");
@@ -308,10 +360,15 @@ fn stages(tx: &Transaction, d: &Dataset, n: &mut Counts) -> Result<()> {
                 .execute(params![fid, id, i as i64, text(f, "UnitGrade"), int(f, "LevelMinion"), int(f, "GradeMinion")])
                 .with_context(|| format!("stage {id} formation {fid}"))?;
             n.formations += 1;
-            for (j, e) in f.get("EnemyList").and_then(|x| x.as_array()).into_iter().flatten().enumerate() {
-                let enemy = e.as_i64().ok_or_else(|| anyhow!("stage {id}: enemy id is not a number"))?;
+            let list: Vec<i64> = f.get("EnemyList").and_then(|x| x.as_array()).into_iter().flatten().map(|e| e.as_i64().ok_or_else(|| anyhow!("stage {id}: enemy id is not a number"))).collect::<Result<_>>()?;
+            for (j, enemy) in list.iter().enumerate() {
                 member.execute(params![fid, j as i64, enemy]).with_context(|| format!("stage {id} formation {fid}: enemy {enemy}"))?;
                 n.formation_enemies += 1;
+            }
+            let levels = RankedLevels::from_formation(f);
+            for (j, (lg, hp, w)) in weigh(&stats, &ranks, &list, levels.as_ref(), false).into_iter().enumerate() {
+                weight_row.execute(params![fid, j as i64, lg.map(|x| x.0), lg.map(|x| x.1), hp, w.weight, w.excluded])?;
+                n.formation_weights += 1;
             }
         }
     }
@@ -335,6 +392,8 @@ struct RaidDifficultyRow {
     floor_start: Option<i64>,
     battle_duration: Option<i64>,
     enemies: Vec<i64>,
+    /// The level and grade the encounter gives its enemies by rank; None when the source gives no level.
+    levels: Option<RankedLevels>,
     released_global: bool,
 }
 
@@ -367,9 +426,10 @@ fn raid_difficulties(kind: &str, r: &Value) -> Result<Vec<RaidDifficultyRow>> {
     // highest difficulty index open on Global
     let max_open = r.get("MaxDifficulty").and_then(|a| a.get(GLOBAL)).and_then(|x| x.as_i64());
     let levels = int_list(r, "Level")?;
+    let formations = r.get("Formations").and_then(|x| x.as_array());
     let (enemies, durations, names, floors): (Vec<Vec<i64>>, Vec<i64>, Vec<String>, Vec<i64>) = match kind {
         "TimeAttack" => {
-            let formations = r.get("Formations").and_then(|x| x.as_array()).ok_or_else(|| anyhow!("no Formations list"))?;
+            let formations = formations.ok_or_else(|| anyhow!("no Formations list"))?;
             let lists = formations.iter().map(|f| ints(f.get("EnemyList").unwrap_or(&Value::Null), "Formations.EnemyList")).collect::<Result<_>>()?;
             (lists, int_list(r, "BattleDuration")?, Vec::new(), Vec::new())
         }
@@ -395,10 +455,26 @@ fn raid_difficulties(kind: &str, r: &Value) -> Result<Vec<RaidDifficultyRow>> {
             level: levels.get(idx).copied(),
             floor_start: floors.get(idx).copied(),
             battle_duration: durations.get(idx).copied(),
+            levels: encounter_levels(kind, r, idx, levels.get(idx).copied(), floors.get(idx).copied(), formations),
             enemies,
             released_global: released && max_open.map_or(true, |m| idx as i64 <= m),
         })
         .collect())
+}
+
+/// The level (and grade) a raid difficulty gives its enemies, the way SchaleDB's raid page picks it: a
+/// time attack's formation by rank, a floor raid's first floor of the tier, else the record's level
+/// for the difficulty, else the default of the `Raid` kind.
+fn encounter_levels(kind: &str, r: &Value, idx: usize, level: Option<i64>, floor_start: Option<i64>, formations: Option<&Vec<Value>>) -> Option<RankedLevels> {
+    match kind {
+        "TimeAttack" => formations.and_then(|f| f.get(idx)).and_then(RankedLevels::from_formation).or_else(|| level.map(RankedLevels::flat)),
+        "MultiFloorRaid" => {
+            let floor = r.get("RaidFloors").and_then(|f| f.get((floor_start? - 1).max(0) as usize))?;
+            int(floor, "Level").map(RankedLevels::flat)
+        }
+        "Raid" => Some(RankedLevels::flat(level.unwrap_or_else(|| weight::RAID_DEFAULT_LEVELS[idx.min(weight::RAID_DEFAULT_LEVELS.len() - 1)]))),
+        _ => level.map(RankedLevels::flat),
+    }
 }
 
 /// The enemy a difficulty is named after: its first Boss, else its first Champion (the
@@ -445,6 +521,10 @@ fn raids(tx: &Transaction, d: &Dataset, n: &mut Counts) -> Result<()> {
          VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
     )?;
     let mut member = tx.prepare("INSERT INTO raid_difficulty_enemy (raid_kind, raid_id, idx, ordinal, enemy_id) VALUES (?1,?2,?3,?4,?5)")?;
+    let mut weight_row = tx.prepare(
+        "INSERT INTO raid_difficulty_enemy_weight (raid_kind, raid_id, idx, ordinal, level, grade, hp, weight, excluded) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+    )?;
+    let stats = hp_stats(d);
     for kind in RAID_KINDS {
         for r in d.raids.get(kind).and_then(|x| x.as_array()).into_iter().flatten() {
             let id = int(r, "Id").ok_or_else(|| anyhow!("{kind} without Id"))?;
@@ -476,6 +556,10 @@ fn raids(tx: &Transaction, d: &Dataset, n: &mut Counts) -> Result<()> {
                 for (ordinal, enemy) in row.enemies.iter().enumerate() {
                     member.execute(params![kind, id, row.idx as i64, ordinal as i64, enemy]).with_context(|| format!("{kind} {id} difficulty {}: enemy {enemy}", row.idx))?;
                     n.raid_difficulty_enemies += 1;
+                }
+                for (ordinal, (lg, hp, w)) in weigh(&stats, &enemy_rank, &row.enemies, row.levels.as_ref(), true).into_iter().enumerate() {
+                    weight_row.execute(params![kind, id, row.idx as i64, ordinal as i64, lg.map(|x| x.0), lg.map(|x| x.1), hp, w.weight, w.excluded])?;
+                    n.raid_weights += 1;
                 }
             }
         }
@@ -543,23 +627,25 @@ mod tests {
                 "103": {"Id": 103, "Name": "일본 한정 의자", "Category": "Furnitures", "Size": [1, 1], "IsReleased": [true, false, false], "Interaction": [true, false, false]}
             }),
             enemies: json!({"Enemies": {
-                "7000001": {"Id": 7000001, "Name": "불량배", "Rank": "Minion", "BulletType": "Normal", "ArmorType": "LightArmor"},
-                "7000013": {"Id": 7000013, "Name": "무자비한 불량배", "Rank": "Champion", "BulletType": "Normal", "ArmorType": "LightArmor"},
-                "7300100": {"Id": 7300100, "Name": "비나", "Rank": "Boss", "BulletType": "Normal", "ArmorType": "HeavyArmor"},
-                "7300600": {"Id": 7300600, "Name": "비나", "Rank": "Boss", "BulletType": "Pierce", "ArmorType": "HeavyArmor"},
-                "7300900": {"Id": 7300900, "Name": "소환물", "Rank": "Summoned", "BulletType": "Normal", "ArmorType": "LightArmor"}
+                "7000001": {"Id": 7000001, "Name": "불량배", "Rank": "Minion", "BulletType": "Normal", "ArmorType": "LightArmor", "MaxHP1": 100, "MaxHP100": 10100},
+                "7000013": {"Id": 7000013, "Name": "무자비한 불량배", "Rank": "Champion", "BulletType": "Normal", "ArmorType": "LightArmor", "MaxHP1": 1000, "MaxHP100": 100000},
+                "7300100": {"Id": 7300100, "Name": "비나", "Rank": "Boss", "BulletType": "Normal", "ArmorType": "HeavyArmor", "MaxHP1": 300000, "MaxHP100": 300000},
+                "7300600": {"Id": 7300600, "Name": "비나", "Rank": "Boss", "BulletType": "Pierce", "ArmorType": "HeavyArmor", "MaxHP1": 900000, "MaxHP100": 900000},
+                "7300900": {"Id": 7300900, "Name": "소환물", "Rank": "Summoned", "BulletType": "Normal", "ArmorType": "LightArmor", "MaxHP1": 5000, "MaxHP100": 5000},
+                "7300901": {"Id": 7300901, "Name": "비나의 몸", "Rank": "Minion", "BulletType": "Normal", "ArmorType": "HeavyArmor", "MaxHP1": 300000, "MaxHP100": 300000},
+                "7300902": {"Id": 7300902, "Name": "비나의 부위", "Rank": "Minion", "BulletType": "Normal", "ArmorType": "LightArmor", "MaxHP1": 100000, "MaxHP100": 100000}
             }}),
             stages: json!({
                 "1011101": {"Id": 1011101, "Category": "Campaign", "Difficulty": 0, "Area": 1, "Stage": 1, "Name": "아오바 중심구 35번지", "Terrain": "Street", "Level": 1,
                             "EntryCost": [[5, 10]], "Formations": [
-                                {"Id": 101110101, "UnitGrade": "Grade1", "EnemyList": [7000001, 7000001]},
-                                {"Id": 101110102, "UnitGrade": "Boss", "EnemyList": [7000013]}]},
+                                {"Id": 101110101, "UnitGrade": "Grade1", "LevelMinion": 1, "GradeMinion": 1, "EnemyList": [7000001, 7000001]},
+                                {"Id": 101110102, "UnitGrade": "Boss", "LevelMinion": 1, "GradeMinion": 1, "EnemyList": [7000013]}]},
                 "30101": {"Id": 30101, "Category": "Bounty", "Type": "ChaserA", "Stage": 1, "Terrain": "Outdoor", "Formations": []}
             }),
             raids: json!({
                 "Raid": [{"Id": 1, "IsReleased": [true, true, false], "MaxDifficulty": [7, 4, 7], "PathName": "binah", "Name": "비나", "Terrain": ["Outdoor", "Street"],
                           "BulletType": "Normal", "BulletTypeInsane": "Pierce", "ArmorType": "HeavyArmor",
-                          "EnemyList": [[7300100], [7300100], [7300100], [7300100], [7300900, 7300100], [7300600]], "BattleDuration": [180, 180, 180, 180, 180, 240]}],
+                          "EnemyList": [[7300100, 7300901, 7300902], [7300100], [7300100], [7300100], [7300900, 7300100], [7300600]], "BattleDuration": [180, 180, 180, 180, 180, 240]}],
                 "TimeAttack": [{"Id": 1, "IsReleased": [true, true, true], "MaxDifficulty": [1, 1, 1], "DungeonType": "Shooting", "Terrain": "Outdoor", "BulletType": "Normal", "ArmorType": "LightArmor",
                                 "Level": [25, 40], "BattleDuration": [180, 240],
                                 "Formations": [{"Id": 911000001, "EnemyList": [7000013]}, {"Id": 911000002, "EnemyList": [7000001, 7000013]}]}],
@@ -600,13 +686,15 @@ mod tests {
                 furniture_interactions: 3,
                 interactions_skipped_style: 1,
                 interactions_duplicate: 1,
-                enemies: 5,
+                enemies: 7,
                 stages: 2,
                 formations: 2,
                 formation_enemies: 3,
+                formation_weights: 3,
                 raids: 4,
                 raid_difficulties: 12,
-                raid_difficulty_enemies: 15,
+                raid_difficulty_enemies: 17,
+                raid_weights: 17,
                 raid_seasons: 1,
                 eliminate_seasons: 1,
             }
@@ -615,6 +703,33 @@ mod tests {
         assert_eq!(name, "현상수배 - 고가도로", "a bounty is named by its type");
         let terrain: String = conn.query_row("SELECT terrain FROM raid WHERE kind = 'TimeAttack'", [], |r| r.get(0)).unwrap();
         assert_eq!(terrain, r#"["Outdoor"]"#, "a single terrain becomes a one-element list");
+    }
+
+    #[test]
+    fn enemies_are_weighted_by_hp_at_the_encounters_level_and_the_mix_follows() {
+        let (conn, _) = db();
+        // stage 1011101: formation 1 has two level-1 minions (100 HP), formation 2 a level-1 champion (1000) and two minions
+        let share = |armor: &str| -> f64 { conn.query_row("SELECT share FROM v_stage_armor_share WHERE stage_id = 1011101 AND armor_type = ?1", [armor], |r| r.get(0)).unwrap() };
+        assert!((share("LightArmor") - 1.0).abs() < 1e-9);
+        let weights: Vec<(f64, Option<String>)> =
+            conn.prepare("SELECT weight, excluded FROM raid_difficulty_enemy_weight WHERE raid_kind = 'Raid' AND raid_id = 1 AND idx = 0 ORDER BY ordinal").unwrap().query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().collect::<Result<_, _>>().unwrap();
+        // the Boss (300k), a body at the Boss's HP that is not counted again, a smaller light part
+        assert_eq!(weights, vec![(300_000.0, None), (0.0, Some("mirror".into())), (100_000.0, None)]);
+        let mix: Vec<(String, f64)> = conn
+            .prepare("SELECT armor_type, share FROM v_raid_armor_share WHERE raid_kind = 'Raid' AND raid_id = 1 AND idx = 0 ORDER BY share DESC")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(mix.iter().map(|(a, _)| a.as_str()).collect::<Vec<_>>(), ["HeavyArmor", "LightArmor"]);
+        assert!((mix[0].1 - 0.75).abs() < 1e-9 && (mix[1].1 - 0.25).abs() < 1e-9, "{mix:?}");
+        // a summon weighs nothing: Raid 1 idx 4 holds one and its armor is not in the mix
+        let summoned: f64 = conn.query_row("SELECT weight FROM raid_difficulty_enemy_weight WHERE raid_id = 1 AND idx = 4 AND ordinal = 0", [], |r| r.get(0)).unwrap();
+        assert_eq!(summoned, 0.0);
+        // the champion of the second formation at level 1 weighs its level-1 HP
+        let hp: i64 = conn.query_row("SELECT hp FROM v_stage_enemy WHERE formation_id = 101110102 AND rank = 'Champion'", [], |r| r.get(0)).unwrap();
+        assert_eq!(hp, 1000);
     }
 
     #[test]
