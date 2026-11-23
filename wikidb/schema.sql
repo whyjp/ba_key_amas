@@ -2,7 +2,7 @@
 -- Reference data only, rebuilt from sources by the collectors. The user's own roster stays
 -- in the scan output (index.json) and joins to this DB by student.id.
 -- Local assist use only: the DB file is not distributed (see source.note).
--- Version 2. Bump meta.schema_version on every incompatible change.
+-- Version 3. Bump meta.schema_version on every incompatible change.
 
 PRAGMA foreign_keys = ON;
 
@@ -24,7 +24,7 @@ CREATE TABLE source (
 
 -- Korean display names for the closed code sets.
 CREATE TABLE label (
-    kind TEXT NOT NULL,                     -- 'BulletType' | 'ArmorType' | 'Terrain' | 'StageType' | 'EnemyRank' | ...
+    kind TEXT NOT NULL,                     -- 'BulletType' | 'ArmorType' | 'Terrain' | 'StageType' | 'EnemyRank' | 'TimeAttackStage' | ...
     code TEXT NOT NULL,
     ko   TEXT NOT NULL,
     PRIMARY KEY (kind, code)
@@ -109,28 +109,70 @@ CREATE TABLE formation_enemy (
     PRIMARY KEY (formation_id, ordinal)
 );
 
--- Total war, 종합전술시험, world raids, ...: a boss encounter.
+-- Total assault (총력전), 종합전술시험, world raids, ...: a boss encounter. One row per
+-- encounter; what the enemies are (attack type, armor type, level, time limit) differs per
+-- difficulty and lives in raid_difficulty. `raw` keeps the whole source record.
 CREATE TABLE raid (
     id              INTEGER NOT NULL,
     kind            TEXT NOT NULL,          -- Raid | TimeAttack | WorldRaid | MultiFloorRaid | InteractiveWorldRaid
     path_name       TEXT,
-    name_ko         TEXT,
-    bullet_type     TEXT,
-    armor_type      TEXT,
-    terrain         TEXT CHECK (terrain IS NULL OR json_valid(terrain)),   -- JSON array
+    name_ko         TEXT,                   -- the source's name; NULL for TimeAttack (the source names none)
+    display_ko      TEXT NOT NULL,          -- what to show and match: name_ko, else derived from the record (TimeAttack: "사격 시험 · 야외 · 경장갑")
+    dungeon_type    TEXT,                   -- TimeAttack only: Shooting | Defense | Destruction | Escort
+    terrain         TEXT CHECK (terrain IS NULL OR json_valid(terrain)),   -- JSON array of the terrains the encounter can be played on; the real one is the season's
     released_global INTEGER CHECK (released_global IN (0, 1)),
     source_id       INTEGER NOT NULL REFERENCES source(id),
     raw             TEXT NOT NULL CHECK (json_valid(raw)),
     PRIMARY KEY (kind, id)
 );
+CREATE INDEX raid_display ON raid (display_ko);
 
-CREATE TABLE raid_season (
-    season_id INTEGER PRIMARY KEY,
-    raid_id   INTEGER NOT NULL,
-    terrain   TEXT,
-    start_at  INTEGER,                      -- unix seconds
-    end_at    INTEGER
+-- One difficulty of a raid, parsed from the source's per-difficulty arrays. `idx` is the
+-- position in those arrays. Attack type and armor type are per enemy (enemy table): a boss
+-- changes attack type with the difficulty (Binah: Normal up to Extreme, Pierce from Insane).
+CREATE TABLE raid_difficulty (
+    raid_kind       TEXT NOT NULL,
+    raid_id         INTEGER NOT NULL,
+    idx             INTEGER NOT NULL,
+    label           TEXT,                   -- the source's name: Normal .. Lunatic, A .. D; NULL for TimeAttack and MultiFloorRaid
+    level           INTEGER,                -- enemy level when the source gives one
+    floor_start     INTEGER,                -- MultiFloorRaid: first floor of this tier
+    battle_duration INTEGER,                -- seconds
+    boss_enemy_id   INTEGER REFERENCES enemy(id),   -- first enemy ranked Boss, else Champion, else NULL
+    released_global INTEGER NOT NULL CHECK (released_global IN (0, 1)),   -- raid released and idx within the Global MaxDifficulty
+    PRIMARY KEY (raid_kind, raid_id, idx),
+    FOREIGN KEY (raid_kind, raid_id) REFERENCES raid(kind, id) ON DELETE CASCADE
 );
+
+-- The enemies of a raid difficulty, in the source's order (summons and projectiles included:
+-- filter on enemy.rank).
+CREATE TABLE raid_difficulty_enemy (
+    raid_kind TEXT NOT NULL,
+    raid_id   INTEGER NOT NULL,
+    idx       INTEGER NOT NULL,
+    ordinal   INTEGER NOT NULL,
+    enemy_id  INTEGER NOT NULL REFERENCES enemy(id),
+    PRIMARY KEY (raid_kind, raid_id, idx, ordinal),
+    FOREIGN KEY (raid_kind, raid_id, idx) REFERENCES raid_difficulty(raid_kind, raid_id, idx) ON DELETE CASCADE
+);
+CREATE INDEX raid_difficulty_enemy_enemy ON raid_difficulty_enemy (enemy_id);
+
+-- Global seasons of 총력전 (mode 'Raid') and 대결전 (mode 'Eliminate'). The terrain of a
+-- season is the one the raid is played on; start_at and end_at are unix seconds.
+CREATE TABLE raid_season (
+    mode            TEXT NOT NULL CHECK (mode IN ('Raid', 'Eliminate')),
+    season_id       INTEGER NOT NULL,
+    season_display  TEXT,                   -- the number the game shows ("BETA", "88")
+    raid_kind       TEXT NOT NULL DEFAULT 'Raid' CHECK (raid_kind = 'Raid'),
+    raid_id         INTEGER NOT NULL,
+    terrain         TEXT NOT NULL,
+    start_at        INTEGER NOT NULL,
+    end_at          INTEGER NOT NULL,
+    open_difficulty TEXT CHECK (open_difficulty IS NULL OR json_valid(open_difficulty)),   -- Eliminate only: highest open difficulty per armor type
+    PRIMARY KEY (mode, season_id),
+    FOREIGN KEY (raid_kind, raid_id) REFERENCES raid(kind, id)
+);
+CREATE INDEX raid_season_raid ON raid_season (raid_id, start_at);
 
 -- Cafe furniture, decorations and interiors.
 CREATE TABLE furniture (
@@ -183,4 +225,10 @@ JOIN student st ON st.released_global = 1
 JOIN type_effectiveness te ON te.bullet_type = st.bullet_type AND te.armor_type = a.armor_type
 GROUP BY s.id, st.id;
 
-INSERT INTO meta (key, value) VALUES ('schema_version', '2');
+-- A raid difficulty with its lead enemy.
+CREATE VIEW v_raid_difficulty AS
+SELECT d.raid_kind, d.raid_id, d.idx, d.label, d.level, d.floor_start, d.battle_duration, d.released_global,
+       d.boss_enemy_id, b.name_ko AS boss_name_ko, b.bullet_type AS boss_bullet_type, b.armor_type AS boss_armor_type
+FROM raid_difficulty d LEFT JOIN enemy b ON b.id = d.boss_enemy_id;
+
+INSERT INTO meta (key, value) VALUES ('schema_version', '3');

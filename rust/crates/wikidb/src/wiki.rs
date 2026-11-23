@@ -1,5 +1,5 @@
 //! Read side of the wiki DB: what the overlay shows about a mission.
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use rusqlite::{params, Connection, OpenFlags};
 use std::path::Path;
 
@@ -78,7 +78,7 @@ pub struct FurnitureBrief {
 }
 
 pub struct Wiki {
-    conn: Connection,
+    pub(crate) conn: Connection,
 }
 
 /// Edit distance between two short strings.
@@ -95,14 +95,23 @@ fn distance(a: &[char], b: &[char]) -> usize {
 }
 
 /// Name without spaces and punctuation, so OCR spacing differences do not matter.
-fn norm(s: &str) -> String {
+pub(crate) fn norm(s: &str) -> String {
     s.chars().filter(|c| c.is_alphanumeric()).collect()
 }
 
 impl Wiki {
     pub fn open(path: &Path) -> Result<Wiki> {
         let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY).with_context(|| format!("opening {}", path.display()))?;
-        Ok(Wiki { conn })
+        let version: Option<String> = conn.query_row("SELECT value FROM meta WHERE key = 'schema_version'", [], |r| r.get(0)).ok();
+        match version {
+            Some(v) if v == crate::SCHEMA_VERSION.to_string() => Ok(Wiki { conn }),
+            found => bail!(
+                "{} has schema version {}, this build needs {}: rebuild it with `cargo run -p baocr-wikidb --release`",
+                path.display(),
+                found.as_deref().unwrap_or("none"),
+                crate::SCHEMA_VERSION
+            ),
+        }
     }
 
     pub fn from_connection(conn: Connection) -> Wiki {
@@ -249,7 +258,7 @@ impl Wiki {
         settle(near)
     }
 
-    fn label(&self, kind: &str, code: &str) -> String {
+    pub(crate) fn label(&self, kind: &str, code: &str) -> String {
         self.conn.query_row("SELECT ko FROM label WHERE kind = ?1 AND code = ?2", params![kind, code], |r| r.get(0)).unwrap_or_else(|_| code.to_string())
     }
 

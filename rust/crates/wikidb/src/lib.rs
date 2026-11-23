@@ -2,9 +2,11 @@
 //! data sources. Each source has its own module, so a source that disappears or
 //! changes shape does not touch the others. The schema lives in `wikidb/schema.sql`.
 pub mod formation;
+pub mod raid;
 pub mod schaledb;
 pub mod wiki;
 pub use formation::{adaptation_factor, evaluate, FormationScore, TypeTable, Verdict};
+pub use raid::{pick_season, RaidBoss, RaidCandidate, RaidDifficulty, RaidKind, RaidSeason, SeasonMode, SeasonPick, SeasonRelation};
 pub use wiki::{FurnitureBrief, FurnitureStudent, MissionBrief, StudentBrief, Tally, Wiki};
 
 use anyhow::{Context, Result};
@@ -12,6 +14,10 @@ use rusqlite::Connection;
 use std::path::Path;
 
 pub const SCHEMA: &str = include_str!("../../../../wikidb/schema.sql");
+
+/// The schema version this build reads and writes (meta.schema_version). `Wiki::open` refuses
+/// a database of another version: rebuild it with the collector.
+pub const SCHEMA_VERSION: u32 = 3;
 
 /// A fresh database with the schema applied.
 pub fn create(conn: &Connection) -> Result<()> {
@@ -30,4 +36,38 @@ pub fn build(path: &Path, dataset: &schaledb::Dataset, fetched_at: &str) -> Resu
     };
     std::fs::rename(&tmp, path).with_context(|| format!("replacing {}", path.display()))?;
     Ok(counts)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_schema_file_declares_the_version_the_code_expects() {
+        let conn = Connection::open_in_memory().unwrap();
+        create(&conn).unwrap();
+        let v: String = conn.query_row("SELECT value FROM meta WHERE key = 'schema_version'", [], |r| r.get(0)).unwrap();
+        assert_eq!(v, SCHEMA_VERSION.to_string());
+    }
+
+    #[test]
+    fn a_database_of_another_version_is_refused_with_a_way_out() {
+        let dir = std::env::temp_dir().join(format!("wikidb-version-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("old.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL); INSERT INTO meta VALUES ('schema_version', '2');").unwrap();
+        }
+        let e = Wiki::open(&path).err().expect("an old database must not open");
+        let msg = format!("{e:#}");
+        assert!(msg.contains("version 2") && msg.contains("rebuild"), "{msg}");
+        let empty = dir.join("empty.db");
+        Connection::open(&empty).unwrap();
+        assert!(Wiki::open(&empty).is_err(), "a file that is no wiki database");
+        let fresh = dir.join("fresh.db");
+        create(&Connection::open(&fresh).unwrap()).unwrap();
+        assert!(Wiki::open(&fresh).is_ok());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

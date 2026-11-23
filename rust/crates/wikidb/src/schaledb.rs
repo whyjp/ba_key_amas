@@ -47,7 +47,11 @@ pub struct Counts {
     pub formations: usize,
     pub formation_enemies: usize,
     pub raids: usize,
+    /// Difficulties of all raids and the enemy rows that belong to them.
+    pub raid_difficulties: usize,
+    pub raid_difficulty_enemies: usize,
     pub raid_seasons: usize,
+    pub eliminate_seasons: usize,
 }
 
 fn get(url: &str) -> Result<Value> {
@@ -121,7 +125,7 @@ pub fn load(conn: &mut Connection, d: &Dataset, fetched_at: &str) -> Result<Coun
 }
 
 /// Localization sections that name a closed code set, stored under the kind the schema uses.
-const LABEL_KINDS: [(&str, &str); 7] = [
+const LABEL_KINDS: [(&str, &str); 8] = [
     ("BulletType", "BulletType"),
     ("ArmorType", "ArmorType"),
     ("StageType", "StageType"),
@@ -129,6 +133,7 @@ const LABEL_KINDS: [(&str, &str); 7] = [
     ("SquadType", "SquadType"),
     ("TacticRole", "TacticRole"),
     ("AdaptationType", "Terrain"),
+    ("TimeAttackStage", "TimeAttackStage"),
 ];
 
 fn labels(tx: &Transaction, d: &Dataset, n: &mut Counts) -> Result<()> {
@@ -316,11 +321,130 @@ fn stages(tx: &Transaction, d: &Dataset, n: &mut Counts) -> Result<()> {
 /// Raid-like encounters, keyed in raids.json by kind.
 const RAID_KINDS: [&str; 5] = ["Raid", "TimeAttack", "WorldRaid", "MultiFloorRaid", "InteractiveWorldRaid"];
 
+/// Names of a `Raid` kind's difficulties by array position: the order of SchaleDB's
+/// `RaidDifficulty` localization section (a JSON object, so its own key order is not kept).
+/// The attack type switches at position 5, which the source's `BulletTypeInsane` calls Insane.
+const RAID_DIFFICULTY_NAMES: [&str; 8] = ["Normal", "Hard", "VeryHard", "HardCore", "Extreme", "Insane", "Torment", "Lunatic"];
+
+/// One difficulty of a raid, parsed once from the kind-specific arrays of its record.
+#[derive(Debug, PartialEq)]
+struct RaidDifficultyRow {
+    idx: usize,
+    label: Option<String>,
+    level: Option<i64>,
+    floor_start: Option<i64>,
+    battle_duration: Option<i64>,
+    enemies: Vec<i64>,
+    released_global: bool,
+}
+
+fn ints(v: &Value, what: &str) -> Result<Vec<i64>> {
+    v.as_array().ok_or_else(|| anyhow!("{what}: expected a list"))?.iter().map(|x| x.as_i64().ok_or_else(|| anyhow!("{what}: not a number"))).collect()
+}
+
+/// The list at `key` as one list of numbers per difficulty.
+fn int_lists(r: &Value, key: &str) -> Result<Vec<Vec<i64>>> {
+    let all = r.get(key).and_then(|x| x.as_array()).ok_or_else(|| anyhow!("no {key} list"))?;
+    all.iter().map(|l| ints(l, key)).collect()
+}
+
+fn int_list(r: &Value, key: &str) -> Result<Vec<i64>> {
+    match r.get(key) {
+        None | Some(Value::Null) => Ok(Vec::new()),
+        Some(v) => ints(v, key),
+    }
+}
+
+fn str_list(r: &Value, key: &str) -> Vec<String> {
+    r.get(key).and_then(|x| x.as_array()).into_iter().flatten().filter_map(|x| x.as_str().map(str::to_string)).collect()
+}
+
+/// The difficulties of one raid record. The per-difficulty arrays differ by kind (enemies per
+/// difficulty, formations per level, enemy tiers per floor range); this is the only place
+/// that knows.
+fn raid_difficulties(kind: &str, r: &Value) -> Result<Vec<RaidDifficultyRow>> {
+    let released = r.get("IsReleased").map_or(true, |_| released_global(r));
+    // highest difficulty index open on Global
+    let max_open = r.get("MaxDifficulty").and_then(|a| a.get(GLOBAL)).and_then(|x| x.as_i64());
+    let levels = int_list(r, "Level")?;
+    let (enemies, durations, names, floors): (Vec<Vec<i64>>, Vec<i64>, Vec<String>, Vec<i64>) = match kind {
+        "TimeAttack" => {
+            let formations = r.get("Formations").and_then(|x| x.as_array()).ok_or_else(|| anyhow!("no Formations list"))?;
+            let lists = formations.iter().map(|f| ints(f.get("EnemyList").unwrap_or(&Value::Null), "Formations.EnemyList")).collect::<Result<_>>()?;
+            (lists, int_list(r, "BattleDuration")?, Vec::new(), Vec::new())
+        }
+        "MultiFloorRaid" => {
+            let lists = int_lists(r, "EnemyList")?;
+            let duration = r.get("BattleDuration").and_then(|x| x.as_i64()).ok_or_else(|| anyhow!("no BattleDuration"))?;
+            let n = lists.len();
+            (lists, vec![duration; n], Vec::new(), int_list(r, "DifficultyStartFloor")?)
+        }
+        "Raid" => {
+            let lists = int_lists(r, "EnemyList")?;
+            let names = RAID_DIFFICULTY_NAMES.iter().take(lists.len()).map(|s| s.to_string()).collect();
+            (lists, int_list(r, "BattleDuration")?, names, Vec::new())
+        }
+        _ => (int_lists(r, "EnemyList")?, int_list(r, "BattleDuration")?, str_list(r, "DifficultyName"), Vec::new()),
+    };
+    Ok(enemies
+        .into_iter()
+        .enumerate()
+        .map(|(idx, enemies)| RaidDifficultyRow {
+            idx,
+            label: names.get(idx).cloned(),
+            level: levels.get(idx).copied(),
+            floor_start: floors.get(idx).copied(),
+            battle_duration: durations.get(idx).copied(),
+            enemies,
+            released_global: released && max_open.map_or(true, |m| idx as i64 <= m),
+        })
+        .collect())
+}
+
+/// The enemy a difficulty is named after: its first Boss, else its first Champion (the
+/// time-attack shooting tests have a Champion and no Boss).
+fn lead_enemy(enemies: &[i64], rank: impl Fn(i64) -> Option<String>) -> Option<i64> {
+    let ranked = |wanted: &str| enemies.iter().copied().find(|&e| rank(e).as_deref() == Some(wanted));
+    ranked("Boss").or_else(|| ranked("Champion"))
+}
+
+/// What a raid shows as its name. The source names every kind but TimeAttack; a time attack
+/// is told apart by its test, terrain and enemy armor ("사격 시험 · 야외 · 경장갑").
+fn raid_display_name(d: &Dataset, kind: &str, id: i64, r: &Value) -> String {
+    if let Some(name) = text(r, "Name").filter(|n| !n.is_empty()) {
+        return name;
+    }
+    let label = |section: &str, code: &str| d.localization.get(section).and_then(|m| m.get(code)).and_then(|x| x.as_str()).map_or_else(|| code.to_string(), str::to_string);
+    if kind == "TimeAttack" {
+        let parts: Vec<String> = [("TimeAttackStage", text(r, "DungeonType")), ("AdaptationType", text_or_first(r, "Terrain")), ("ArmorType", text_or_first(r, "ArmorType"))]
+            .into_iter()
+            .filter_map(|(section, code)| code.map(|c| label(section, &c)))
+            .collect();
+        if !parts.is_empty() {
+            return parts.join(" · ");
+        }
+    }
+    text(r, "PathName").unwrap_or_else(|| format!("{kind} {id}"))
+}
+
 fn raids(tx: &Transaction, d: &Dataset, n: &mut Counts) -> Result<()> {
+    let enemy_rank: std::collections::HashMap<i64, String> = d
+        .enemies
+        .get("Enemies")
+        .and_then(|x| x.as_object())
+        .into_iter()
+        .flat_map(|m| m.values())
+        .filter_map(|e| Some((int(e, "Id")?, text(e, "Rank")?)))
+        .collect();
     let mut st = tx.prepare(
-        "INSERT INTO raid (id, kind, path_name, name_ko, bullet_type, armor_type, terrain, released_global, source_id, raw)
+        "INSERT INTO raid (id, kind, path_name, name_ko, display_ko, dungeon_type, terrain, released_global, source_id, raw)
          VALUES (?1,?2,?3,?4,?5,?6,?7,?8,1,?9)",
     )?;
+    let mut difficulty = tx.prepare(
+        "INSERT INTO raid_difficulty (raid_kind, raid_id, idx, label, level, floor_start, battle_duration, boss_enemy_id, released_global)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+    )?;
+    let mut member = tx.prepare("INSERT INTO raid_difficulty_enemy (raid_kind, raid_id, idx, ordinal, enemy_id) VALUES (?1,?2,?3,?4,?5)")?;
     for kind in RAID_KINDS {
         for r in d.raids.get(kind).and_then(|x| x.as_array()).into_iter().flatten() {
             let id = int(r, "Id").ok_or_else(|| anyhow!("{kind} without Id"))?;
@@ -335,21 +459,58 @@ fn raids(tx: &Transaction, d: &Dataset, n: &mut Counts) -> Result<()> {
                 kind,
                 text(r, "PathName"),
                 text(r, "Name"),
-                text_or_first(r, "BulletType"),
-                text_or_first(r, "ArmorType"),
+                raid_display_name(d, kind, id, r),
+                text(r, "DungeonType"),
                 terrain,
                 r.get("IsReleased").is_some().then(|| released_global(r)),
                 r.to_string(),
             ])
             .with_context(|| format!("{kind} {id}"))?;
             n.raids += 1;
+            for row in raid_difficulties(kind, r).with_context(|| format!("{kind} {id}"))? {
+                let lead = lead_enemy(&row.enemies, |e| enemy_rank.get(&e).cloned());
+                difficulty
+                    .execute(params![kind, id, row.idx as i64, row.label, row.level, row.floor_start, row.battle_duration, lead, row.released_global])
+                    .with_context(|| format!("{kind} {id} difficulty {}", row.idx))?;
+                n.raid_difficulties += 1;
+                for (ordinal, enemy) in row.enemies.iter().enumerate() {
+                    member.execute(params![kind, id, row.idx as i64, ordinal as i64, enemy]).with_context(|| format!("{kind} {id} difficulty {}: enemy {enemy}", row.idx))?;
+                    n.raid_difficulty_enemies += 1;
+                }
+            }
         }
     }
-    let seasons = d.raids.get("RaidSeasons").and_then(|x| x.get(GLOBAL)).and_then(|x| x.get("Seasons")).and_then(|x| x.as_array());
-    let mut st = tx.prepare("INSERT INTO raid_season (season_id, raid_id, terrain, start_at, end_at) VALUES (?1,?2,?3,?4,?5)")?;
-    for s in seasons.into_iter().flatten() {
-        st.execute(params![int(s, "SeasonId"), int(s, "RaidId"), text(s, "Terrain"), int(s, "Start"), int(s, "End")])?;
-        n.raid_seasons += 1;
+    let server = d.raids.get("RaidSeasons").and_then(|x| x.get(GLOBAL));
+    let mut season = tx.prepare(
+        "INSERT INTO raid_season (mode, season_id, season_display, raid_id, terrain, start_at, end_at, open_difficulty) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+    )?;
+    for (mode, key) in [("Raid", "Seasons"), ("Eliminate", "EliminateSeasons")] {
+        for s in server.and_then(|x| x.get(key)).and_then(|x| x.as_array()).into_iter().flatten() {
+            let field = |k: &str| int(s, k).ok_or_else(|| anyhow!("{mode} season without {k}"));
+            let season_id = field("SeasonId")?;
+            let display = match s.get("SeasonDisplay") {
+                Some(Value::String(t)) => Some(t.clone()),
+                Some(Value::Number(num)) => Some(num.to_string()),
+                _ => None,
+            };
+            season
+                .execute(params![
+                    mode,
+                    season_id,
+                    display,
+                    field("RaidId")?,
+                    text(s, "Terrain").ok_or_else(|| anyhow!("{mode} season {season_id} without Terrain"))?,
+                    field("Start")?,
+                    field("End")?,
+                    json_text(s, "OpenDifficulty"),
+                ])
+                .with_context(|| format!("{mode} season {season_id}"))?;
+            if mode == "Raid" {
+                n.raid_seasons += 1;
+            } else {
+                n.eliminate_seasons += 1;
+            }
+        }
     }
     Ok(())
 }
@@ -383,7 +544,10 @@ mod tests {
             }),
             enemies: json!({"Enemies": {
                 "7000001": {"Id": 7000001, "Name": "불량배", "Rank": "Minion", "BulletType": "Normal", "ArmorType": "LightArmor"},
-                "7000013": {"Id": 7000013, "Name": "무자비한 불량배", "Rank": "Champion", "BulletType": "Normal", "ArmorType": "LightArmor"}
+                "7000013": {"Id": 7000013, "Name": "무자비한 불량배", "Rank": "Champion", "BulletType": "Normal", "ArmorType": "LightArmor"},
+                "7300100": {"Id": 7300100, "Name": "비나", "Rank": "Boss", "BulletType": "Normal", "ArmorType": "HeavyArmor"},
+                "7300600": {"Id": 7300600, "Name": "비나", "Rank": "Boss", "BulletType": "Pierce", "ArmorType": "HeavyArmor"},
+                "7300900": {"Id": 7300900, "Name": "소환물", "Rank": "Summoned", "BulletType": "Normal", "ArmorType": "LightArmor"}
             }}),
             stages: json!({
                 "1011101": {"Id": 1011101, "Category": "Campaign", "Difficulty": 0, "Area": 1, "Stage": 1, "Name": "아오바 중심구 35번지", "Terrain": "Street", "Level": 1,
@@ -393,11 +557,23 @@ mod tests {
                 "30101": {"Id": 30101, "Category": "Bounty", "Type": "ChaserA", "Stage": 1, "Terrain": "Outdoor", "Formations": []}
             }),
             raids: json!({
-                "Raid": [{"Id": 1, "IsReleased": [true, true, false], "PathName": "binah", "Terrain": ["Outdoor", "Street"], "BulletType": "Normal", "ArmorType": "HeavyArmor"}],
-                "TimeAttack": [{"Id": 1, "Terrain": "Outdoor", "BulletType": "Normal", "ArmorType": "LightArmor"}],
-                "RaidSeasons": [{"Seasons": []}, {"Seasons": [{"SeasonId": 5, "RaidId": 4, "Terrain": "Street", "Start": 10, "End": 20}]}, {"Seasons": []}]
+                "Raid": [{"Id": 1, "IsReleased": [true, true, false], "MaxDifficulty": [7, 4, 7], "PathName": "binah", "Name": "비나", "Terrain": ["Outdoor", "Street"],
+                          "BulletType": "Normal", "BulletTypeInsane": "Pierce", "ArmorType": "HeavyArmor",
+                          "EnemyList": [[7300100], [7300100], [7300100], [7300100], [7300900, 7300100], [7300600]], "BattleDuration": [180, 180, 180, 180, 180, 240]}],
+                "TimeAttack": [{"Id": 1, "IsReleased": [true, true, true], "MaxDifficulty": [1, 1, 1], "DungeonType": "Shooting", "Terrain": "Outdoor", "BulletType": "Normal", "ArmorType": "LightArmor",
+                                "Level": [25, 40], "BattleDuration": [180, 240],
+                                "Formations": [{"Id": 911000001, "EnemyList": [7000013]}, {"Id": 911000002, "EnemyList": [7000001, 7000013]}]}],
+                "WorldRaid": [{"Id": 814000, "IsReleased": [true, true, true], "MaxDifficulty": [1, 1, 1], "PathName": "w", "Name": "와카모", "Terrain": ["Indoor"], "DifficultyName": ["HardCore", "Extreme"],
+                               "Level": [60, 70], "EnemyList": [[7300100], [7300600]], "BattleDuration": [240, 240]}],
+                "MultiFloorRaid": [{"Id": 1000000, "IsReleased": [true, true, true], "MaxDifficulty": [1, 1, 1], "DifficultyStartFloor": [1, 25, 50], "PathName": "set", "Name": "세트", "Terrain": ["Outdoor"],
+                                    "EnemyList": [[7300100, 7300900], [7300600]], "BattleDuration": 270}],
+                "RaidSeasons": [{"Seasons": []},
+                                {"Seasons": [{"SeasonId": 5, "SeasonDisplay": 1, "RaidId": 1, "Terrain": "Street", "Start": 10, "End": 20}],
+                                 "EliminateSeasons": [{"SeasonId": 5, "SeasonDisplay": "BETA", "RaidId": 1, "Terrain": "Outdoor", "Start": 30, "End": 40, "OpenDifficulty": {"LightArmor": 5}}]},
+                                {"Seasons": []}]
             }),
-            localization: json!({"BulletType": {"Explosion": "폭발"}, "StageType": {"ChaserA": "현상수배 - 고가도로"}, "AdaptationType": {"Street": "시가지"}}),
+            localization: json!({"BulletType": {"Explosion": "폭발"}, "StageType": {"ChaserA": "현상수배 - 고가도로"}, "AdaptationType": {"Street": "시가지", "Outdoor": "야외"},
+                                "ArmorType": {"LightArmor": "경장갑"}, "TimeAttackStage": {"Shooting": "사격 시험"}}),
             config: json!({"TypeEffectiveness": {
                 "Explosion": {"LightArmor": 20000, "HeavyArmor": 10000},
                 "Pierce": {"LightArmor": 5000, "HeavyArmor": 20000}}}),
@@ -416,7 +592,24 @@ mod tests {
         let (conn, n) = db();
         assert_eq!(
             n,
-            Counts { labels: 3, type_effectiveness: 4, students: 4, furniture: 4, furniture_interactions: 3, interactions_skipped_style: 1, interactions_duplicate: 1, enemies: 2, stages: 2, formations: 2, formation_enemies: 3, raids: 2, raid_seasons: 1 }
+            Counts {
+                labels: 6,
+                type_effectiveness: 4,
+                students: 4,
+                furniture: 4,
+                furniture_interactions: 3,
+                interactions_skipped_style: 1,
+                interactions_duplicate: 1,
+                enemies: 5,
+                stages: 2,
+                formations: 2,
+                formation_enemies: 3,
+                raids: 4,
+                raid_difficulties: 12,
+                raid_difficulty_enemies: 15,
+                raid_seasons: 1,
+                eliminate_seasons: 1,
+            }
         );
         let name: String = conn.query_row("SELECT name_ko FROM stage WHERE id = 30101", [], |r| r.get(0)).unwrap();
         assert_eq!(name, "현상수배 - 고가도로", "a bounty is named by its type");
@@ -476,6 +669,113 @@ mod tests {
         crate::create(&conn).unwrap();
         let e = load(&mut conn, &d, "t").unwrap_err();
         assert!(format!("{e:#}").contains("enemy 999"), "{e:#}");
+    }
+
+    type BossRow = (i64, Option<String>, Option<String>, Option<String>, bool);
+
+    fn boss_rows(conn: &Connection, kind: &str, id: i64) -> Vec<BossRow> {
+        conn.prepare("SELECT idx, label, boss_bullet_type, boss_armor_type, released_global FROM v_raid_difficulty WHERE raid_kind = ?1 AND raid_id = ?2 ORDER BY idx")
+            .unwrap()
+            .query_map(params![kind, id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    }
+
+    #[test]
+    fn a_raids_attack_type_is_kept_per_difficulty() {
+        let (conn, _) = db();
+        let rows = boss_rows(&conn, "Raid", 1);
+        let attack: Vec<_> = rows.iter().map(|r| r.2.as_deref().unwrap()).collect();
+        assert_eq!(attack, ["Normal", "Normal", "Normal", "Normal", "Normal", "Pierce"], "Insane (position 5) switches to the Insane attack type");
+        let labels: Vec<_> = rows.iter().map(|r| r.1.as_deref().unwrap()).collect();
+        assert_eq!(labels, ["Normal", "Hard", "VeryHard", "HardCore", "Extreme", "Insane"]);
+        let open: Vec<_> = rows.iter().map(|r| r.4).collect();
+        assert_eq!(open, [true, true, true, true, true, false], "Global MaxDifficulty is 4 here: Insane is closed");
+        let n: i64 = conn.query_row("SELECT COUNT(*) FROM raid_difficulty_enemy WHERE raid_kind = 'Raid' AND idx = 4", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 2, "summons stay linked, enemy.rank tells them apart");
+        let boss: i64 = conn.query_row("SELECT boss_enemy_id FROM raid_difficulty WHERE raid_kind = 'Raid' AND idx = 4", [], |r| r.get(0)).unwrap();
+        assert_eq!(boss, 7300100, "the lead enemy is the first Boss, not the first listed enemy");
+    }
+
+    #[test]
+    fn a_time_attack_is_named_by_its_test_terrain_and_armor() {
+        let (conn, _) = db();
+        let (name, source_name, dungeon): (String, Option<String>, String) =
+            conn.query_row("SELECT display_ko, name_ko, dungeon_type FROM raid WHERE kind = 'TimeAttack'", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
+        assert_eq!((name.as_str(), source_name, dungeon.as_str()), ("사격 시험 · 야외 · 경장갑", None, "Shooting"));
+        let (levels, boss): (String, i64) = conn
+            .query_row("SELECT GROUP_CONCAT(level), MIN(boss_enemy_id) FROM raid_difficulty WHERE raid_kind = 'TimeAttack'", [], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap();
+        assert_eq!((levels.as_str(), boss), ("25,40", 7000013), "a time attack's formations are its difficulties; the Champion leads");
+        let named: String = conn.query_row("SELECT display_ko FROM raid WHERE kind = 'Raid'", [], |r| r.get(0)).unwrap();
+        assert_eq!(named, "비나", "a source name is used as it is");
+    }
+
+    #[test]
+    fn world_raids_and_floor_raids_get_their_own_difficulty_names() {
+        let (conn, _) = db();
+        let labels: Vec<_> = boss_rows(&conn, "WorldRaid", 814000).into_iter().map(|r| (r.1, r.2)).collect();
+        assert_eq!(labels, [(Some("HardCore".into()), Some("Normal".into())), (Some("Extreme".into()), Some("Pierce".into()))], "the source's own names, not positions");
+        let floors: Vec<(i64, Option<i64>, Option<i64>)> = conn
+            .prepare("SELECT idx, floor_start, battle_duration FROM raid_difficulty WHERE raid_kind = 'MultiFloorRaid' ORDER BY idx")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(floors, [(0, Some(1), Some(270)), (1, Some(25), Some(270))]);
+    }
+
+    #[test]
+    fn both_season_lists_are_stored_with_their_terrain() {
+        let (conn, _) = db();
+        type Season = (String, i64, Option<String>, String, Option<String>);
+        let rows: Vec<Season> = conn
+            .prepare("SELECT mode, season_id, season_display, terrain, open_difficulty FROM raid_season ORDER BY mode")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            rows,
+            [("Eliminate".into(), 5, Some("BETA".into()), "Outdoor".into(), Some(r#"{"LightArmor":5}"#.into())), ("Raid".into(), 5, Some("1".into()), "Street".into(), None)],
+            "the same season id can exist in both modes"
+        );
+    }
+
+    #[test]
+    fn a_raid_enemy_that_does_not_exist_is_an_error() {
+        let mut d = dataset();
+        d.raids["Raid"][0]["EnemyList"][0] = json!([999]);
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::create(&conn).unwrap();
+        let e = load(&mut conn, &d, "t").unwrap_err();
+        assert!(format!("{e:#}").contains("enemy 999"), "{e:#}");
+    }
+
+    #[test]
+    fn a_season_of_an_unknown_raid_is_an_error() {
+        let mut d = dataset();
+        d.raids["RaidSeasons"][1]["Seasons"][0]["RaidId"] = json!(99);
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::create(&conn).unwrap();
+        assert!(load(&mut conn, &d, "t").is_err());
+    }
+
+    #[test]
+    fn lead_enemy_prefers_a_boss_then_a_champion() {
+        let rank = |e: i64| match e {
+            1 => Some("Minion".to_string()),
+            2 => Some("Champion".to_string()),
+            3 => Some("Boss".to_string()),
+            _ => None,
+        };
+        assert_eq!(lead_enemy(&[1, 2, 3], rank), Some(3));
+        assert_eq!(lead_enemy(&[1, 2], rank), Some(2));
+        assert_eq!(lead_enemy(&[1], rank), None);
+        assert_eq!(lead_enemy(&[], rank), None);
     }
 
     #[test]
