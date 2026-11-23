@@ -1,4 +1,4 @@
-use crate::capture::{game_capture, layout_looks_calibrated, to_frame};
+use crate::capture::{game_capture, layout_looks_calibrated, require_ratio43, to_frame};
 use crate::deep::capture_deep;
 use crate::hcu::{Exclusive, Hcu};
 use anyhow::{anyhow, bail, Result};
@@ -87,6 +87,7 @@ pub fn scan_arrows(
     sink: &dyn ScanSink,
 ) -> Result<ScanOutcome> {
     let _ = (out, from_first);
+    require_ratio43(region)?;
     h.activate()?;
     let mut img = game_capture(h, region)?;
     if roster_visible_pixels(&img) {
@@ -275,6 +276,15 @@ mod tests {
         let o = run(&w, 10, false, &sink);
         assert_eq!((o.stop_reason.as_str(), o.error.as_deref()), ("two_empty_names", Some("two unreadable names")));
         assert_eq!(sink.submitted.lock().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn the_scan_refuses_16_9_before_any_input() {
+        let w = arrow_world(vec![20, 70, 120]);
+        let sink = FakeSink::new();
+        let r = scan_arrows(&w.hcu().exclusive(), [0.0, 0.0, 1280.0, 720.0], Path::new("out"), 3, true, false, &sink);
+        assert_eq!(r.unwrap_err().to_string(), crate::capture::SCAN_NEEDS_43);
+        assert!(w.inputs().is_empty(), "{:?}", w.inputs());
     }
 
     #[test]

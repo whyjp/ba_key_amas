@@ -70,6 +70,10 @@ fn stop_note(reason: &str) -> String {
 }
 
 pub fn scan_students(ocr: Arc<dyn Ocr>, hcu: &Exclusive, region: [f64; 4], req: &ScanRequest, opts: Options, report: &dyn Fn(BannerState)) -> Result<ScanSummary> {
+    if let Err(e) = baocr_hcu::require_ratio43(region) {
+        report(BannerState::failed(0, None, baocr_hcu::SCAN_NEEDS_43));
+        return Err(e);
+    }
     // Learn the total first (scroll through the roster once) so progress reads n/m,
     // and start from the first student.
     report(BannerState::counting(0));

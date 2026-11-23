@@ -10,6 +10,16 @@ pub fn detect_layout(region: [f64; 4]) -> Option<Layout> {
     Layout::detect(region)
 }
 
+/// Records the conditions a result was collected under.
+pub fn new_capture(region: [f64; 4]) -> Capture {
+    Capture {
+        aspect_ratio: detect_layout(region).unwrap_or(Layout::Ratio43).label().into(),
+        frame_region: region,
+        window_mode: "windowed".into(),
+        note: "profile readers and the student scan are calibrated for the game's 4:3 setting in windowed mode; 16:9 is read by the add-on only, fullscreen is not verified".into(),
+    }
+}
+
 /// Rejects capture regions that are neither 4:3 nor 16:9.
 pub fn check_aspect(region: [f64; 4]) -> Result<Layout> {
     let (w, h) = (region[2] - region[0], region[3] - region[1]);
@@ -23,6 +33,18 @@ pub fn check_aspect(region: [f64; 4]) -> Result<Layout> {
         )
     })
 }
+
+/// The student scan clicks at fixed 4:3 frame coordinates (next-student arrow, list scroll), so it
+/// only runs in the 4:3 layout. Anything that sends input for the scan calls this first.
+pub fn require_ratio43(region: [f64; 4]) -> Result<()> {
+    match detect_layout(region) {
+        Some(Layout::Ratio169) => bail!("{SCAN_NEEDS_43}"),
+        _ => Ok(()),
+    }
+}
+
+/// Shown when the student scan is started in 16:9.
+pub const SCAN_NEEDS_43: &str = "학생 스캔은 4:3 화면 비율에서만 지원합니다. 게임 옵션 > 그래픽에서 4:3으로 바꾸세요";
 
 /// Cheap anchor test on the first profile: unreadable panel text means the
 /// on-screen layout is not the calibrated one.
@@ -143,6 +165,13 @@ mod tests {
     }
 
     #[test]
+    fn the_scan_refuses_16_9_and_takes_the_rest() {
+        assert!(require_ratio43([0.0, 0.0, 1280.0, 960.0]).is_ok());
+        let e = require_ratio43([0.0, 0.0, 1920.0, 1080.0]).unwrap_err().to_string();
+        assert_eq!(e, SCAN_NEEDS_43);
+    }
+
+    #[test]
     fn region_parsing() {
         assert_eq!(parse_frame_region("230.36,91.73,685.39,433.07").unwrap(), [230.36, 91.73, 685.39, 433.07]);
         assert!(parse_frame_region("1,2,3").is_err());
@@ -177,6 +206,7 @@ mod tests {
     fn new_capture_fields() {
         let c = new_capture([1.0, 2.0, 3.0, 4.0]);
         assert_eq!((c.aspect_ratio.as_str(), c.window_mode.as_str(), c.frame_region), ("4:3", "windowed", [1.0, 2.0, 3.0, 4.0]));
+        assert_eq!(new_capture([0.0, 0.0, 1920.0, 1080.0]).aspect_ratio, "16:9");
     }
 
     /// Screen 1000x600, scale 2: a zoom of (X0,Y0,X1,Y1) is a (2*(X1-X0)) x (2*(Y1-Y0)) image.

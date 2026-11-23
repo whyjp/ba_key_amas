@@ -1,6 +1,8 @@
 //! `baocr --doctor`: reads the desktop and says, in plain Korean lines, whether the game can be
 //! driven from here. Sends no input. The facts are read by [`probe`]; [`evaluate`] is pure.
 
+use baocr_core::layout::Layout;
+
 /// What was found out about the game window.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GameFacts {
@@ -88,9 +90,13 @@ pub fn evaluate(f: &Facts) -> Report {
     add(!g.minimized, if g.minimized { "게임 창이 최소화되어 있습니다.".into() } else { "게임 창이 최소화되어 있지 않습니다.".into() });
 
     let (cw, ch) = (g.client[2] - g.client[0], g.client[3] - g.client[1]);
+    let shape = Layout::detect([0.0, 0.0, cw as f64, ch as f64]);
     add(
-        cw > 0 && ch > 0 && ((cw as f64 / ch as f64) - 4.0 / 3.0).abs() < 0.04,
-        format!("게임 화면 크기 {cw}x{ch} (4:3 창 모드가 필요합니다)."),
+        shape.is_some(),
+        match shape {
+            Some(l) => format!("게임 화면 크기 {cw}x{ch}, 화면 비율 {}.", l.label()),
+            None => format!("게임 화면 크기 {cw}x{ch}는 4:3도 16:9도 아닙니다. 게임 옵션 > 그래픽에서 화면 비율을 4:3 또는 16:9로 하고 창 모드로 실행하세요."),
+        },
     );
     // a 5x5 grid of points, so a gap between two monitors under the middle of the window is seen too
     let inside = (0..5).all(|i| (0..5).all(|j| on_a_monitor(&f.monitors, g.client[0] + (cw - 1) * i / 4, g.client[1] + (ch - 1) * j / 4)));
@@ -291,5 +297,19 @@ mod tests {
         f.foreground = 1;
         let bad = evaluate(&f).checks.iter().filter(|c| !c.ok).count();
         assert_eq!(bad, 4);
+    }
+
+    #[test]
+    fn both_ratios_are_ok_and_the_ratio_is_reported() {
+        let mut f = healthy();
+        let r = evaluate(&f);
+        assert!(r.render().contains("화면 비율 4:3"), "{}", r.render());
+        f.game.as_mut().unwrap().client = [100, 100, 1380, 820]; // 1280x720
+        let r = evaluate(&f);
+        assert!(r.healthy(), "{}", r.render());
+        assert!(r.render().contains("화면 비율 16:9"), "{}", r.render());
+        f.game.as_mut().unwrap().client = [100, 100, 1380, 900]; // 16:10
+        let r = evaluate(&f);
+        assert!(!r.healthy() && r.render().contains("4:3도 16:9도 아닙니다"), "{}", r.render());
     }
 }

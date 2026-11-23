@@ -266,3 +266,70 @@ fn art_only_screens_are_never_taken_for_a_battle() {
         assert!(!looks_like_battle(&img.to_rgb8()), "{name} looks like a battle");
     }
 }
+
+// ---- 16:9 (1280x720) recordings -------------------------------------------------------------
+
+fn w169(name: &str) -> RgbImage {
+    let img = load(&format!("screens/w169-{name}.png"));
+    assert_eq!(img.dimensions(), (1280, 720), "{name}");
+    img
+}
+
+#[test]
+fn w169_profile_and_student_list_are_told_apart() {
+    let profile = w169("student-profile");
+    assert!(detail_visible(&profile), "16:9 profile not recognised");
+    assert!(!roster_visible_pixels(&profile), "16:9 profile mistaken for the list");
+    let list = w169("student-list");
+    assert!(!detail_visible(&list), "16:9 list mistaken for a profile");
+    assert!(roster_visible_pixels(&list), "16:9 list not recognised");
+    let rows: Vec<i32> = roster_cards(&list).chunks(6).map(|r| r[0].y).collect();
+    assert_eq!(roster_cards(&list).len(), 12);
+    assert_eq!(rows, vec![313, 580], "card tops of the two rows");
+    let t = scroll_thumb(&list);
+    assert!((180..=182).contains(&t.top) && (212..=214).contains(&t.bottom), "{t:?}");
+}
+
+#[test]
+fn w169_other_screens_are_neither_profile_nor_list() {
+    for n in ["lobby", "quick-formation", "raid-quick-formation", "squad", "event-open"] {
+        let img = w169(n);
+        assert!(!detail_visible(&img), "{n}: taken for a profile");
+        assert!(!roster_visible_pixels(&img), "{n}: taken for the student list");
+    }
+}
+
+#[test]
+fn w169_screens_are_never_battle_and_4_3_battle_still_is() {
+    for n in ["lobby", "student-list", "student-profile", "quick-formation", "raid-quick-formation", "squad", "event-open"] {
+        assert!(!looks_like_battle(&w169(n)), "{n}");
+    }
+    assert!(looks_like_battle(&load("screens/battle.png")));
+}
+
+#[test]
+fn w169_quick_formation_grid_is_read_like_the_4_3_one() {
+    let q = w169("quick-formation");
+    assert_eq!(quick_tab_is_striker(&q), Some(true));
+    let labels = quick_card_labels(&q);
+    assert_eq!(labels.len(), 12, "{labels:?}");
+    assert!(labels.iter().all(|l| (305..=307).contains(&l.y0) || (458..=460).contains(&l.y0)), "{labels:?}");
+    let selected: Vec<bool> = labels.iter().filter(|l| l.y0 < 400).map(|l| quick_card_selected(&q, l.cx, l.y0)).collect();
+    assert_eq!(selected, vec![true, true, true, true, false, false], "squad members are outlined");
+    // the 4:3 recording gives the same reading, 120 px lower
+    let q43 = load("screens/quick-formation.png");
+    assert_eq!(quick_tab_is_striker(&q43), Some(true));
+    let l43 = quick_card_labels(&q43);
+    assert_eq!(l43.len(), 12);
+    assert!((l43[0].y0 - labels[0].y0 - 120).abs() <= 1, "{} vs {}", l43[0].y0, labels[0].y0);
+    let raid = w169("raid-quick-formation");
+    assert_eq!(quick_card_labels(&raid).len(), 6);
+}
+
+#[test]
+fn w169_panel_delta_follows_the_panel() {
+    let a = w169("student-profile");
+    assert_eq!(panel_delta(&a, &a), 0.0);
+    // the shifted panel region covers the profile's right panel: a different screen differs a lot there
+    assert!(panel_delta(&a, &w169("student-list")) > 0.2);
+}

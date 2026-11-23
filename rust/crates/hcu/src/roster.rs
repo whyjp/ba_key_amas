@@ -1,7 +1,7 @@
 //! Roster preparation: learn the total number of students before scanning, and
 //! open the first student, so progress can be shown as n/m and the scan always
 //! starts at the beginning.
-use crate::{click_game, game_capture, to_frame, Exclusive, Hcu};
+use crate::{click_game, game_capture, require_ratio43, to_frame, Exclusive, Hcu};
 use anyhow::{anyhow, bail, Result};
 use baocr_pixels::{detail_visible, roster_cards, roster_visible_pixels, same_cards, scroll_thumb, signature_distance, list_shift, slot_occupied, unowned_banner, Card, CardSignature};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -231,6 +231,7 @@ fn count_pages(h: &Exclusive, region: R4, lines: Option<i32>, delta: i32, on_cou
 /// Fast path: several lines per scroll. If a page shares no line with the previous
 /// one (the scroll skipped lines) the count is redone one line at a time.
 pub fn count_roster(h: &Exclusive, region: R4, mut on_count: impl FnMut(usize)) -> Result<usize> {
+    require_ratio43(region)?;
     // How far a wheel movement goes differs between machines and game sessions: when the
     // first scroll goes too far, start over from the top with a smaller movement.
     let mut delta = SCROLL_MAX;
@@ -355,6 +356,7 @@ fn reach_roster(h: &Exclusive, region: R4, student_button: &dyn Fn(&RgbImage) ->
 /// student. The list is always scrolled to its start before counting and again
 /// afterwards, so the scroll position it was left in does not matter.
 pub fn prepare_scan(h: &Exclusive, region: R4, student_button: &dyn Fn(&RgbImage) -> Option<(i32, i32)>, on_count: impl FnMut(usize)) -> Result<usize> {
+    require_ratio43(region)?;
     h.activate()?;
     reach_roster(h, region, student_button)?;
     let total = count_roster(h, region, on_count)?;
@@ -364,6 +366,7 @@ pub fn prepare_scan(h: &Exclusive, region: R4, student_button: &dyn Fn(&RgbImage
 
 /// Make sure a profile is open (used when the total could not be counted).
 pub fn ensure_profile(h: &Exclusive, region: R4, student_button: &dyn Fn(&RgbImage) -> Option<(i32, i32)>) -> Result<()> {
+    require_ratio43(region)?;
     let img = game_capture(h, region)?;
     if let Screen::Profile = screen_kind(&img) {
         return Ok(());
