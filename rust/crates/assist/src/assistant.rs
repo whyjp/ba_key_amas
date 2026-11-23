@@ -18,7 +18,7 @@ use crate::widgets;
 use baocr_core::ocr_api::TextBox;
 use baocr_extract::raid::RaidRef;
 use baocr_extract::scene::{MissionRef, Scene};
-use baocr_overlay::{scan_rows, BannerState, Dock, Mark, PanelState, Row};
+use baocr_overlay::{scan_rows, Anchor, BannerState, Mark, PanelState, Presentation, Row};
 use baocr_wikidb::{StudentBrief, TypeTable, Wiki};
 use image::RgbImage;
 use std::cell::{Cell, RefCell};
@@ -269,8 +269,13 @@ impl<'a, S: Surface> Assistant<'a, S> {
 
     fn handle(&mut self, event: &str) -> bool {
         // the card was dragged and snapped to a side: remember where
-        if let Some(dock) = Dock::decode(event) {
-            self.settings.set_dock(dock);
+        if let Some(anchor) = Anchor::decode(event) {
+            self.settings.set_anchor(anchor);
+            return true;
+        }
+        // the pin button: the card now stays open, or folds into a tab
+        if let Some(p) = Presentation::decode(event) {
+            self.settings.set_presentation(p);
             return true;
         }
         if event == BUTTON_STUDENT_SECTION {
@@ -432,6 +437,7 @@ impl<'a, S: Surface> Assistant<'a, S> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use baocr_overlay::Dock;
     use baocr_core::ocr_api::Ocr;
     use baocr_extract::scene::MissionRef;
     use baocr_extract::CardName;
@@ -739,13 +745,24 @@ mod tests {
         let (r, ocr) = (rig(), NoOcr);
         let path = std::env::temp_dir().join(format!("baocr-dock-{}.json", std::process::id()));
         let mut settings = Settings::default();
-        settings.set_dock(Dock { side: baocr_overlay::Side::Left });
+        let left = Dock { anchor: Anchor::Outside(baocr_overlay::Side::Left), presentation: None };
+        settings.set_dock(left);
         let mut a = Assistant::new(Observer::new(&ocr, &r.students), &r.wiki, &r.students, &r.types, settings, Some(path.clone()), r.fake.clone());
-        assert_eq!(r.fake.0.borrow().docks, vec![Dock { side: baocr_overlay::Side::Left }], "the saved place is applied first");
+        assert_eq!(r.fake.0.borrow().docks, vec![left], "the saved place is applied first");
         click(&r, "dock:r");
         assert!(a.poll());
-        assert_eq!(a.settings().dock(), Dock { side: baocr_overlay::Side::Right });
+        assert_eq!(a.settings().dock().anchor, Anchor::Outside(baocr_overlay::Side::Right));
         assert_eq!(Settings::load(&path).dock(), a.settings().dock(), "and saved");
+        // dropped inside the game, and the pin button: both are remembered, and are independent
+        click(&r, "dock:il");
+        click(&r, "present:pinned");
+        assert!(a.poll());
+        let want = Dock { anchor: Anchor::Inside(baocr_overlay::Corner::TopLeft), presentation: Some(Presentation::Pinned) };
+        assert_eq!(a.settings().dock(), want);
+        assert_eq!(Settings::load(&path).dock(), want);
+        click(&r, "present:bookmark");
+        assert!(a.poll());
+        assert_eq!(a.settings().dock(), Dock { presentation: Some(Presentation::Bookmark), ..want });
         let _ = std::fs::remove_file(&path);
     }
 

@@ -5,8 +5,11 @@
 //! WS_EX_TOOLWINDOW (no taskbar button). WDA_EXCLUDEFROMCAPTURE keeps it out of
 //! screenshots where the OS supports it.
 use crate::cache::{Memo, Tracker};
-use crate::dock::{dock_from_drop, dock_origin, Dock};
-use crate::panel::{HINT_AREA, ingame_origin, ingame_panel_width, panel_width, render_panel, render_panel_hits, render_tooltip, Hit, PanelState, DRAG_HANDLE, PANEL_BASE_W};
+use crate::dock::{Anchor, Corner, Dock, Presentation};
+use crate::fold::{Fold, Intent};
+use crate::panel::{ingame_origin, ingame_panel_width, inside_card_width, panel_width, render_panel, render_panel_hits, render_tooltip, Hit, PanelState, PANEL_BASE_W, PIN_BUTTON};
+use crate::placement::{available, contains, dropped, effective_anchor, resolve, slot, snap, strip, Frame, Unfold};
+use crate::tab::{pick, render_snap_hint, render_tab, tab_size, Press};
 use crate::render::{load_fonts, Fonts, Ltrb};
 use crate::marks::{render_marks, Mark};
 use crate::{Card, Shown};
@@ -404,6 +407,11 @@ unsafe fn create_layer(inst: isize, class: &[u16], title: &str, click_through: b
 }
 
 impl Layer {
+    /// Whether the layer already shows the content `key` stands for.
+    fn is_current(&self, key: u64) -> bool {
+        self.visible && self.drawn == Some(key)
+    }
+
     unsafe fn hide(&mut self) {
         if self.visible {
             ShowWindow(self.hwnd, SW_HIDE);
@@ -434,6 +442,34 @@ impl Layer {
             self.drawn = Some(key);
         }
     }
+}
+
+/// A drag of the card layer: where in the dragged thing it was picked up, and whether that was
+/// the open card (else the folded tab).
+#[derive(Clone, Copy)]
+struct Drag {
+    grab: (i32, i32),
+    open: bool,
+    /// Where the pointer was when it was pressed.
+    from: (i32, i32),
+}
+
+/// What the card layer shows, which decides what a press on it means.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum View {
+    Nothing,
+    Card,
+    Tab,
+    /// Between the two, sliding (presses are not read).
+    Strip,
+}
+
+/// What is drawn into the card layer this tick.
+#[derive(Clone, Copy)]
+enum Shape {
+    Card,
+    Tab,
+    Strip,
 }
 
 fn hash_of<T: std::hash::Hash>(v: &T) -> u64 {
@@ -476,15 +512,25 @@ fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, stop: Arc<Atom
         let mut rect = None;
         let mut tick: u32 = 0;
         let mut card_hits: Vec<Hit> = Vec::new();
-        // a drag of the card by its header: where in the card it was picked up, and where it is now
-        let mut drag: Option<(i32, i32)> = None;
-        let mut drag_at: Option<(i32, i32)> = None;
+        // a drag of the card by its header (or of the folded tab): where in it it was picked up,
+        // and whether it was the open card; and the size of what is being dragged
+        let mut drag: Option<Drag> = None;
+        let mut drag_size: Option<(i32, i32)> = None;
+        // what the card layer shows (what a press on it means), the fold's slide and the clock it runs on
+        let mut shown_view = View::Nothing;
+        let mut user_pres = Presentation::Pinned;
+        let (mut fold, mut slide) = (Fold::default(), 0.0f32);
+        let epoch = Instant::now();
+        // the click-through card inside the game sits at the same top right corner as the tab: it makes room
+        let mut ingame_shift: i32;
         let (mut card_track, mut ingame_track, mut marks_track) = (Tracker::<Card>::new(), Tracker::<Option<PanelState>>::new(), Tracker::<Vec<Mark>>::new());
-        let (mut card_gen, mut ingame_gen, mut marks_gen, mut dock_now) = (0u64, 0u64, 0u64, Dock::default());
-        let mut card_memo: Memo<(u64, u32), (image::RgbaImage, Vec<Hit>)> = Memo::new();
+        let (mut card_gen, mut ingame_gen, mut marks_gen, mut dock_now, mut locked) = (0u64, 0u64, 0u64, Dock::default(), false);
+        let mut card_memo: Memo<(u64, u32, u8), (image::RgbaImage, Vec<Hit>)> = Memo::new();
         let mut ingame_memo: Memo<(u64, u32), image::RgbaImage> = Memo::new();
         let mut marks_memo: Memo<(u64, i32, i32), image::RgbaImage> = Memo::new();
         let mut tip_memo: Memo<(String, i32), image::RgbaImage> = Memo::new();
+        let mut tab_memo: Memo<(i32, i32, bool, bool, u32), image::RgbaImage> = Memo::new();
+        let mut hint_memo: Memo<(i32, i32, u32), image::RgbaImage> = Memo::new();
         let mut hits_gen = 0u64;
         prof::enable();
         let mut prof_since = Instant::now();
@@ -503,16 +549,32 @@ fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, stop: Arc<Atom
             let game_present_now = rect.is_some();
             let clicks: Vec<(isize, i32, i32)> = CLICKS.lock().map(|mut c| std::mem::take(&mut *c)).unwrap_or_default();
             for (h, x, y) in clicks {
-                if h == card.hwnd {
-                    if let Some(hit) = card_hits.iter().find(|hit| hit.contains(x, y) && hit.id != HINT_AREA) {
-                        if hit.id == DRAG_HANDLE {
-                            if left_button_down() && game_present_now {
-                                drag = Some((x, y));
+                if h != card.hwnd {
+                    continue;
+                }
+                match shown_view {
+                    View::Card => match pick(false, &card_hits, x, y) {
+                        Some(Press::Drag) if left_button_down() && game_present_now => drag = Some(Drag { grab: (x, y), open: true, from: cursor() }),
+                        Some(Press::Button(PIN_BUTTON)) => {
+                            let now = user_pres.toggled();
+                            if let Ok(mut g) = state.lock() {
+                                g.dock.presentation = Some(now);
                             }
-                        } else if let Ok(mut e) = events.lock() {
-                            e.push(hit.id.clone());
+                            dock_now.presentation = Some(now);
+                            if let Ok(mut e) = events.lock() {
+                                e.push(now.encode());
+                            }
                         }
-                    }
+                        Some(Press::Button(id)) => {
+                            if let Ok(mut e) = events.lock() {
+                                e.push(id.to_string());
+                            }
+                        }
+                        _ => {}
+                    },
+                    // the tab is all handle; a press that does not move it does nothing
+                    View::Tab if left_button_down() && game_present_now => drag = Some(Drag { grab: (x, y), open: false, from: cursor() }),
+                    _ => {}
                 }
             }
             // The card is always there while the add-on runs: against the game when it is found,
@@ -527,6 +589,10 @@ fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, stop: Arc<Atom
                 ingame.hide();
                 marks.hide();
                 tip.hide();
+                // nothing is animated while nobody can see it
+                fold.reset();
+                slide = 0.0;
+                shown_view = View::Nothing;
                 tick = tick.wrapping_add(1);
                 prof::add(prof::Part::Busy, tick_start.elapsed());
                 std::thread::sleep(Duration::from_millis(90));
@@ -539,69 +605,137 @@ fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, stop: Arc<Atom
                 ingame_gen = ingame_track.update(&g.ingame);
                 marks_gen = marks_track.update(&g.marks);
                 dock_now = g.dock;
+                locked = g.locked;
+            }
+            let frame = Frame { client, outer, work };
+            let (out_w, in_w) = (panel_width(cw), inside_card_width(cw));
+            let avail = if game_present { available(frame, out_w) } else { Vec::new() };
+            // let go of a drag: snap to the nearest anchor and report it
+            if let (Some(d), false) = (drag, left_button_down()) {
+                drag = None;
+                if let Some(a) = drag_size.take().and_then(|size| dropped(frame, size, d.from, cursor(), &avail)) {
+                    dock_now.anchor = a;
+                    if let Ok(mut g) = state.lock() {
+                        g.dock.anchor = a;
+                    }
+                    if let Ok(mut e) = events.lock() {
+                        e.push(a.encode());
+                    }
+                }
             }
             let mut card_rect: Option<((i32, i32), (i32, i32))> = None;
+            ingame_shift = 0;
+            let mut card_scale = out_w as f32 / PANEL_BASE_W;
+            let mut hint: Option<(Ltrb, (i32, i32))> = None;
             match card_track.current() {
                 Some(Card::Panel(p)) => {
-                    let width = panel_width(cw) as u32;
-                    let ((img, hits), render_gen) = card_memo.get((card_gen, width), || prof::time(prof::Part::RenderCard, || render_panel_hits(width, p, &fonts)));
-                    let size = (img.width() as i32, img.height() as i32);
-                    // against the game on the docked side; with no room, inside it rather than nowhere
-                    let docked = if game_present {
-                        dock_origin(client, outer, work, size, dock_now).unwrap_or_else(|| ingame_origin(client, size))
-                    } else {
-                        // no game: wait at the top right of the screen
-                        ((work.2 - size.0 - 12).max(work.0), work.1 + 12)
-                    };
-                    let at = match drag {
-                        Some((gx, gy)) if left_button_down() => {
-                            let (cx, cy) = cursor();
-                            let p = (cx - gx, cy - gy);
-                            drag_at = Some(p);
-                            p
-                        }
-                        Some(_) => {
-                            // let go: snap to the nearest side and report it
-                            drag = None;
-                            match drag_at.take() {
-                                Some(p) => {
-                                    let d = dock_from_drop(client, p, size);
-                                    if let Ok(mut g) = state.lock() {
-                                        g.dock = d;
-                                    }
-                                    if let Ok(mut e) = events.lock() {
-                                        e.push(d.encode());
-                                    }
-                                    dock_origin(client, outer, work, size, d).unwrap_or(docked)
-                                }
-                                None => docked,
-                            }
-                        }
-                        None => docked,
-                    };
+                    // where the card really is: the preferred anchor when the monitor has room for it
+                    let anchor = if game_present { effective_anchor(frame, out_w, dock_now.anchor) } else { dock_now.anchor };
+                    let inside = game_present && anchor.is_inside();
+                    let width = if inside { in_w } else { out_w } as u32;
+                    card_scale = width as f32 / PANEL_BASE_W;
+                    user_pres = if game_present { dock_now.presentation.unwrap_or_else(|| Presentation::default_for(anchor)) } else { Presentation::Pinned };
+                    // a scan's clicks must not land on the card: inside the game it is a tab meanwhile
+                    let pres = if game_present && locked && inside { Presentation::Bookmark } else { user_pres };
+                    let pin_code = if game_present { 1 + (user_pres == Presentation::Bookmark) as u8 } else { 0 };
+                    let ((img, hits), render_gen) = card_memo.get((card_gen, width, pin_code), || {
+                        prof::time(prof::Part::RenderCard, || {
+                            let mut shown = p.clone();
+                            shown.pin = (pin_code != 0).then_some(pin_code == 1);
+                            render_panel_hits(width, &shown, &fonts)
+                        })
+                    });
                     if hits_gen != render_gen {
                         card_hits.clone_from(hits);
                         hits_gen = render_gen;
                     }
-                    card_rect = Some((at, size));
-                    card.show(screen_dc, img, at, hash_of(&(render_gen, at)));
+                    let size = (img.width() as i32, img.height() as i32);
+                    let tab = tab_size(card_scale);
+                    if anchor == Anchor::Inside(Corner::TopRight) {
+                        ingame_shift = tab.0 + 6;
+                    }
+                    let r = resolve(frame, anchor, size, tab);
+                    let tab_dim = (r.tab.2 - r.tab.0, r.tab.3 - r.tab.1);
+                    // (with no game there is no frame to keep it in: it is shown whole)
+                    let open_size = if game_present { ((r.open.2 - r.open.0).min(size.0), (r.open.3 - r.open.1).min(size.1)) } else { size };
+                    // the fold: the pointer on the tab or the open card keeps it open
+                    if !game_present || pres == Presentation::Pinned {
+                        fold.set_open();
+                        slide = 1.0;
+                    } else {
+                        let on_it = contains(strip(&r, slide).0, cursor());
+                        let intent = match drag {
+                            Some(d) if d.open => Intent::Hold,
+                            Some(_) => Intent::Shut,
+                            None if locked && inside => Intent::Shut,
+                            None if on_it => Intent::Over,
+                            None => Intent::Away,
+                        };
+                        slide = fold.step(epoch.elapsed().as_millis() as u64, intent);
+                    }
+                    // what the layer shows, and where
+                    let (rc, src_x) = strip(&r, slide);
+                    let (shape, at) = match drag {
+                        Some(d) if left_button_down() => {
+                            let (cx, cy) = cursor();
+                            let shown_size = if d.open { open_size } else { tab_dim };
+                            drag_size = Some(shown_size);
+                            hint = slot(frame, snap(frame, shown_size, (cx, cy), &avail), shown_size).map(|rc| (rc, shown_size));
+                            (if d.open { Shape::Card } else { Shape::Tab }, (cx - d.grab.0, cy - d.grab.1))
+                        }
+                        _ if !game_present => (Shape::Card, ((work.2 - size.0 - 12).max(work.0), work.1 + 12)), // waits at the top right of the screen
+                        _ if slide >= 1.0 => (Shape::Card, (rc.0, rc.1)),
+                        _ if slide <= 0.0 => (Shape::Tab, (rc.0, rc.1)),
+                        _ => (Shape::Strip, (rc.0, rc.1)),
+                    };
+                    let dims = ((rc.2 - rc.0, rc.3 - rc.1), src_x, open_size, tab_dim);
+                    let key = hash_of(&(render_gen, at, shape as u8, dims, r.unfold == Unfold::Left, locked));
+                    if !card.is_current(key) {
+                        // the open card cut to the room it has
+                        let cut = |x: u32, w: u32, h: u32| image::imageops::crop_imm(img, x.min(img.width()), 0, w.min(img.width()), h.min(img.height())).to_image();
+                        match shape {
+                            Shape::Tab => {
+                                let (timg, _) = tab_memo.get((tab_dim.0, tab_dim.1, r.unfold == Unfold::Left, locked, width), || render_tab(tab_dim, r.unfold, locked, card_scale));
+                                card.show(screen_dc, timg, at, key);
+                            }
+                            Shape::Card if open_size == size => card.show(screen_dc, img, at, key),
+                            Shape::Card => card.show(screen_dc, &cut(0, open_size.0 as u32, open_size.1 as u32), at, key),
+                            Shape::Strip => card.show(screen_dc, &cut(src_x.max(0) as u32, (rc.2 - rc.0) as u32, (rc.3 - rc.1) as u32), at, key),
+                        }
+                    }
+                    shown_view = match (shape, drag) {
+                        (_, Some(_)) => View::Nothing,
+                        (Shape::Card, None) => View::Card,
+                        (Shape::Tab, None) => View::Tab,
+                        (Shape::Strip, None) => View::Strip,
+                    };
+                    if shown_view == View::Card {
+                        card_rect = Some((at, open_size));
+                    }
                 }
-                _ => card.hide(),
+                _ => {
+                    card.hide();
+                    shown_view = View::Nothing;
+                }
             }
-            // a tooltip while the pointer rests on a row that has one
-            let hovered = card_rect.filter(|_| drag.is_none()).and_then(|(at, size)| {
+            // while the card is carried: the place it would snap to; else a tooltip while the
+            // pointer rests on a row that has one
+            let hovered = card_rect.and_then(|(at, size)| {
                 let (cx, cy) = cursor();
                 let inside = cx >= at.0 && cx < at.0 + size.0 && cy >= at.1 && cy < at.1 + size.1;
                 inside.then(|| card_hits.iter().find(|h| h.contains(cx - at.0, cy - at.1)).and_then(|h| h.tip.clone())).flatten().map(|t| (t, (cx, cy)))
             });
-            match hovered {
-                Some((text, (cx, cy))) => {
-                    let scale = panel_width(cw) as f32 / PANEL_BASE_W;
-                    let (img, tip_gen) = tip_memo.get((text.clone(), panel_width(cw)), || render_tooltip(scale, &text, &fonts));
+            match (hint, hovered) {
+                (Some((rc, size)), _) => {
+                    let (img, hint_gen) = hint_memo.get((size.0, size.1, out_w as u32), || render_snap_hint(size, card_scale));
+                    tip.show(screen_dc, img, (rc.0, rc.1), hash_of(&(hint_gen, rc)));
+                }
+                (None, Some((text, (cx, cy)))) => {
+                    let (img, tip_gen) = tip_memo.get((text.clone(), (card_scale * PANEL_BASE_W) as i32), || render_tooltip(card_scale, &text, &fonts));
                     let at = ((cx + 14).min(work.2 - img.width() as i32).max(work.0), (cy + 22).min(work.3 - img.height() as i32).max(work.1));
                     tip.show(screen_dc, img, at, hash_of(&(tip_gen, at)));
                 }
-                None => tip.hide(),
+                (None, None) => tip.hide(),
             }
             if game_present {
                 // a card inside the game
@@ -609,7 +743,8 @@ fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, stop: Arc<Atom
                     Some(Some(p)) => {
                         let width = ingame_panel_width(cw) as u32;
                         let (img, render_gen) = ingame_memo.get((ingame_gen, width), || prof::time(prof::Part::RenderIngame, || render_panel(width, p, &fonts)));
-                        let at = ingame_origin(client, (img.width() as i32, img.height() as i32));
+                        let mut at = ingame_origin(client, (img.width() as i32, img.height() as i32));
+                        at.0 = (at.0 - ingame_shift).max(client.0);
                         ingame.show(screen_dc, img, at, hash_of(&(render_gen, at)));
                     }
                     _ => ingame.hide(),
@@ -629,7 +764,8 @@ fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, stop: Arc<Atom
             tick = tick.wrapping_add(1);
             prof::add(prof::Part::Busy, tick_start.elapsed());
             // a drag needs the card to follow the cursor smoothly
-            std::thread::sleep(Duration::from_millis(if drag.is_some() { 16 } else { 90 }));
+            let tab_mode = game_present && user_pres == Presentation::Bookmark;
+            std::thread::sleep(Duration::from_millis(if drag.is_some() || fold.sliding() { 16 } else if tab_mode { 40 } else { 90 }));
         }
         drop(card);
         drop(ingame);

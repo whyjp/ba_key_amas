@@ -160,12 +160,17 @@ pub struct PanelState {
     pub rows: Vec<Row>,
     /// A button in the header's right corner (id, tooltip), drawn as a power icon.
     pub close: Option<(String, String)>,
+    /// Draws a pin button left of the power icon: Some(true) when the card is pinned open,
+    /// Some(false) when it folds into a tab. Set by the overlay, which owns the fold.
+    pub pin: Option<bool>,
 }
 
 /// The id of the header's hit area: pressing it starts a drag instead of reporting a click.
 pub const DRAG_HANDLE: &str = "drag";
 /// The id of a tooltip row's hit area (it reports no click; the tooltip is its purpose).
 pub const HINT_AREA: &str = "hint";
+/// The id of the pin button's hit area; the overlay handles it itself.
+pub const PIN_BUTTON: &str = "pin";
 
 /// A clickable area of a rendered panel, in the panel image's pixels.
 #[derive(Debug, Clone, PartialEq)]
@@ -191,6 +196,12 @@ pub fn panel_width(client_w: i32) -> i32 {
     ((client_w as f32 * WIDTH_SHARE).round() as i32).clamp(MIN_W, MAX_W)
 }
 
+/// Width of the main card when it is shown inside the game: narrower than beside it, so that it
+/// covers no more of the game than it needs (it is still wider than the click-through card).
+pub fn inside_card_width(client_w: i32) -> i32 {
+    ((client_w as f32 * 0.34).round() as i32).clamp(220, 320)
+}
+
 /// Width of a panel drawn inside the game, narrower than the one beside it.
 pub fn ingame_panel_width(client_w: i32) -> i32 {
     ((client_w as f32 * 0.46).round() as i32).clamp(190, 360)
@@ -210,7 +221,9 @@ pub fn ingame_origin(client: Ltrb, size: (i32, i32)) -> (i32, i32) {
 /// else on the left, aligned with the top of the game. None when neither side has
 /// room: the panel is then not shown rather than drawn over the game.
 pub fn panel_origin(client: Ltrb, outer: Ltrb, work: Ltrb, size: (i32, i32)) -> Option<(i32, i32)> {
-    crate::dock::dock_origin(client, outer, work, size, crate::dock::Dock::default())
+    use crate::dock::{Anchor, Side};
+    let f = crate::placement::Frame { client, outer, work };
+    [Side::Right, Side::Left].into_iter().find_map(|s| crate::placement::slot(f, Anchor::Outside(s), size)).map(|r| (r.0, r.1))
 }
 
 const LABEL_W: f32 = 62.0;
@@ -373,9 +386,15 @@ pub fn render_panel_hits(width: u32, state: &PanelState, fonts: &Fonts) -> (Rgba
     card(&mut img, wf, hf, s, head, 12.0 * s, BODY);
     // the close button first: hits are searched in order, and the header below it is a drag handle
     let icon_cx = wf - 36.0 * s;
+    let box_w = 26.0 * s;
     if let Some((id, tip)) = &state.close {
-        let box_w = 26.0 * s;
         hits.push(Hit { id: id.clone(), tip: Some(tip.clone()), x: icon_cx - box_w / 2.0, y: 0.0, w: box_w, h: head });
+    }
+    // the pin sits left of the power icon; pressing it is not a drag either
+    let pin_cx = if state.close.is_some() { icon_cx - 26.0 * s } else { icon_cx };
+    if let Some(pinned) = state.pin {
+        let tip = if pinned { "접기" } else { "고정" };
+        hits.push(Hit { id: PIN_BUTTON.into(), tip: Some(tip.into()), x: pin_cx - box_w / 2.0, y: 0.0, w: box_w, h: head });
     }
     // the header bar is where the card is picked up and moved
     hits.push(Hit { id: DRAG_HANDLE.into(), tip: None, x: 0.0, y: 0.0, w: wf, h: head });
@@ -386,11 +405,14 @@ pub fn render_panel_hits(width: u32, state: &PanelState, fonts: &Fonts) -> (Rgba
     if !state.scene.is_empty() {
         let name = "ba-scanner";
         let nw = text_width(&fonts.regular, 10.5 * s, name);
-        let right = if state.close.is_some() { icon_cx - 16.0 * s } else { wf - 20.0 * s };
+        let right = if state.pin.is_some() { pin_cx - 16.0 * s } else if state.close.is_some() { icon_cx - 16.0 * s } else { wf - 20.0 * s };
         draw_text(&mut img, &fonts.regular, 10.5 * s, right - nw, (head - 10.5 * s * 1.2) / 2.0, NAVY_SOFT, 1.0, name);
     }
     if state.close.is_some() {
         power_icon(&mut img, icon_cx, head / 2.0, 6.5 * s, s);
+    }
+    if let Some(pinned) = state.pin {
+        pin_icon(&mut img, pin_cx, head / 2.0, 6.5 * s, s, pinned);
     }
 
     let mut y = head + 10.0 * s;
@@ -567,6 +589,22 @@ fn power_icon(img: &mut RgbaImage, cx: f32, cy: f32, r: f32, s: f32) {
     let gap = 2.4 * s;
     fill_rrect(img, cx - gap, cy - r - 1.0, 2.0 * gap, r - 0.2 * s, 0.0, |_, _| (NAVY, 1.0));
     fill_rrect(img, cx - t / 2.0, cy - r - 0.6 * s, t, r + 0.4 * s, t / 2.0, |_, _| (WHITE, 1.0));
+}
+
+/// A push pin in white, centred at (cx, cy): solid when the card is pinned open, with a hollow
+/// head (outline only, in the header's soft blue) when it folds into a tab.
+pub(crate) fn pin_icon(img: &mut RgbaImage, cx: f32, cy: f32, r: f32, s: f32, pinned: bool) {
+    let t = (1.5 * s).max(1.1);
+    let head = if pinned { WHITE } else { NAVY_SOFT };
+    let (hw, hh) = (r * 0.9, r * 1.05);
+    let (hx, hy) = (cx - hw / 2.0, cy - r);
+    fill_rrect(img, hx, hy, hw, hh, r * 0.3, |_, _| (head, 1.0));
+    if !pinned {
+        fill_rrect(img, hx + t, hy + t, hw - 2.0 * t, hh - 2.0 * t, (r * 0.3 - t).max(0.0), |_, _| (NAVY, 1.0));
+    }
+    // the flange, then the needle
+    fill_rrect(img, cx - r * 0.85, cy + 0.05 * r, r * 1.7, (t * 1.2).max(1.5), 0.5 * s, |_, _| (WHITE, 1.0));
+    fill_rrect(img, cx - t / 2.0, cy + 0.05 * r, t, r * 0.95, t / 2.0, |_, _| (WHITE, 1.0));
 }
 
 /// A small solid triangle centred at (cx, cy): pointing down when `open`, right when folded.
