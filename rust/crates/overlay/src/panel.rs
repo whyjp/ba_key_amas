@@ -1,7 +1,7 @@
 //! The guide panel: a card with the current screen and, on mission screens, what the
 //! mission holds. It sits beside the game window (right, else left), never on it.
 //! Pure pixels in, pixels out, like the banner, so the look is checked without a game.
-use crate::render::{card, draw_text, fill_rrect, text_width, Fonts, Ltrb, AMBER, BODY, BORDER, INK, MUTED, NAVY, NAVY_SOFT, RULE, TRACK, WHITE};
+use crate::render::{card, draw_text, fill_rrect, text_width, Fonts, Ltrb, AMBER, BLUE, BODY, BORDER, INK, MUTED, NAVY, NAVY_SOFT, RULE, TRACK, WHITE};
 use image::{Rgba, RgbaImage};
 
 /// Design width; the panel is scaled to the game window.
@@ -83,6 +83,12 @@ pub enum Row {
     Verdict { label: String, text: String, tone: Tone },
     /// A clickable row; clicking it reports `id` through the overlay's events.
     Button { id: String, label: String, value: String, on: bool },
+    /// Like `Info`, and a tooltip shows `tip` while the pointer is over the row.
+    Hint { label: String, value: String, tip: String },
+    /// A small section title.
+    Heading(String),
+    /// A bar from empty to `done` of `total` (just the text when the total is not known yet).
+    Progress { label: String, done: usize, total: Option<usize>, text: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -96,11 +102,15 @@ pub struct PanelState {
 
 /// The id of the header's hit area: pressing it starts a drag instead of reporting a click.
 pub const DRAG_HANDLE: &str = "drag";
+/// The id of a tooltip row's hit area (it reports no click; the tooltip is its purpose).
+pub const HINT_AREA: &str = "hint";
 
 /// A clickable area of a rendered panel, in the panel image's pixels.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Hit {
     pub id: String,
+    /// Shown as a tooltip while the pointer is over the area.
+    pub tip: Option<String>,
     pub x: f32,
     pub y: f32,
     pub w: f32,
@@ -209,6 +219,9 @@ pub fn render_panel_hits(width: u32, state: &PanelState, fonts: &Fonts) -> (Rgba
             Row::Meter { .. } => 22.0 * s + 5.0 * s,
             Row::Verdict { .. } => 28.0 * s + 7.0 * s,
             Row::Button { .. } => 24.0 * s + 5.0 * s,
+            Row::Hint { value, .. } => wrap(&fonts.regular, 14.0 * s, value_w, value).len() as f32 * 21.0 * s + 5.0 * s,
+            Row::Heading(_) => 21.0 * s + 4.0 * s,
+            Row::Progress { .. } => 22.0 * s + 5.0 * s,
         };
     }
     h += 8.0 * s;
@@ -219,7 +232,7 @@ pub fn render_panel_hits(width: u32, state: &PanelState, fonts: &Fonts) -> (Rgba
     let head = HEAD_H * s;
     card(&mut img, wf, hf, s, head, 12.0 * s, BODY);
     // the header bar is where the card is picked up and moved
-    hits.push(Hit { id: DRAG_HANDLE.into(), x: 0.0, y: 0.0, w: wf, h: head });
+    hits.push(Hit { id: DRAG_HANDLE.into(), tip: None, x: 0.0, y: 0.0, w: wf, h: head });
 
     // header bar: screen name left, tool name right (before the cut corner)
     let scene = if state.scene.is_empty() { "ba-scanner" } else { state.scene.as_str() };
@@ -251,6 +264,44 @@ pub fn render_panel_hits(width: u32, state: &PanelState, fonts: &Fonts) -> (Rgba
                     y += 21.0 * s;
                 }
                 y += 5.0 * s;
+                if more {
+                    rule(&mut img, y - 3.0 * s);
+                }
+            }
+            Row::Hint { label, value, tip } => {
+                draw_text(&mut img, &fonts.regular, 12.5 * s, pad, y + 2.0 * s, MUTED, 1.0, label);
+                let top = y;
+                for line in wrap(&fonts.regular, 14.0 * s, value_w, value) {
+                    draw_text(&mut img, &fonts.semibold, 14.0 * s, pad + label_w, y, INK, 1.0, &line);
+                    y += 21.0 * s;
+                }
+                hits.push(Hit { id: HINT_AREA.into(), tip: Some(tip.clone()), x: pad, y: top, w: wf - pad * 2.0, h: y - top });
+                y += 5.0 * s;
+                if more {
+                    rule(&mut img, y - 3.0 * s);
+                }
+            }
+            Row::Heading(text) => {
+                y += 4.0 * s;
+                draw_text(&mut img, &fonts.bold, 11.5 * s, pad, y, NAVY, 1.0, text);
+                y += 17.0 * s;
+                fill_rrect(&mut img, pad, y, wf - pad * 2.0, (1.0 * s).max(1.0), 0.0, |_, _| (BORDER, 1.0));
+                y += 4.0 * s;
+            }
+            Row::Progress { label, done, total, text } => {
+                draw_text(&mut img, &fonts.regular, 12.5 * s, pad, y + 2.0 * s, MUTED, 1.0, label);
+                let tw = text_width(&fonts.semibold, 12.5 * s, text);
+                let (bx, bw, bh) = (pad + label_w, value_w - tw - 8.0 * s, 8.0 * s);
+                let by = y + 6.0 * s;
+                fill_rrect(&mut img, bx, by, bw, bh, 1.0 * s, |_, _| (TRACK, 1.0));
+                if let Some(t) = total.filter(|t| *t > 0) {
+                    let fw = (bw * (*done as f32 / t as f32).clamp(0.0, 1.0)).max(if *done > 0 { 2.0 * s } else { 0.0 });
+                    if fw > 0.0 {
+                        fill_rrect(&mut img, bx, by, fw, bh, 1.0 * s, |_, _| (BLUE, 1.0));
+                    }
+                }
+                draw_text(&mut img, &fonts.semibold, 12.5 * s, wf - pad - tw, y + 2.0 * s, INK, 1.0, text);
+                y += 22.0 * s + 5.0 * s;
                 if more {
                     rule(&mut img, y - 3.0 * s);
                 }
@@ -309,7 +360,7 @@ pub fn render_panel_hits(width: u32, state: &PanelState, fonts: &Fonts) -> (Rgba
                 draw_text(&mut img, &fonts.regular, 12.5 * s, bx + 9.0 * s, ty, ink, 1.0, label);
                 let vw = text_width(&fonts.bold, 12.5 * s, value);
                 draw_text(&mut img, &fonts.bold, 12.5 * s, bx + bw - 9.0 * s - vw, ty, vink, 1.0, value);
-                hits.push(Hit { id: id.clone(), x: bx, y, w: bw, h: bh });
+                hits.push(Hit { id: id.clone(), tip: None, x: bx, y, w: bw, h: bh });
                 y += 24.0 * s + 5.0 * s;
             }
             Row::Verdict { label, text, tone } => {
@@ -324,6 +375,27 @@ pub fn render_panel_hits(width: u32, state: &PanelState, fonts: &Fonts) -> (Rgba
         }
     }
     (img, hits)
+}
+
+/// A small flat tooltip: `text` (lines split at '\n') in white on navy. `scale` is the card's
+/// scale (panel width over its design width), so the tooltip grows with the window.
+pub fn render_tooltip(scale: f32, text: &str, fonts: &Fonts) -> RgbaImage {
+    let s = scale;
+    let (px, pad) = (12.5 * s, 8.0 * s);
+    let lines: Vec<&str> = text.lines().collect();
+    let w = lines.iter().map(|l| text_width(&fonts.semibold, px, l)).fold(0.0f32, f32::max) + pad * 2.0;
+    let line_h = px * 1.45;
+    let h = lines.len() as f32 * line_h + pad * 1.4;
+    let mut img = RgbaImage::from_pixel(w.ceil() as u32, h.ceil() as u32, Rgba([0, 0, 0, 0]));
+    let (wf, hf) = (w.ceil(), h.ceil());
+    fill_rrect(&mut img, 0.0, 0.0, wf, hf, 3.0 * s, |x, y| {
+        let edge = x < 1.0 || y < 1.0 || x > wf - 1.0 || y > hf - 1.0;
+        (if edge { NAVY_SOFT } else { NAVY }, 1.0)
+    });
+    for (i, l) in lines.iter().enumerate() {
+        draw_text(&mut img, &fonts.semibold, px, pad, pad * 0.7 + i as f32 * line_h, WHITE, 1.0, l);
+    }
+    img
 }
 
 #[cfg(test)]
@@ -387,6 +459,36 @@ mod tests {
         }
         let bare = render_panel(300, &PanelState { scene: "메인 메뉴".into(), ..Default::default() }, &f);
         assert!(bare.height() < render_panel(300, &sample(), &f).height(), "less content, shorter card");
+    }
+
+    #[test]
+    fn hint_rows_carry_their_tooltip_and_progress_rows_draw_a_bar() {
+        let Some(f) = load_fonts() else { return };
+        let state = PanelState {
+            scene: "상태".into(),
+            title: String::new(),
+            rows: vec![
+                Row::Heading("학생 정보".into()),
+                Row::Hint { label: "갱신".into(), value: "3일 2시간 경과".into(), tip: "2026-11-20 17:49".into() },
+                Row::Progress { label: "진행".into(), done: 50, total: Some(100), text: "50/100".into() },
+            ],
+        };
+        let (img, hits) = render_panel_hits(300, &state, &f);
+        let hint = hits.iter().find(|h| h.id == HINT_AREA).expect("a hit area for the hint row");
+        assert_eq!(hint.tip.as_deref(), Some("2026-11-20 17:49"));
+        assert!(hits.iter().filter(|h| h.id != DRAG_HANDLE).count() == 1, "only the hint row has an area");
+        // the bar is half full: blue at its first quarter, track colour at its last
+        let y = img.height() - 22;
+        let at = |x: u32| *img.get_pixel(x, y);
+        let blue_found = (60..200).any(|x| { let p = at(x); p[2] > 170 && p[0] < 90 });
+        assert!(blue_found, "a blue fill on the progress row");
+        let tip = render_tooltip(1.0, "마지막 스캔\n2026-11-20 17:49", &f);
+        assert!(tip.width() > 80 && tip.height() > 30, "{}x{}", tip.width(), tip.height());
+        assert_eq!(tip.get_pixel(0, 0)[3], 0, "rounded corner");
+        if let Some(dir) = std::env::var_os("BANNER_PREVIEW_DIR") {
+            img.save(std::path::Path::new(&dir).join("rows.png")).unwrap();
+            tip.save(std::path::Path::new(&dir).join("tip.png")).unwrap();
+        }
     }
 
     #[test]

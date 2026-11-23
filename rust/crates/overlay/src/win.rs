@@ -5,8 +5,8 @@
 //! WS_EX_TOOLWINDOW (no taskbar button). WDA_EXCLUDEFROMCAPTURE keeps it out of
 //! screenshots where the OS supports it.
 use crate::dock::{dock_from_drop, dock_origin};
-use crate::panel::{ingame_origin, ingame_panel_width, panel_width, render_panel, render_panel_hits, Hit, DRAG_HANDLE};
-use crate::render::{banner_layout, banner_origin, load_fonts, render, Fonts, Ltrb};
+use crate::panel::{ingame_origin, ingame_panel_width, panel_width, render_panel, render_panel_hits, render_tooltip, Hit, DRAG_HANDLE, PANEL_BASE_W};
+use crate::render::{load_fonts, Fonts, Ltrb};
 use crate::marks::render_marks;
 use crate::{Card, Shown};
 use std::ffi::c_void;
@@ -193,7 +193,7 @@ fn game_geometry() -> Option<(Ltrb, Ltrb, Ltrb, isize)> {
 
 /// Is another window in front of the game and over it? Then the overlay must not be drawn on
 /// top of that window. The game itself, the overlay's own windows and the desktop shell do not count.
-unsafe fn covered(game: isize, own: [isize; 3], outer: Ltrb) -> bool {
+unsafe fn covered(game: isize, own: [isize; 4], outer: Ltrb) -> bool {
     let fg = GetForegroundWindow();
     if fg == 0 || fg == game || own.contains(&fg) {
         return false;
@@ -218,6 +218,19 @@ unsafe fn cursor() -> (i32, i32) {
     let mut p = Point { x: 0, y: 0 };
     GetCursorPos(&mut p);
     (p.x, p.y)
+}
+
+/// The work area of the primary monitor (taskbar excluded).
+fn primary_work() -> Ltrb {
+    unsafe {
+        let mut mi = MonitorInfo { size: std::mem::size_of::<MonitorInfo>() as u32, monitor: Rect { left: 0, top: 0, right: 0, bottom: 0 }, work: Rect { left: 0, top: 0, right: 0, bottom: 0 }, flags: 0 };
+        let hmon = MonitorFromWindow(0, 1); // MONITOR_DEFAULTTOPRIMARY
+        if hmon != 0 && GetMonitorInfoW(hmon, &mut mi) != 0 {
+            (mi.work.left, mi.work.top, mi.work.right, mi.work.bottom)
+        } else {
+            (0, 0, 1920, 1080)
+        }
+    }
 }
 
 /// A premultiplied-BGRA DIB the banner is rendered into.
@@ -389,9 +402,12 @@ fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, stop: Arc<Atom
             icon_sm: 0,
         };
         RegisterClassExW(&wc); // already registered on a second run: harmless
-        let (Some(mut card), Some(mut ingame), Some(mut marks)) =
-            (create_layer(inst, &class, "ba-scanner", false), create_layer(inst, &class, "ba-scanner-ingame", true), create_layer(inst, &class, "ba-scanner-marks", true))
-        else {
+        let (Some(mut card), Some(mut ingame), Some(mut marks), Some(mut tip)) = (
+            create_layer(inst, &class, "ba-scanner", false),
+            create_layer(inst, &class, "ba-scanner-ingame", true),
+            create_layer(inst, &class, "ba-scanner-marks", true),
+            create_layer(inst, &class, "ba-scanner-tip", true),
+        ) else {
             eprintln!("overlay: this Windows version cannot hide the overlay from screen capture (or the window could not be created); running without it");
             return;
         };
@@ -415,7 +431,7 @@ fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, stop: Arc<Atom
             let clicks: Vec<(isize, i32, i32)> = CLICKS.lock().map(|mut c| std::mem::take(&mut *c)).unwrap_or_default();
             for (h, x, y) in clicks {
                 if h == card.hwnd {
-                    if let Some(hit) = card_hits.iter().find(|hit| hit.contains(x, y)) {
+                    if let Some(hit) = card_hits.iter().find(|hit| hit.contains(x, y) && hit.tip.is_none()) {
                         if hit.id == DRAG_HANDLE {
                             if left_button_down() {
                                 drag = Some((x, y));
@@ -426,90 +442,103 @@ fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, stop: Arc<Atom
                     }
                 }
             }
-            match rect {
-                None => {
-                    card.hide();
-                    ingame.hide();
-                    marks.hide();
-                }
-                Some((_, outer, _, game)) if covered(game, [card.hwnd, ingame.hwnd, marks.hwnd], outer) => {
-                    card.hide();
-                    ingame.hide();
-                    marks.hide();
-                }
-                Some((client, outer, work, _)) => {
-                    let (cw, ch) = (client.2 - client.0, client.3 - client.1);
-                    let shown = state.lock().map(|g| g.clone()).unwrap_or(Shown { card: Card::Hidden, ingame: None, marks: Vec::new(), dock: Default::default() });
-                    // the card: the banner goes above/below the window, the panel beside it
-                    let placed = match &shown.card {
-                        Card::Hidden => None,
-                        Card::Banner(s) => {
-                            let (_, _, bw, _) = banner_layout(cw, ch); // proportional to this window
-                            let img = render(bw, s, tick, &fonts);
-                            let at = banner_origin(client, outer, work, (img.width() as i32, img.height() as i32));
-                            Some((img, at, u64::from(tick)))
+            // The card is always there while the add-on runs: against the game when it is found,
+            // else waiting at the top right of the screen (so it can still be used, and closed).
+            let game_present = rect.is_some();
+            let (client, outer, work, game) = rect.unwrap_or_else(|| {
+                let w = primary_work();
+                ((w.2 - 2, w.1, w.2, w.1 + 200), (w.2 - 2, w.1, w.2, w.1 + 200), w, 0)
+            });
+            if game_present && covered(game, [card.hwnd, ingame.hwnd, marks.hwnd, tip.hwnd], outer) {
+                card.hide();
+                ingame.hide();
+                marks.hide();
+                tip.hide();
+                tick = tick.wrapping_add(1);
+                std::thread::sleep(Duration::from_millis(90));
+                continue;
+            }
+            let (cw, ch) = (client.2 - client.0, client.3 - client.1);
+            let shown = state.lock().map(|g| g.clone()).unwrap_or(Shown { card: Card::Hidden, ingame: None, marks: Vec::new(), dock: Default::default() });
+            let mut card_rect: Option<((i32, i32), (i32, i32))> = None;
+            match &shown.card {
+                Card::Hidden => card.hide(),
+                Card::Panel(p) => {
+                    let (img, hits) = render_panel_hits(panel_width(cw) as u32, p, &fonts);
+                    let key = hash_of(&(format!("{p:?}"), cw, ch));
+                    let size = (img.width() as i32, img.height() as i32);
+                    // against the game on the docked side; with no room, inside it rather than nowhere
+                    let docked = dock_origin(client, outer, work, size, shown.dock).unwrap_or_else(|| ingame_origin(client, size));
+                    let at = match drag {
+                        Some((gx, gy)) if left_button_down() => {
+                            let (cx, cy) = cursor();
+                            let p = (cx - gx, cy - gy);
+                            drag_at = Some(p);
+                            p
                         }
-                        Card::Panel(p) => {
-                            let (img, hits) = render_panel_hits(panel_width(cw) as u32, p, &fonts);
-                            let key = hash_of(&(format!("{p:?}"), cw, ch));
-                            let size = (img.width() as i32, img.height() as i32);
-                            // against the game on the docked side; with no room, inside it rather than nowhere
-                            let docked = dock_origin(client, outer, work, size, shown.dock).unwrap_or_else(|| ingame_origin(client, size));
-                            let at = match drag {
-                                Some((gx, gy)) if left_button_down() => {
-                                    let (cx, cy) = cursor();
-                                    let p = (cx - gx, cy - gy);
-                                    drag_at = Some(p);
-                                    p
-                                }
-                                Some(_) => {
-                                    // let go: snap to the nearest side and report where it landed
-                                    drag = None;
-                                    match drag_at.take() {
-                                        Some(p) => {
-                                            let d = dock_from_drop(client, p, size);
-                                            if let Ok(mut g) = state.lock() {
-                                                g.dock = d;
-                                            }
-                                            if let Ok(mut e) = events.lock() {
-                                                e.push(d.encode());
-                                            }
-                                            dock_origin(client, outer, work, size, d).unwrap_or(docked)
-                                        }
-                                        None => docked,
+                        Some(_) => {
+                            // let go: snap to the nearest side and report it
+                            drag = None;
+                            match drag_at.take() {
+                                Some(p) => {
+                                    let d = dock_from_drop(client, p, size);
+                                    if let Ok(mut g) = state.lock() {
+                                        g.dock = d;
                                     }
+                                    if let Ok(mut e) = events.lock() {
+                                        e.push(d.encode());
+                                    }
+                                    dock_origin(client, outer, work, size, d).unwrap_or(docked)
                                 }
                                 None => docked,
-                            };
-                            card_hits = hits;
-                            Some((img, at, key ^ hash_of(&at)))
+                            }
                         }
+                        None => docked,
                     };
-                    match placed {
-                        Some((img, at, key)) => card.show(screen_dc, &img, at, key),
-                        None => card.hide(),
+                    card_hits = hits;
+                    card_rect = Some((at, size));
+                    card.show(screen_dc, &img, at, key ^ hash_of(&at));
+                }
+            }
+            // a tooltip while the pointer rests on a row that has one
+            let hovered = card_rect.filter(|_| drag.is_none()).and_then(|(at, size)| {
+                let (cx, cy) = cursor();
+                let inside = cx >= at.0 && cx < at.0 + size.0 && cy >= at.1 && cy < at.1 + size.1;
+                inside.then(|| card_hits.iter().find(|h| h.contains(cx - at.0, cy - at.1)).and_then(|h| h.tip.clone())).flatten().map(|t| (t, (cx, cy)))
+            });
+            match hovered {
+                Some((text, (cx, cy))) => {
+                    let scale = panel_width(cw) as f32 / PANEL_BASE_W;
+                    let img = render_tooltip(scale, &text, &fonts);
+                    let at = ((cx + 14).min(work.2 - img.width() as i32).max(work.0), (cy + 22).min(work.3 - img.height() as i32).max(work.1));
+                    tip.show(screen_dc, &img, at, hash_of(&(&text, at)));
+                }
+                None => tip.hide(),
+            }
+            if game_present {
+                // a card inside the game
+                match &shown.ingame {
+                    Some(p) => {
+                        let img = render_panel(ingame_panel_width(cw) as u32, p, &fonts);
+                        let at = ingame_origin(client, (img.width() as i32, img.height() as i32));
+                        let key = hash_of(&(format!("{p:?}"), cw, ch)) ^ hash_of(&at);
+                        ingame.show(screen_dc, &img, at, key);
                     }
-                    // a card inside the game
-                    match &shown.ingame {
-                        Some(p) => {
-                            let img = render_panel(ingame_panel_width(cw) as u32, p, &fonts);
-                            let at = ingame_origin(client, (img.width() as i32, img.height() as i32));
-                            let key = hash_of(&(format!("{p:?}"), cw, ch)) ^ hash_of(&at);
-                            ingame.show(screen_dc, &img, at, key);
-                        }
-                        None => ingame.hide(),
-                    }
-                    // the icons over the portraits: the layer covers the game's client area
-                    if shown.marks.is_empty() {
-                        marks.hide();
-                    } else {
-                        let key = hash_of(&(&shown.marks, client.0, client.1, cw, ch));
-                        if !(marks.visible && marks.drawn == Some(key)) {
-                            let img = render_marks(cw as u32, ch as u32, &shown.marks, &fonts);
-                            marks.show(screen_dc, &img, (client.0, client.1), key);
-                        }
+                    None => ingame.hide(),
+                }
+                // the icons over the portraits: the layer covers the game's client area
+                if shown.marks.is_empty() {
+                    marks.hide();
+                } else {
+                    let key = hash_of(&(&shown.marks, client.0, client.1, cw, ch));
+                    if !(marks.visible && marks.drawn == Some(key)) {
+                        let img = render_marks(cw as u32, ch as u32, &shown.marks, &fonts);
+                        marks.show(screen_dc, &img, (client.0, client.1), key);
                     }
                 }
+            } else {
+                ingame.hide();
+                marks.hide();
             }
             tick = tick.wrapping_add(1);
             // a drag needs the card to follow the cursor smoothly
@@ -518,6 +547,7 @@ fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, stop: Arc<Atom
         drop(card);
         drop(ingame);
         drop(marks);
+        drop(tip);
         ReleaseDC(0, screen_dc);
     }
 }

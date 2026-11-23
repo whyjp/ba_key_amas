@@ -8,21 +8,22 @@ mod dock;
 mod marks;
 mod panel;
 mod render;
+mod scan;
 #[cfg(windows)]
 mod win;
 
 pub use marks::{render_marks, Icon, Mark};
 pub use dock::{dock_from_drop, dock_origin, Dock, Side};
-pub use panel::{ingame_origin, ingame_panel_width, panel_origin, panel_width, render_panel, render_panel_hits, Chip, Hit, PanelState, Row, Tone};
+pub use panel::{ingame_origin, ingame_panel_width, panel_origin, panel_width, render_panel, render_panel_hits, render_tooltip, Chip, Hit, PanelState, Row, Tone, PANEL_BASE_W};
 
-pub use render::{banner_layout, banner_origin, Ltrb, load_fonts, render, BannerState, Fonts, Phase, BASE_H, BASE_W};
+pub use render::{load_fonts, BannerState, Fonts, Ltrb, Phase};
+pub use scan::{scan_card, scan_rows};
 
 use std::sync::{Arc, Mutex};
 
 /// The card window: scan progress, or the guide card beside the game window.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Card {
-    Banner(BannerState),
     Panel(PanelState),
     Hidden,
 }
@@ -52,7 +53,7 @@ impl Overlay {
     /// Show the banner over the game window ("Blue Archive"). Never fails the
     /// caller: if the banner cannot be shown, scanning just runs without it.
     pub fn start() -> Overlay {
-        Overlay::start_with(Card::Banner(BannerState::default()))
+        Overlay::start_with(Card::Hidden)
     }
 
     /// Start with nothing shown (the guide panel appears when `panel` is called).
@@ -107,7 +108,7 @@ impl Overlay {
 
     /// Replace the shown banner state.
     pub fn set(&self, s: BannerState) {
-        self.show(Card::Banner(s));
+        self.show(Card::Panel(scan_card(&s, false)));
     }
 
     /// Show the guide card beside the game window.
