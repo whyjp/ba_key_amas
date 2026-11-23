@@ -42,6 +42,7 @@ impl Default for Settings {
                 (WidgetId::Formation, Placement::Outside),
                 (WidgetId::PortraitIcons, Placement::InGame),
                 (WidgetId::SlotStats, Placement::InGame),
+                (WidgetId::FurnitureStudents, Placement::InGame),
             ]),
         }
     }

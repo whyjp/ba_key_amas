@@ -11,6 +11,17 @@ use baocr_pixels::{quick_card_selected, quick_tab_is_striker};
 use baocr_wikidb::{StudentBrief, Wiki};
 use image::RgbImage;
 
+/// A furniture card in the cafe's furniture view, with the students that interact with it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FurnitureCard {
+    /// Top-left of the card's inside and its width (frame pixels): where the name tags go.
+    pub x: i32,
+    pub y: i32,
+    pub w: i32,
+    /// The students' names, in id order.
+    pub students: Vec<String>,
+}
+
 /// What the screen shows.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Observation {
@@ -23,11 +34,13 @@ pub struct Observation {
     pub squad: Vec<i64>,
     /// The kind of student the grid's active tab lists: "Main" (STRIKER) or "Support" (SPECIAL).
     pub grid_kind: Option<&'static str>,
+    /// The furniture cards on screen that have students (cafe furniture view).
+    pub furniture: Vec<FurnitureCard>,
 }
 
 impl Observation {
     pub fn new(scene: Scene) -> Observation {
-        Observation { scene, mission: None, cards: Vec::new(), squad: Vec::new(), grid_kind: None }
+        Observation { scene, mission: None, cards: Vec::new(), squad: Vec::new(), grid_kind: None, furniture: Vec::new() }
     }
 
     /// The 빠른 편성 popup is up but its grid shows no names (compact view).
