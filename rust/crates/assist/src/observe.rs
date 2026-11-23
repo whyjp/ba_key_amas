@@ -36,22 +36,28 @@ impl Observation {
     }
 }
 
+/// A frame with at most this many text boxes, right after the main menu, is the idle main menu.
+const IDLE_MAX_BOXES: usize = 1;
+
 pub struct Observer<'a> {
     ocr: &'a dyn Ocr,
     students: &'a [StudentBrief],
     tracker: MissionTracker,
     squad: Vec<i64>,
+    /// The last screen that was recognised (the idle lobby is told from it: it has no text of its own).
+    last: Scene,
 }
 
 impl<'a> Observer<'a> {
     pub fn new(ocr: &'a dyn Ocr, students: &'a [StudentBrief]) -> Observer<'a> {
-        Observer { ocr, students, tracker: MissionTracker::default(), squad: Vec::new() }
+        Observer { ocr, students, tracker: MissionTracker::default(), squad: Vec::new(), last: Scene::Unknown }
     }
 
     /// Forget the mission and the squad (the game was closed: what was known is not true any more).
     pub fn forget(&mut self) {
         self.tracker = MissionTracker::default();
         self.squad.clear();
+        self.last = Scene::Unknown;
     }
 
     /// `boxes`: the frame's free-text OCR. `fallback`: the screen to assume when the text
@@ -60,6 +66,13 @@ impl<'a> Observer<'a> {
         let mut scene = classify(boxes, None);
         if scene == Scene::Unknown {
             scene = fallback;
+        }
+        // After the main menu the game hides every menu when the player is idle: art and no text.
+        if scene == Scene::Unknown && boxes.len() <= IDLE_MAX_BOXES && matches!(self.last, Scene::Lobby | Scene::LobbyIdle) {
+            scene = Scene::LobbyIdle;
+        }
+        if scene != Scene::Unknown {
+            self.last = scene;
         }
         let mission = self.tracker.update(scene, boxes).cloned();
         // A squad belongs to the mission or edit session in progress: leaving for a screen that
@@ -143,6 +156,56 @@ impl BattleGate {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct NoOcr;
+    impl Ocr for NoOcr {
+        fn boxes(&self, _: &RgbImage) -> anyhow::Result<Vec<TextBox>> {
+            Ok(Vec::new())
+        }
+        fn line(&self, _: &RgbImage) -> anyhow::Result<(String, f32)> {
+            Ok((String::new(), 0.0))
+        }
+        fn choose(&self, _: &RgbImage, _: &[String]) -> anyhow::Result<(usize, Vec<f32>)> {
+            Ok((0, Vec::new()))
+        }
+    }
+
+    fn boxes_of(name: &str) -> Vec<TextBox> {
+        let path = format!("{}/../../../fixtures/screens/{name}.boxes.txt", env!("CARGO_MANIFEST_DIR"));
+        std::fs::read_to_string(path)
+            .unwrap()
+            .lines()
+            .filter_map(|l| {
+                let (c, text) = l.split_once('\t')?;
+                let n: Vec<f32> = c.split(',').filter_map(|v| v.parse().ok()).collect();
+                (n.len() == 4).then(|| TextBox { x0: n[0], y0: n[1], x1: n[2], y1: n[3], text: text.to_string(), score: 1.0 })
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_main_menu_that_hides_itself_when_idle_is_still_the_main_menu() {
+        let ocr = NoOcr;
+        let mut o = Observer::new(&ocr, &[]);
+        let img = RgbImage::new(1280, 960);
+        let (lobby, idle) = (boxes_of("lobby"), boxes_of("lobby-idle"));
+        assert!(idle.is_empty() && !lobby.is_empty(), "fixtures: the idle screen has no text, the menu has");
+        // with no menu seen before, a text-less frame is just unknown (a cutscene, a loading screen)
+        assert_eq!(o.observe(&img, &idle, Scene::Unknown).scene, Scene::Unknown);
+        assert_eq!(o.observe(&img, &lobby, Scene::Unknown).scene, Scene::Lobby);
+        assert_eq!(o.observe(&img, &idle, Scene::Unknown).scene, Scene::LobbyIdle);
+        assert_eq!(o.observe(&img, &idle, Scene::Unknown).scene, Scene::LobbyIdle, "stays while the art is shown");
+        // a click brings the menu back
+        assert_eq!(o.observe(&img, &lobby, Scene::Unknown).scene, Scene::Lobby);
+        // after another screen is recognised, an empty frame is not the idle menu
+        o.observe(&img, &lobby, Scene::StudentList);
+        o.observe(&img, &[], Scene::StudentList);
+        assert_eq!(o.observe(&img, &idle, Scene::Unknown).scene, Scene::Unknown);
+        // forgetting the game forgets the menu
+        o.observe(&img, &lobby, Scene::Unknown);
+        o.forget();
+        assert_eq!(o.observe(&img, &idle, Scene::Unknown).scene, Scene::Unknown);
+    }
 
     #[test]
     fn two_readings_in_a_row_enter_and_leave() {

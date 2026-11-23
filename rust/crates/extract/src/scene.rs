@@ -14,6 +14,8 @@ use regex::Regex;
 pub enum Scene {
     /// Main menu.
     Lobby,
+    /// The main menu after a while without input: the game hides every menu, art only. A click brings them back.
+    LobbyIdle,
     /// 업무: the hub that leads to 임무, 현상수배, 총력전, ...
     WorkHub,
     /// 임무: the list of one area's missions (Normal / Hard tabs).
@@ -45,6 +47,7 @@ impl Scene {
     pub fn label(self) -> &'static str {
         match self {
             Scene::Lobby => "메인 메뉴",
+            Scene::LobbyIdle => "메인 메뉴 (대기)",
             Scene::WorkHub => "업무",
             Scene::MissionList => "임무 선택",
             Scene::DungeonSelect => "의뢰 선택",
@@ -248,7 +251,7 @@ impl MissionTracker {
                 self.place = place_from_list(boxes).or_else(|| self.place.take());
             }
             // back at a place from which another mission is picked (or none): forget
-            Scene::DungeonSelect | Scene::MissionList | Scene::WorkHub | Scene::Lobby | Scene::StudentList | Scene::StudentProfile => {
+            Scene::DungeonSelect | Scene::MissionList | Scene::WorkHub | Scene::Lobby | Scene::LobbyIdle | Scene::StudentList | Scene::StudentProfile => {
                 self.mission = None;
                 self.place = None;
             }

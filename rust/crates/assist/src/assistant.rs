@@ -381,6 +381,9 @@ impl<'a, S: Surface> Assistant<'a, S> {
         let mut rows = vec![Row::Info { label: "게임".into(), value: if self.game_present { "연결됨" } else { "대기 중" }.into() }];
         rows.extend(outside);
         let icons_wanted = self.widgets.iter().any(|w| w.kind() == Kind::Marks && self.settings.effective(w.id()) != Placement::Off);
+        if obs.scene == Scene::LobbyIdle {
+            rows.push(Row::Note("메뉴가 숨겨졌습니다. 화면을 한 번 클릭하면 메뉴가 돌아옵니다".into()));
+        }
         if obs.grid_without_names() && icons_wanted {
             rows.push(Row::Note("학생 이름이 보이는 보기(목록 오른쪽 위 버튼)에서 아이콘이 표시됩니다".into()));
         }
