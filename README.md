@@ -15,6 +15,9 @@ target/release/baocr --scan-arrows --from-first --fast --out scan             # 
 target/release/baocr --reextract scan [--ids 003,007]                         # retry from saved frames, no game input
 target/release/baocr --watch --out db                                         # passive background updater
 cargo run -p baocr-namedict                                                   # refresh the dictionary after a patch
+cargo run -p baocr-wikidb --release                                           # build ../wikidb/wiki.db (missions, enemies, students)
+target/release/baocr --assist                                                 # guide card beside the game window (no input)
+target/release/baocr --learn shots                                            # save every new screen + its text while you play (no input)
 ```
 
 Build output goes to `CARGO_TARGET_DIR` (use a drive with space; C: was nearly full).
@@ -28,10 +31,24 @@ pin, role and weapon stars (all 106), and reads the level of the 67 students
 the Go/Tesseract path left empty. Known gap: equipment item names are only
 verified for tier 4 (icon catalog); Go and Rust disagree on tier 5/6 slots.
 
+## Guide card (`--assist`)
+
+A passive assistant: it only takes screenshots (no clicks, keys or scrolls). It
+recognises the screen from the text OCR reads (main menu, 업무, 임무 list, 임무
+정보 popup, hex map, 편성, 현상수배 / 특별의뢰 / 학원교류회 lists, student list and
+profile), remembers the mission shown on the 임무 정보 popup (the hex map and the
+squad screen do not name it), and draws a card **beside** the game window (right,
+else left; never on it) with the screen, the mission, its terrain, the enemies'
+attack and armor types and the student attack types that do best against them.
+The card window is click-through and excluded from screen capture; if the OS
+cannot exclude it, it is not shown. Mission data comes from the wiki DB
+(`wikidb/schema.sql`, built by `baocr-wikidb` from SchaleDB's Global/Korean data).
+`wiki.db` is a local build artefact, not redistributed.
+
 Workspace crates: `core` (schema, OCR trait), `names`, `pixels`, `equipment`,
 `export` (CSV/HTML/store/index), `ocr` (engine), `extract` (profile + menu pass),
 `pipeline` (async workers, re-extraction), `hcu` (game control, scan loop, watcher),
-`cli`, `namedict`. Module contracts: `rust/PORTING.md`.
+`cli`, `namedict`, `wikidb` (reference DB: build + read API), `overlay` (banner and guide card). Module contracts: `rust/PORTING.md`.
 
 The Go program below is kept only until the Rust scan and watcher have been
 verified live against the game; it is superseded.
@@ -47,6 +64,9 @@ verified live against the game; it is superseded.
   OCR models live in `models/` (see `models/README.md`).
 - Tested live: full-roster scan (106 students, 7.4 min fast / ~26 s per student
   with the menu pass), passive `--watch`, window auto-detection.
+- Guide card verified live for campaign 19-3 (임무 정보, 임무 지도, 편성) and a 현상수배
+  stage popup; 특별의뢰 and 학원교류회 screens are recognised from recorded frames only.
+  Event missions, 총력전 and 종합전술시험 are not covered yet.
 - Not verified: 3-digit bond rank (no sample), 능력개방 unlocked state, equipment
   icons beyond tier 4, a live level-up appearing in `--watch`.
 
