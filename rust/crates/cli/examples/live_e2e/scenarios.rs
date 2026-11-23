@@ -15,7 +15,7 @@ const BACK: (i32, i32) = (55, 38);
 const HOME: (i32, i32) = (1235, 22);
 
 const HUB: &str = "업무";
-const RAID_SELECT: &str = "총력전 선택";
+const RAID_SELECT: &str = "총력전 선택|총력전 (집계 중)";
 const MOCK_LIST: &str = "모의 총력전 보스";
 const ROOM: &str = "방 정보";
 const MOCK_FORM: &str = "모의 총력전 편성";
@@ -300,7 +300,7 @@ fn step(rig: &mut Rig, s: &Step) -> Result<()> {
     let missing: Vec<&&str> = s.truth.iter().filter(|w| !text.contains(&norm(w))).collect();
     rig.record("nav", &format!("{}: independent OCR of the screen has {:?}", s.name, s.truth), if missing.is_empty() { "all present".to_string() } else { format!("missing {missing:?} ({})", path.display()) }, missing.is_empty());
     let scene_now = rig.scene();
-    rig.record("nav", &format!("{}: scene stays '{}' after settling", s.name, s.to), scene_now.clone(), scene_now == s.to);
+    rig.record("nav", &format!("{}: scene stays '{}' after settling", s.name, s.to), scene_now.clone(), scene_is(&scene_now, s.to));
     Ok(())
 }
 
@@ -331,8 +331,10 @@ fn raid_card_facts(rig: &mut Rig, wiki: &Wiki, tag: &str, prefix: &str) {
 }
 
 fn nav(rig: &mut Rig, wiki: &Wiki) -> Result<()> {
-    step(rig, &Step { name: "hub to 총력전", at: (870, 575), from: HUB, to: RAID_SELECT, truth: &["BattleSelect", "총력전"], title_prefix: "" })?;
-    raid_card_facts(rig, wiki, "총력전 선택", "총력전");
+    step(rig, &Step { name: "hub to 총력전", at: (870, 575), from: HUB, to: RAID_SELECT, truth: &["총력전"], title_prefix: "" })?;
+    if rig.scene() == "총력전 선택" {
+        raid_card_facts(rig, wiki, "총력전 선택", "총력전");
+    }
     step(rig, &Step { name: "총력전 to 모의 총력전", at: (97, 200), from: RAID_SELECT, to: MOCK_LIST, truth: &["보스선택", "모의총력전"], title_prefix: "" })?;
     raid_card_facts(rig, wiki, "모의 보스 1", "모의 총력전");
     // cycle bosses with the right arrow: the card's boss must change each time and match the DB

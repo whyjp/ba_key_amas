@@ -15,6 +15,12 @@ pub fn unix_ms() -> u128 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis())
 }
 
+/// Whether the add-on's scene is the expected one; `expected` may list alternatives separated by `|`
+/// (the season of 총력전 shows either its difficulty rows or "집계 중" depending on the day).
+pub fn scene_is(actual: &str, expected: &str) -> bool {
+    expected.split('|').any(|e| e == actual)
+}
+
 pub fn nap(ms: u64) {
     std::thread::sleep(Duration::from_millis(ms));
 }
@@ -191,7 +197,7 @@ impl Rig {
         let d = self.fresh_dump()?;
         let scene = d["main"]["scene"].as_str().unwrap_or("").to_string();
         let title = d["main"]["title"].as_str().unwrap_or("").to_string();
-        if !expect.is_empty() && scene != expect {
+        if !expect.is_empty() && !scene_is(&scene, expect) {
             bail!("refusing to click ({x},{y}) for '{why}': the add-on says '{scene}', expected '{expect}'");
         }
         if let Some(what) = Self::forbidden(&scene, &title, x, y) {
@@ -269,7 +275,7 @@ impl Rig {
         while unix_ms() < end {
             if let Ok(d) = self.dump() {
                 let changed = d["changed_unix_ms"].as_u64().unwrap_or(0) as u128;
-                if d["main"]["scene"].as_str() == Some(scene) && changed >= since {
+                if d["main"]["scene"].as_str().is_some_and(|s| scene_is(s, scene)) && changed >= since {
                     return Some(changed.saturating_sub(since) as f64);
                 }
             }
@@ -282,7 +288,7 @@ impl Rig {
     pub fn wait_for_scene_now(&self, scene: &str, timeout_ms: u64) -> bool {
         let end = unix_ms() + timeout_ms as u128;
         while unix_ms() < end {
-            if self.scene() == scene {
+            if scene_is(&self.scene(), scene) {
                 return true;
             }
             nap(50);
