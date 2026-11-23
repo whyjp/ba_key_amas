@@ -21,3 +21,7 @@ dist-go/
 models/
 rust/target/
 rust/Cargo.lock.bak
+
+# wiki DB is built locally from public data and not redistributed
+wikidb/wiki.db
+wikidb/wiki.db.tmp
