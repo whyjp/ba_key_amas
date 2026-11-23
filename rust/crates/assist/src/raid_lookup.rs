@@ -11,7 +11,7 @@
 use anyhow::Result;
 use baocr_extract::raid::{RaidRef, DIFFICULTIES};
 use baocr_extract::scene::RaidMode;
-use baocr_wikidb::{pick_season, MissionBrief, RaidCandidate, RaidDifficulty, RaidKind, SeasonMode, SeasonPick, Wiki};
+use baocr_wikidb::{pick_season, MissionBrief, RaidCandidate, RaidDifficulty, RaidKind, SeasonMode, SeasonPick, Tally, Wiki};
 
 const LABEL_ARMOR: &str = "ArmorType";
 const LABEL_ATTACK: &str = "BulletType";
@@ -56,6 +56,8 @@ pub struct RaidFound {
     /// The mission as the matchup tables read it: the screen's difficulty, else the raid's first one. The boss's
     /// armor, attack type and the level are the screen's where it names them.
     pub brief: MissionBrief,
+    /// The lead enemy's attack type of each difficulty, labelled as the game labels it ("Insane", or the position when it has no name).
+    pub attack_by_difficulty: Vec<(String, Tally)>,
     /// The total assault's season running now (or nearest), for its terrain.
     pub season: Option<SeasonPick>,
     pub disagreements: Vec<Disagreement>,
@@ -141,7 +143,14 @@ pub fn lookup(wiki: &Wiki, raid: &RaidRef, now: i64) -> Result<RaidLookup> {
         // the title would name the first difficulty the brief happens to be built from
         brief.name = chosen.name.clone();
     }
-    Ok(RaidLookup::Found(Box::new(RaidFound { raid: chosen, picked_by_armor, difficulty: on_screen, difficulties, brief, season, disagreements, unknown_words })))
+    let attack_by_difficulty = difficulties
+        .iter()
+        .filter_map(|d| {
+            let code = d.boss.as_ref()?.bullet_type.clone()?;
+            Some((d.label.clone().unwrap_or_else(|| d.idx.to_string()), Tally { ko: wiki.label(LABEL_ATTACK, &code), code, n: 0 }))
+        })
+        .collect();
+    Ok(RaidLookup::Found(Box::new(RaidFound { raid: chosen, picked_by_armor, difficulty: on_screen, difficulties, brief, attack_by_difficulty, season, disagreements, unknown_words })))
 }
 
 #[cfg(test)]
@@ -273,6 +282,7 @@ mod tests {
         // the same boss on the list (no difficulty): titled by the boss alone, not by the first difficulty it was built from
         let list = found(lookup(&w, &mock_boss_from_list(&boxes("raid-mock-m00")).unwrap(), 0).unwrap());
         assert_eq!((list.difficulty, list.brief.name.as_str(), list.difficulties.len()), (None, "시로&쿠로", 2));
+        assert_eq!(list.attack_by_difficulty.iter().map(|(l, t)| (l.as_str(), t.ko.as_str())).collect::<Vec<_>>(), vec![("Normal", "일반"), ("Insane", "폭발")]);
         // a difficulty the wiki does not have is said so, and not mapped to another
         let lunatic = found(lookup(&w, &RaidRef { difficulty: Some(7), ..room }, 0).unwrap());
         assert_eq!((lunatic.difficulty, lunatic.disagreements[0].what), (None, "난이도"));

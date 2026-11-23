@@ -1,17 +1,19 @@
 //! The widgets the assistant offers.
 use crate::matchup::{all_attack_types_by_edge, attack_types_by_edge, defense_matrix, fit_entry, grade_of, legend, offense_matrix, striker_armors};
-use crate::widget::{is_mission_screen, Context, Kind, Lookup, Output, Widget, WidgetId};
-use baocr_extract::scene::Scene;
+use crate::raid_lookup::{RaidFound, RaidLookup};
+use crate::widget::{is_mission_screen, is_raid_screen, Context, Kind, Lookup, Output, Widget, WidgetId};
+use baocr_extract::raid::{RaidRef, DIFFICULTIES};
+use baocr_extract::scene::{RaidMode, Scene};
 use baocr_extract::CardName;
 use baocr_overlay::{Chip, Frame, Icon, Mark, Row, Tone};
-use baocr_wikidb::{evaluate, rate, FormationScore, MissionBrief, Rating, StudentBrief, Tally, TypeTable, Verdict, Wiki};
+use baocr_wikidb::{evaluate, rate, FormationScore, MissionBrief, Rating, SeasonRelation, StudentBrief, Tally, TypeTable, Verdict, Wiki};
 
 fn chips(list: &[Tally], suffix: &str) -> Vec<Chip> {
     list.iter().map(|t| Chip { text: format!("{} {}{suffix}", t.ko, t.n), tone: Tone::from_code(&t.code) }).collect()
 }
 
 fn on_formation_screen(scene: Scene) -> bool {
-    matches!(scene, Scene::Squad | Scene::QuickFormation)
+    matches!(scene, Scene::Squad | Scene::QuickFormation | Scene::RaidFormation(_))
 }
 
 /// The mission's name, terrain, level and what its enemies are.
@@ -57,11 +59,113 @@ fn mission_rows(rows: &mut Vec<Row>, b: &MissionBrief, types: &TypeTable, with_t
     if let Some(l) = b.recommended_level {
         rows.push(Row::Info { label: "추천 Lv".into(), value: l.to_string() });
     }
-    rows.push(Row::Chips { label: "적 공격".into(), chips: chips(&b.attack, "") });
+    if !b.attack.is_empty() {
+        rows.push(Row::Chips { label: "적 공격".into(), chips: chips(&b.attack, "") });
+    }
     let table = with_table.then(|| offense_matrix(b, &all_attack_types_by_edge(b, types), types)).flatten();
     match table {
         Some(table) => rows.extend([table, legend()]),
         None => rows.push(Row::Chips { label: "적 방어".into(), chips: chips(&b.armor, "") }),
+    }
+}
+
+/// Said on a raid formation card: the verdict judges one party.
+const PARTY_NOTE: &str = "총력전은 최대 4개 부대(1부대~4부대)를 편성합니다. 이 판정은 마지막으로 읽은 한 부대만 기준이며, 부대 간 조합은 판단하지 않습니다";
+/// Said on a raid formation screen that names no student.
+const NO_NAMES_NOTE: &str = "편성 화면에는 학생 이름이 나오지 않습니다. 빠른 편성 창을 열면 선택한 학생을 읽어 판정합니다";
+
+/// How the difficulties attack, grouped where neighbours share a type: "Normal~Hardcore 일반".
+fn attack_ranges(found: &RaidFound) -> Vec<Chip> {
+    let mut groups: Vec<(&str, &str, &Tally)> = Vec::new();
+    for (label, tally) in &found.attack_by_difficulty {
+        match groups.last_mut() {
+            Some(last) if last.2.code == tally.code => last.1 = label,
+            _ => groups.push((label, label, tally)),
+        }
+    }
+    groups
+        .into_iter()
+        .map(|(from, to, t)| Chip { text: if from == to { format!("{from} {}", t.ko) } else { format!("{from}~{to} {}", t.ko) }, tone: Tone::from_code(&t.code) })
+        .collect()
+}
+
+/// The encounter's facts, or why they are not known. `on_formation`: the formation card shows the tables.
+pub fn raid_rows(raid: &RaidRef, found: &RaidLookup, types: &TypeTable, on_formation: bool, squad_read: bool) -> Vec<Row> {
+    let mut rows = Vec::new();
+    match found {
+        RaidLookup::Found(f) => {
+            let unrestricted = raid.mode == RaidMode::UnrestrictedRaid;
+            match (raid.difficulty, unrestricted) {
+                (Some(i), _) => rows.push(Row::Info { label: "난이도".into(), value: DIFFICULTIES[i].into() }),
+                (None, true) => rows.push(Row::Info { label: "단계".into(), value: "선택한 단계는 읽지 못합니다".into() }),
+                (None, false) => rows.push(Row::Info { label: "난이도".into(), value: "선택 전 (방 정보 창에서 표시)".into() }),
+            }
+            if f.brief.terrain.is_none() {
+                let value = if raid.terrains.is_empty() { "화면에서 읽을 수 없음".to_string() } else { format!("{} 중 선택", raid.terrains.join(" · ")) };
+                rows.push(Row::Info { label: "지형".into(), value });
+            }
+            let mut brief = f.brief.clone();
+            let attack_unknown = raid.difficulty.is_none() && !unrestricted;
+            if attack_unknown {
+                brief.attack.clear();
+            }
+            mission_rows(&mut rows, &brief, types, !on_formation);
+            if attack_unknown {
+                rows.push(Row::Chips { label: "적 공격".into(), chips: attack_ranges(f) });
+                if on_formation {
+                    let first = f.attack_by_difficulty.first().map_or("첫", |(l, _)| l.as_str());
+                    rows.push(Row::Note(format!("난이도를 읽지 못해 {first} 기준으로 판정합니다")));
+                }
+            }
+            if let Some(p) = f.season.as_ref().filter(|p| p.relation != SeasonRelation::Active) {
+                rows.push(Row::Note(format!("진행 중인 시즌이 없어 가장 가까운 시즌({})의 지형입니다", p.season.display.as_deref().unwrap_or("?"))));
+            }
+            if f.picked_by_armor {
+                rows.push(Row::Note("같은 이름의 레이드가 여럿이라 화면의 방어 타입으로 골랐습니다".into()));
+            }
+            for d in &f.disagreements {
+                rows.push(Row::Note(format!("{}: 화면 {} / 위키 {} (화면 기준으로 계산)", d.what, d.screen, d.wiki)));
+            }
+            if !f.unknown_words.is_empty() {
+                rows.push(Row::Note(format!("모르는 단어라 반영하지 못했습니다: {}", f.unknown_words.join(", "))));
+            }
+        }
+        RaidLookup::Ambiguous(candidates) => {
+            rows.push(Row::Note(format!("같은 이름의 레이드가 {}개입니다. 방어 타입이 보이는 화면(보스 선택, 단계 선택)에서 구분합니다", candidates.len())));
+        }
+        RaidLookup::NotFound => rows.push(Row::Note("위키DB에서 이 보스를 찾지 못했습니다".into())),
+        RaidLookup::None => {}
+    }
+    if on_formation && !squad_read {
+        rows.push(Row::Note(NO_NAMES_NOTE.into()));
+    }
+    rows
+}
+
+/// The raid encounter: boss, difficulty, terrain, level, what it attacks and wears, and the matchup tables.
+pub struct RaidInfo;
+
+impl Widget for RaidInfo {
+    fn id(&self) -> WidgetId {
+        WidgetId::RaidInfo
+    }
+    fn title(&self) -> &'static str {
+        "레이드 카드"
+    }
+    fn kind(&self) -> Kind {
+        Kind::Card
+    }
+    fn render(&self, cx: &Context) -> Option<Output> {
+        let scene = cx.obs.scene;
+        if !is_raid_screen(scene) {
+            return None;
+        }
+        let Some(raid) = cx.obs.raid.as_ref() else {
+            // a formation reached without the boss having been seen on the way in
+            return matches!(scene, Scene::RaidFormation(_)).then(|| Output::Card { title: scene.label().into(), rows: vec![Row::Note("보스 정보를 읽지 못했습니다. 보스 선택이나 방 정보 화면을 거치면 표시됩니다".into())] });
+        };
+        let on_formation = matches!(scene, Scene::RaidFormation(_) | Scene::QuickFormation);
+        Some(Output::Card { title: raid.display(), rows: raid_rows(raid, &cx.raid, cx.types, on_formation, cx.team().len() >= MIN_SQUAD_FOR_VERDICT) })
     }
 }
 
@@ -112,7 +216,11 @@ impl Widget for Formation {
             return None;
         }
         let score = evaluate(brief, cx.terrain(), &team, cx.students, cx.types)?;
-        Some(Output::Card { title: String::new(), rows: formation_rows(&score, brief, cx.terrain(), &team, cx.types) })
+        let mut rows = formation_rows(&score, brief, cx.terrain(), &team, cx.types);
+        if cx.obs.raid.as_ref().is_some_and(|r| r.mode != RaidMode::UnrestrictedRaid) {
+            rows.insert(0, Row::Note(PARTY_NOTE.into()));
+        }
+        Some(Output::Card { title: String::new(), rows })
     }
 }
 
@@ -229,13 +337,14 @@ impl Widget for SlotStats {
         Kind::Marks
     }
     fn render(&self, cx: &Context) -> Option<Output> {
-        (cx.obs.scene == Scene::QuickFormation).then(|| Output::Marks(slot_marks(&cx.team(), cx.brief(), cx.terrain(), cx.types)))
+        // the strip's place on a raid's popup is not known: no icons rather than icons on the wrong things
+        (cx.obs.scene == Scene::QuickFormation && cx.obs.raid.is_none()).then(|| Output::Marks(slot_marks(&cx.team(), cx.brief(), cx.terrain(), cx.types)))
     }
 }
 
 /// All widgets, in the order their cards stack.
 pub fn all() -> Vec<Box<dyn Widget>> {
-    vec![Box::new(MissionInfo), Box::new(Formation), Box::new(PortraitIcons), Box::new(SlotStats)]
+    vec![Box::new(MissionInfo), Box::new(RaidInfo), Box::new(Formation), Box::new(PortraitIcons), Box::new(SlotStats)]
 }
 
 #[cfg(test)]

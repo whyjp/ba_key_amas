@@ -5,6 +5,7 @@
 //! Where an output ends up (beside the game, inside it, nowhere) is not the widget's
 //! business: that is the settings' and the assistant's.
 use crate::observe::Observation;
+use crate::raid_lookup::RaidLookup;
 use baocr_extract::scene::Scene;
 use baocr_overlay::{Mark, Row};
 use baocr_wikidb::{MissionBrief, StudentBrief, TypeTable};
@@ -18,10 +19,11 @@ pub enum WidgetId {
     Formation,
     PortraitIcons,
     SlotStats,
+    RaidInfo,
 }
 
 impl WidgetId {
-    pub const ALL: [WidgetId; 4] = [WidgetId::MissionInfo, WidgetId::Formation, WidgetId::PortraitIcons, WidgetId::SlotStats];
+    pub const ALL: [WidgetId; 5] = [WidgetId::MissionInfo, WidgetId::RaidInfo, WidgetId::Formation, WidgetId::PortraitIcons, WidgetId::SlotStats];
 
     /// The id as it appears in button events ("place:formation").
     pub fn key(self) -> &'static str {
@@ -30,6 +32,7 @@ impl WidgetId {
             WidgetId::Formation => "formation",
             WidgetId::PortraitIcons => "portrait_icons",
             WidgetId::SlotStats => "slot_stats",
+            WidgetId::RaidInfo => "raid_info",
         }
     }
 
@@ -67,6 +70,8 @@ pub enum Lookup {
 pub struct Context<'a> {
     pub obs: &'a Observation,
     pub lookup: Lookup,
+    /// How the raid encounter in play resolves in the wiki (None outside the raid modes).
+    pub raid: RaidLookup,
     pub students: &'a [StudentBrief],
     pub types: &'a TypeTable,
 }
@@ -74,15 +79,14 @@ pub struct Context<'a> {
 impl Context<'_> {
     /// The mission's terrain code (Street | Outdoor | Indoor), when it is known.
     pub fn terrain(&self) -> Option<&str> {
-        match &self.lookup {
-            Lookup::Found { brief, .. } => brief.terrain.as_ref().map(|t| t.code.as_str()),
-            _ => None,
-        }
+        self.brief().and_then(|b| b.terrain.as_ref()).map(|t| t.code.as_str())
     }
 
+    /// What the squad is judged against: the mission in play, else the raid encounter in play.
     pub fn brief(&self) -> Option<&MissionBrief> {
-        match &self.lookup {
-            Lookup::Found { brief, .. } => Some(brief),
+        match (&self.lookup, &self.raid) {
+            (Lookup::Found { brief, .. }, _) => Some(brief),
+            (_, RaidLookup::Found(found)) => Some(&found.brief),
             _ => None,
         }
     }
@@ -96,6 +100,14 @@ impl Context<'_> {
 /// Screens that belong to a picked mission.
 pub fn is_mission_screen(scene: Scene) -> bool {
     matches!(scene, Scene::MissionInfo | Scene::EnemyInfo | Scene::MissionMap | Scene::Squad | Scene::QuickFormation)
+}
+
+/// Screens of the raid-like modes that belong to one encounter (the 종합전술시험 and 대결전 screens do not).
+pub fn is_raid_screen(scene: Scene) -> bool {
+    matches!(
+        scene,
+        Scene::RaidSelect | Scene::MockRaidBosses | Scene::RaidRoomInfo | Scene::RaidFormation(_) | Scene::UnrestrictedRaidSelect | Scene::UnrestrictedRaidStages | Scene::UnrestrictedRaidStage | Scene::QuickFormation
+    )
 }
 
 pub trait Widget {
