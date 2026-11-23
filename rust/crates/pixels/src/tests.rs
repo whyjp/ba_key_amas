@@ -225,3 +225,33 @@ fn quick_formation_tab_is_read_from_the_red_fill() {
     let lobby = image::open(format!("{}/../../../fixtures/lobby-main-menu.png", env!("CARGO_MANIFEST_DIR"))).unwrap().to_rgb8();
     assert_eq!(quick_tab_is_striker(&lobby), None);
 }
+
+#[test]
+fn the_fast_frame_key_tells_views_apart_like_the_slow_one() {
+    let dir = format!("{}/../../../fixtures/screens", env!("CARGO_MANIFEST_DIR"));
+    let names = ["quick-formation", "quick-formation-live-a", "quick-formation-scrolled-a", "quick-formation-scrolled-b", "lobby-idle", "work-hub-full"];
+    let frames: Vec<RgbImage> = names.iter().map(|n| image::open(format!("{dir}/{n}.png")).unwrap().to_rgb8()).collect();
+    for (i, a) in frames.iter().enumerate() {
+        assert_eq!(frame_distance(&fast_frame_key(a), &fast_frame_key(a)), 0.0);
+        for (j, b) in frames.iter().enumerate().skip(i + 1) {
+            let (slow, fast) = (frame_distance(&frame_key(a), &frame_key(b)), frame_distance(&fast_frame_key(a), &fast_frame_key(b)));
+            assert!((slow - fast).abs() < 1.0, "{} vs {}: slow {slow:.2}, fast {fast:.2}", names[i], names[j]);
+            // the settle threshold (1.5) must fall on the same side
+            assert_eq!(slow < 1.5, fast < 1.5, "{} vs {}: slow {slow:.2}, fast {fast:.2}", names[i], names[j]);
+        }
+    }
+}
+
+#[test]
+fn the_fast_frame_key_is_the_block_mean() {
+    let mut img = RgbImage::from_pixel(1280, 960, Rgb([10, 20, 30]));
+    for y in 0..30 {
+        for x in 0..40 {
+            img.put_pixel(x, y, Rgb([200, 100, 0]));
+        }
+    }
+    let k = fast_frame_key(&img);
+    assert_eq!(&k[0..3], &[200, 100, 0]);
+    assert_eq!(&k[3..6], &[10, 20, 30]);
+    assert_eq!(fast_frame_key(&RgbImage::new(10, 10)), [0u8; 3072], "a frame too small to key is blank, not a panic");
+}

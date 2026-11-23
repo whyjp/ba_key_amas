@@ -15,7 +15,7 @@ use baocr_extract::scene::Scene;
 use baocr_extract::Options;
 use baocr_hcu::{check_aspect, detect_region, game_capture, parse_frame_region, screen_kind, Hcu, HcuSession, Screen};
 use baocr_overlay::{set_escape_target, BannerState, Overlay};
-use baocr_pixels::{frame_distance, frame_key, looks_like_battle};
+use baocr_pixels::{fast_frame_key, frame_distance, looks_like_battle};
 use baocr_wikidb::Wiki;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -27,8 +27,9 @@ use std::time::{Duration, Instant, SystemTime};
 const STILL: f64 = 1.5;
 /// Re-detect the game window this often (loops), so moving or resizing it is followed.
 const REGION_EVERY: u32 = 25;
-/// Pause between loops while a view is changing or not read yet: short, to read it soon.
-const SETTLING_PAUSE: Duration = Duration::from_millis(60);
+/// Pause between loops while a view is changing or not read yet: short, to read it soon (a capture
+/// takes 85 to 125 ms already, so 20 ms more costs little and a second matching frame comes sooner).
+const SETTLING_PAUSE: Duration = Duration::from_millis(20);
 /// Pause once the view is read and still the same: nothing to do but notice a change.
 const IDLE_PAUSE: Duration = Duration::from_millis(300);
 /// Loops the view must have stayed the same before the slow pause applies.
@@ -197,7 +198,7 @@ pub fn run(ocr: Arc<dyn Ocr>, session: &HcuSession, region_spec: &str, wiki_path
             continue;
         }
         let (key, moving) = prof.time("key", || {
-            let key = frame_key(&img);
+            let key = fast_frame_key(&img);
             let moving = prev.as_ref().map_or(true, |p| frame_distance(p, &key) >= STILL);
             (key, moving)
         });
