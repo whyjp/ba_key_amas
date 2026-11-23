@@ -112,4 +112,4 @@ The earlier extraction-era notes (Go and Tesseract, the OCR benchmark, bond rank
 
 [adr/README.md](adr/README.md) lists them. Older notes: [hcu-native.md](hcu-native.md),
 [raid-data.md](raid-data.md), [card-dock.md](card-dock.md), [speed-research.md](speed-research.md),
-[enemy-weighting.md](enemy-weighting.md) (on the weights branch until merged).
+[enemy-weighting.md](enemy-weighting.md).

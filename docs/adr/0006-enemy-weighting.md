@@ -1,7 +1,6 @@
 # 0006 Enemy armor and attack mix weighted by HP
 
-Status: Pending. Implemented on branch `wt-weights` (schema v4); merge after the live e2e run.
-Full research and sources: `docs/enemy-weighting.md` on that branch.
+Status: Accepted (merged, schema v4). Full research and sources: [enemy-weighting.md](../enemy-weighting.md).
 
 ## Context
 Counting enemies per armor type treats a one-HP minion and a boss alike. A raid boss with parts (the drum

@@ -35,7 +35,7 @@
 <g><rect x="240" y="27" width="196" height="58" rx="8" fill="#1f3a63"/>
 <text x="338" y="49" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">baocr</text>
 <text x="338" y="67" fill="#dbe4f0" font-size="10.5" text-anchor="middle">add-on loop, scan, doctor (bin)</text>
-<text x="428" y="79" fill="#b7c4d6" font-size="9" text-anchor="end">724 lines</text></g>
+<text x="428" y="79" fill="#b7c4d6" font-size="9" text-anchor="end">975 lines</text></g>
 <g><rect x="458" y="27" width="196" height="58" rx="8" fill="#777777"/>
 <text x="556" y="49" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">namedict</text>
 <text x="556" y="67" fill="#dbe4f0" font-size="10.5" text-anchor="middle">tool: builds the name dictionary</text>
@@ -43,11 +43,11 @@
 <g><rect x="131" y="139" width="196" height="58" rx="8" fill="#2f6f9f"/>
 <text x="229" y="161" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">assist</text>
 <text x="229" y="179" fill="#dbe4f0" font-size="10.5" text-anchor="middle">observer, widgets, assistant, settings</text>
-<text x="319" y="191" fill="#b7c4d6" font-size="9" text-anchor="end">2881 lines</text></g>
+<text x="319" y="191" fill="#b7c4d6" font-size="9" text-anchor="end">3062 lines</text></g>
 <g><rect x="349" y="139" width="196" height="58" rx="8" fill="#8a5a1c"/>
 <text x="447" y="161" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">hcu</text>
 <text x="447" y="179" fill="#dbe4f0" font-size="10.5" text-anchor="middle">desktop control, scan loops, guards</text>
-<text x="537" y="191" fill="#b7c4d6" font-size="9" text-anchor="end">4016 lines</text></g>
+<text x="537" y="191" fill="#b7c4d6" font-size="9" text-anchor="end">4004 lines</text></g>
 <g><rect x="567" y="139" width="196" height="58" rx="8" fill="#6b3f8f"/>
 <text x="665" y="161" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">pipeline</text>
 <text x="665" y="179" fill="#dbe4f0" font-size="10.5" text-anchor="middle">async extraction workers</text>
@@ -59,15 +59,15 @@
 <g><rect x="240" y="251" width="196" height="58" rx="8" fill="#6b3f8f"/>
 <text x="338" y="273" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">extract</text>
 <text x="338" y="291" fill="#dbe4f0" font-size="10.5" text-anchor="middle">profile reading, scenes, raid tracker</text>
-<text x="428" y="303" fill="#b7c4d6" font-size="9" text-anchor="end">1717 lines</text></g>
+<text x="428" y="303" fill="#b7c4d6" font-size="9" text-anchor="end">1729 lines</text></g>
 <g><rect x="458" y="251" width="196" height="58" rx="8" fill="#2f6f9f"/>
 <text x="556" y="273" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">overlay</text>
 <text x="556" y="291" fill="#dbe4f0" font-size="10.5" text-anchor="middle">layered windows, card, dock, tray</text>
-<text x="646" y="303" fill="#b7c4d6" font-size="9" text-anchor="end">4461 lines</text></g>
+<text x="646" y="303" fill="#b7c4d6" font-size="9" text-anchor="end">4518 lines</text></g>
 <g><rect x="676" y="251" width="196" height="58" rx="8" fill="#3f7f4f"/>
 <text x="774" y="273" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">wikidb</text>
 <text x="774" y="291" fill="#dbe4f0" font-size="10.5" text-anchor="middle">SchaleDB collector, DB, lookups</text>
-<text x="864" y="303" fill="#b7c4d6" font-size="9" text-anchor="end">2282 lines</text></g>
+<text x="864" y="303" fill="#b7c4d6" font-size="9" text-anchor="end">2580 lines</text></g>
 <g><rect x="22" y="363" width="196" height="58" rx="8" fill="#6b3f8f"/>
 <text x="120" y="385" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">equipment</text>
 <text x="120" y="403" fill="#dbe4f0" font-size="10.5" text-anchor="middle">equipment icon reading</text>
