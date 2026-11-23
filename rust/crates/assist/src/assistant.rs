@@ -506,6 +506,8 @@ mod tests {
              INSERT INTO stage VALUES (10,'Campaign',NULL,19,3,0,'설원 지구 제2 지역','Outdoor',85,NULL,NULL,NULL,1);
              INSERT INTO stage_formation VALUES (100,10,0,'Grade1',1,1);
              INSERT INTO formation_enemy VALUES (100,0,1);
+             INSERT INTO formation_enemy_weight VALUES (100,0,1,1,100,100,NULL);
+             INSERT INTO raid_difficulty_enemy_weight VALUES ('Raid',3,0,0,17,1,100,100,NULL),('Raid',3,5,0,80,1,100,100,NULL),('MultiFloorRaid',1000000,0,0,25,1,100,100,NULL);
              INSERT INTO student VALUES (1,'a','a','신비학생','','',3,'Main','','','Mystic','HeavyArmor',1,4,1,'',1,1,'{}'),(2,'b','b','관통학생','','',3,'Main','','','Pierce','HeavyArmor',1,0,1,'',1,1,'{}'),
                                         (3,'c','c','스페셜학생','','',3,'Support','','','Mystic','HeavyArmor',1,2,1,'',1,1,'{}');",
         )
@@ -536,7 +538,7 @@ mod tests {
 
     fn raid_obs(scene: Scene, file_mode: baocr_extract::scene::RaidMode, difficulty: Option<usize>, squad: Vec<i64>) -> Observation {
         let boss = if file_mode == baocr_extract::scene::RaidMode::UnrestrictedRaid { "세트의 분노" } else { "시로&쿠로" };
-        let raid = baocr_extract::raid::RaidRef { mode: file_mode, boss: boss.into(), difficulty, armors: vec!["특수장갑".into()], attack: None, level: Some(17), terrains: vec!["시가지".into(), "실내".into()] };
+        let raid = baocr_extract::raid::RaidRef { mode: file_mode, boss: boss.into(), difficulty, words: baocr_extract::raid::RaidScreenWords { armors: vec!["특수장갑".into()], attack: None, level: Some(17) }, terrains: vec!["시가지".into(), "실내".into()] };
         Observation { raid: Some(raid), squad, ..Observation::new(scene) }
     }
 

@@ -11,7 +11,7 @@ pub use formation::{
     Verdict,
 };
 pub use raid::{pick_season, RaidBoss, RaidCandidate, RaidDifficulty, RaidKind, RaidSeason, SeasonMode, SeasonPick, SeasonRelation};
-pub use wiki::{DecodedLabels, FurnitureBrief, FurnitureStudent, MissionBrief, StudentBrief, Tally, Wiki};
+pub use wiki::{DecodedLabels, FurnitureBrief, FurnitureStudent, MissionBrief, Share, StudentBrief, Tally, Wiki};
 
 use anyhow::{Context, Result};
 use rusqlite::Connection;

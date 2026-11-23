@@ -222,7 +222,7 @@ mod tests {
         let mut see = |file: &str| o.observe(&img, &boxes_of(file), Scene::Unknown);
         let list = see("raid-mock-m11");
         assert_eq!((list.scene, list.mission.is_none()), (Scene::MockRaidBosses, true));
-        assert_eq!(list.raid.as_ref().map(|r| (r.boss.as_str(), r.armors.len())), Some(("드럼통게", 2)));
+        assert_eq!(list.raid.as_ref().map(|r| (r.boss.as_str(), r.words.armors.len())), Some(("드럼통게", 2)));
         let room = see("raid-mock-room-info");
         assert_eq!(room.raid.as_ref().map(|r| (r.boss.as_str(), r.difficulty)), Some(("시로&쿠로", Some(0))), "another boss's popup replaces the list's");
         let formation = see("raid-formation-empty");

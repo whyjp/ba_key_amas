@@ -1,16 +1,20 @@
 //! The widgets the assistant offers.
-use crate::matchup::{all_attack_types_by_edge, attack_types_by_edge, defense_matrix, fit_entry, grade_of, legend, offense_matrix, striker_armors};
+use crate::matchup::{all_attack_types_by_edge, attack_types_by_edge, defense_matrix, fit_entry, grade_of, legend, offense_matrix, share_labels, striker_armors, terrain_ko, tidy, MAX_CHIPS};
 use crate::raid_lookup::{RaidFound, RaidLookup};
 use crate::widget::{is_mission_screen, is_raid_screen, Context, Kind, Lookup, Output, Widget, WidgetId};
 use baocr_extract::raid::{RaidRef, DIFFICULTIES};
 use baocr_extract::scene::{RaidMode, Scene};
 use baocr_extract::CardName;
 use baocr_overlay::{Chip, Frame, Icon, Mark, Row, Tone};
-use baocr_wikidb::{evaluate, rate, FormationScore, MissionBrief, Rating, SeasonRelation, StudentBrief, Tally, TypeTable, Verdict, Wiki};
+use baocr_wikidb::{evaluate, rate, FormationScore, MissionBrief, Rating, SeasonRelation, Share, StudentBrief, Tally, TypeTable, Verdict, Wiki};
 
-fn chips(list: &[Tally], suffix: &str) -> Vec<Chip> {
-    list.iter().map(|t| Chip { text: format!("{} {}{suffix}", t.ko, t.n), tone: Tone::from_code(&t.code) }).collect()
+/// The types of an encounter with their share of the enemy HP, the small ones merged into "기타".
+fn chips(list: &[Share]) -> Vec<Chip> {
+    share_labels(&tidy(list, MAX_CHIPS)).into_iter().map(|(text, code)| Chip { text, tone: code.map_or(Tone::Even, |c| Tone::from_code(&c)) }).collect()
 }
+
+/// Said under the chips: what the percentages are.
+const SHARE_NOTE: &str = "비율은 적 체력(HP) 합계에서 차지하는 몫입니다. 소환물은 제외";
 
 fn on_formation_screen(scene: Scene) -> bool {
     matches!(scene, Scene::Squad | Scene::QuickFormation | Scene::RaidFormation(_))
@@ -60,12 +64,15 @@ fn mission_rows(rows: &mut Vec<Row>, b: &MissionBrief, types: &TypeTable, with_t
         rows.push(Row::Info { label: "추천 Lv".into(), value: l.to_string() });
     }
     if !b.attack.is_empty() {
-        rows.push(Row::Chips { label: "적 공격".into(), chips: chips(&b.attack, "") });
+        rows.push(Row::Chips { label: "적 공격".into(), chips: chips(&b.attack) });
     }
     let table = with_table.then(|| offense_matrix(b, &all_attack_types_by_edge(b, types), types)).flatten();
     match table {
         Some(table) => rows.extend([table, legend()]),
-        None => rows.push(Row::Chips { label: "적 방어".into(), chips: chips(&b.armor, "") }),
+        None => {
+            rows.push(Row::Chips { label: "적 방어".into(), chips: chips(&b.armor) });
+            rows.push(Row::Note(SHARE_NOTE.into()));
+        }
     }
 }
 
@@ -101,7 +108,7 @@ pub fn raid_rows(raid: &RaidRef, found: &RaidLookup, types: &TypeTable, on_forma
                 (None, false) => rows.push(Row::Info { label: "난이도".into(), value: "선택 전 (방 정보 창에서 표시)".into() }),
             }
             if f.brief.terrain.is_none() {
-                let value = if raid.terrains.is_empty() { "화면에서 읽을 수 없음".to_string() } else { format!("{} 중 선택", raid.terrains.join(" · ")) };
+                let value = if f.raid.terrains.is_empty() { "위키에 없음".to_string() } else { format!("{} 중 선택", f.raid.terrains.iter().map(|t| terrain_ko(t)).collect::<Vec<_>>().join(" · ")) };
                 rows.push(Row::Info { label: "지형".into(), value });
             }
             let mut brief = f.brief.clone();
@@ -124,7 +131,7 @@ pub fn raid_rows(raid: &RaidRef, found: &RaidLookup, types: &TypeTable, on_forma
                 rows.push(Row::Note("같은 이름의 레이드가 여럿이라 화면의 방어 타입으로 골랐습니다".into()));
             }
             for d in &f.disagreements {
-                rows.push(Row::Note(format!("{}: 화면 {} / 위키 {} (화면 기준으로 계산)", d.what, d.screen, d.wiki)));
+                rows.push(Row::Note(format!("{}: 화면 {} / 위키 {} (위키 기준으로 계산, 위키 모델 점검 필요)", d.what, d.screen, d.wiki)));
             }
             if !f.unknown_words.is_empty() {
                 rows.push(Row::Note(format!("모르는 단어라 반영하지 못했습니다: {}", f.unknown_words.join(", "))));
@@ -360,6 +367,7 @@ mod tests {
     /// Mostly heavy armor, shot at with mystic and explosion.
     fn brief() -> MissionBrief {
         let tally = |code: &str, ko: &str, n: i64| Tally { code: code.into(), ko: ko.into(), n };
+        let share = |code: &str, ko: &str, share: f64| Share { code: code.into(), ko: ko.into(), share, heads: 1 };
         MissionBrief {
             stage_id: 1,
             name: "19-3".into(),
@@ -368,8 +376,8 @@ mod tests {
             difficulty: 0,
             terrain: Some(tally("Outdoor", "야외", 0)),
             recommended_level: Some(85),
-            attack: vec![tally("Mystic", "신비", 21), tally("Explosion", "폭발", 10)],
-            armor: vec![tally("HeavyArmor", "중장갑", 20), tally("Unarmed", "특수장갑", 6), tally("LightArmor", "경장갑", 3)],
+            attack: vec![share("Mystic", "신비", 0.68), share("Explosion", "폭발", 0.32)],
+            armor: vec![share("HeavyArmor", "중장갑", 0.62), share("Unarmed", "특수장갑", 0.28), share("LightArmor", "경장갑", 0.10)],
             best_attack: vec![],
         }
     }
@@ -482,8 +490,8 @@ mod tests {
         assert_eq!(entries.iter().map(|e| e.badge.as_str()).collect::<Vec<_>>(), vec!["강적합", "적합", "보통", "부적합", "강적합", "SP"]);
         assert!(entries[5].grade.is_none() && entries[5].tags.is_empty() && entries[5].note.contains("스킬"));
         let Row::Matrix { cols, rows: lines, .. } = &rows[2] else { panic!("offense table third: {rows:?}") };
-        assert_eq!(cols[0].text, "중장갑 20");
-        assert_eq!(lines.iter().map(|l| l.label.text.as_str()).collect::<Vec<_>>(), vec!["관통", "폭발", "신비"], "the squad's own attack types, best first");
+        assert_eq!(cols.iter().map(|c| c.text.as_str()).collect::<Vec<_>>(), vec!["중장갑 62%", "특수장갑 28%", "경장갑 10%"]);
+        assert_eq!(lines.iter().map(|l| l.label.text.as_str()).collect::<Vec<_>>(), vec!["관통", "신비", "폭발"], "the squad's own attack types, best first");
         assert!(rows.iter().any(|r| matches!(r, Row::Matrix { heading, .. } if heading.starts_with("방어"))));
         assert!(rows.iter().any(|r| matches!(r, Row::Legend { .. })));
         assert!(matches!(rows.last(), Some(Row::Note(n)) if n.contains("5명") && n.contains("스페셜 1명") && n.contains("스킬")));

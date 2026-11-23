@@ -201,26 +201,17 @@ CREATE TABLE furniture_interaction (
 );
 CREATE INDEX furniture_interaction_student ON furniture_interaction (student_id);
 
--- What a stage's enemies are made of: how many enemies of each armor type it holds.
-CREATE VIEW v_stage_armor AS
-SELECT f.stage_id AS stage_id, e.armor_type AS armor_type, COUNT(*) AS enemies
-FROM stage_formation f
-JOIN formation_enemy fe ON fe.formation_id = f.id
-JOIN enemy e ON e.id = fe.enemy_id
-WHERE e.armor_type IS NOT NULL AND e.rank <> 'Summoned'
-GROUP BY f.stage_id, e.armor_type;
-
 -- How well each student's attack type does against a stage's enemies (average multiplier,
--- weighted by enemy count, in basis points) and how well the student fits the terrain.
+-- weighted by the enemies' share of the stage, in basis points) and how well the student fits the terrain.
 CREATE VIEW v_student_vs_stage AS
 SELECT s.id AS stage_id,
        st.id AS student_id,
-       CAST(ROUND(1.0 * SUM(a.enemies * te.multiplier_bp) / SUM(a.enemies)) AS INTEGER) AS effectiveness_bp,
+       CAST(ROUND(SUM(a.share * te.multiplier_bp)) AS INTEGER) AS effectiveness_bp,
        CASE s.terrain WHEN 'Street' THEN st.street_adapt
                       WHEN 'Outdoor' THEN st.outdoor_adapt
                       WHEN 'Indoor' THEN st.indoor_adapt END AS terrain_adapt
 FROM stage s
-JOIN v_stage_armor a ON a.stage_id = s.id
+JOIN v_stage_armor_share a ON a.stage_id = s.id
 JOIN student st ON st.released_global = 1
 JOIN type_effectiveness te ON te.bullet_type = st.bullet_type AND te.armor_type = a.armor_type
 GROUP BY s.id, st.id;

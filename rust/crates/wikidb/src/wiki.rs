@@ -11,6 +11,17 @@ pub struct Tally {
     pub n: i64,
 }
 
+/// An armor or attack type with its share of an encounter's enemy weight (0..=1, the shares of a
+/// list add up to 1) and how many counted enemies it stands for. The weights are the collector's
+/// (`weight.rs`); a reader never makes its own.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Share {
+    pub code: String,
+    pub ko: String,
+    pub share: f64,
+    pub heads: i64,
+}
+
 /// Words read from a screen, decoded through the `label` table: the codes found, in order, and the words that are no label.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DecodedLabels {
@@ -19,7 +30,7 @@ pub struct DecodedLabels {
 }
 
 /// What the player wants to know before sending a squad into a mission.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MissionBrief {
     pub stage_id: i64,
     pub name: String,
@@ -29,9 +40,10 @@ pub struct MissionBrief {
     pub difficulty: i64,
     pub terrain: Option<Tally>,
     pub recommended_level: Option<i64>,
-    /// Enemies per attack type (bullet type) and per armor type, summons left out.
-    pub attack: Vec<Tally>,
-    pub armor: Vec<Tally>,
+    /// The enemies' attack types (bullet types) and armor types by share of the enemy weight (HP, see
+    /// docs/enemy-weighting.md), biggest first. Summons and the like weigh nothing.
+    pub attack: Vec<Share>,
+    pub armor: Vec<Share>,
     /// Student attack types ranked by average damage multiplier against this mission's
     /// enemies; `n` is the multiplier in percent (100 = normal damage).
     pub best_attack: Vec<Tally>,
@@ -345,30 +357,39 @@ impl Wiki {
         Ok(out)
     }
 
+    /// The armor or attack type mix of one encounter, read from one of the `v_*_share` views.
+    /// `column` is the type column of the view, `kind` the label kind of its codes.
+    pub(crate) fn read_shares(&self, view: &str, column: &str, kind: &str, key_filter: &str, key: &[&dyn rusqlite::ToSql]) -> Result<Vec<Share>> {
+        let sql = format!("SELECT {column}, enemies, share FROM {view} WHERE {key_filter} ORDER BY share DESC, {column}");
+        let mut st = self.conn.prepare(&sql)?;
+        let rows = st.query_map(key, |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, f64>(2)?)))?;
+        rows.map(|r| r.map(|(code, heads, share)| Share { ko: self.label(kind, &code), code, share, heads }).map_err(Into::into)).collect()
+    }
+
+    /// Student attack types ranked by the damage multiplier against `armor` (n in percent, 100 = normal).
+    pub(crate) fn best_attack_against(&self, armor: &[Share]) -> Result<Vec<Tally>> {
+        if armor.is_empty() {
+            return Ok(Vec::new());
+        }
+        let table = self.type_table()?;
+        let mut st = self.conn.prepare("SELECT DISTINCT bullet_type FROM student")?;
+        let bullets: Vec<String> = st.query_map([], |r| r.get(0))?.collect::<std::result::Result<_, _>>()?;
+        let mut out: Vec<Tally> = bullets
+            .into_iter()
+            .map(|code| {
+                let mean: f64 = armor.iter().map(|a| a.share * table.get(&code, &a.code)).sum();
+                Tally { ko: self.label("BulletType", &code), code, n: (mean * 100.0).round() as i64 }
+            })
+            .collect();
+        out.sort_by(|a, b| b.n.cmp(&a.n).then_with(|| a.code.cmp(&b.code)));
+        Ok(out)
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn brief(&self, id: i64, name: String, area: Option<i64>, stage_no: Option<i64>, difficulty: i64, terrain: Option<String>, level: Option<i64>) -> Result<MissionBrief> {
-        let count_by = |column: &str, kind: &str| -> Result<Vec<Tally>> {
-            let sql = format!(
-                "SELECT e.{column}, COUNT(*) FROM stage_formation f
-                 JOIN formation_enemy fe ON fe.formation_id = f.id JOIN enemy e ON e.id = fe.enemy_id
-                 WHERE f.stage_id = ?1 AND e.{column} IS NOT NULL AND e.rank <> 'Summoned' GROUP BY e.{column} ORDER BY COUNT(*) DESC, e.{column}"
-            );
-            let mut st = self.conn.prepare(&sql)?;
-            let rows = st.query_map(params![id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
-            rows.map(|r| r.map(|(code, n)| Tally { ko: self.label(kind, &code), code, n }).map_err(Into::into)).collect()
-        };
-        let armor = count_by("armor_type", "ArmorType")?;
-        let attack = count_by("bullet_type", "BulletType")?;
-        let mut best = self.conn.prepare(
-            "SELECT te.bullet_type, CAST(ROUND(SUM(1.0 * a.enemies * te.multiplier_bp) / SUM(a.enemies) / 100.0) AS INTEGER) AS pct
-             FROM v_stage_armor a JOIN type_effectiveness te ON te.armor_type = a.armor_type
-             WHERE a.stage_id = ?1 AND te.bullet_type IN (SELECT DISTINCT bullet_type FROM student)
-             GROUP BY te.bullet_type ORDER BY pct DESC, te.bullet_type",
-        )?;
-        let best_attack = best
-            .query_map(params![id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?
-            .map(|r| r.map(|(code, n)| Tally { ko: self.label("BulletType", &code), code, n }).map_err(Into::into))
-            .collect::<Result<Vec<_>>>()?;
+        let armor = self.read_shares("v_stage_armor_share", "armor_type", "ArmorType", "stage_id = ?1", &[&id])?;
+        let attack = self.read_shares("v_stage_attack_share", "bullet_type", "BulletType", "stage_id = ?1", &[&id])?;
+        let best_attack = self.best_attack_against(&armor)?;
         Ok(MissionBrief {
             stage_id: id,
             name,
@@ -399,6 +420,7 @@ mod tests {
              INSERT INTO stage VALUES (10,'Campaign',NULL,19,3,0,'설원 지구 제2 지역','Outdoor',85,NULL,NULL,NULL,1),(11,'Campaign',NULL,19,3,1,'설원 지구 제2 지역','Outdoor',90,NULL,NULL,NULL,1);
              INSERT INTO stage_formation VALUES (100,10,0,'Grade1',1,1),(110,11,0,'Grade1',1,1);
              INSERT INTO formation_enemy VALUES (100,0,1),(100,1,2),(100,2,2),(110,0,1);
+             INSERT INTO formation_enemy_weight VALUES (100,0,1,1,100,100,NULL),(100,1,1,1,100,100,NULL),(100,2,1,1,100,100,NULL),(110,0,1,1,100,100,NULL);
              INSERT INTO student VALUES (1,'a','a','s1','','',3,'Main','','','Explosion','Normal',1,1,1,'',1,1,'{}'),(2,'b','b','s2','','',3,'Main','','','Pierce','Normal',1,1,1,'',1,1,'{}');",
         )
         .unwrap();
@@ -424,8 +446,8 @@ mod tests {
         let m = &found[0];
         assert_eq!(m.terrain.as_ref().map(|t| t.ko.as_str()), Some("야외"));
         assert_eq!(m.recommended_level, Some(85));
-        assert_eq!(m.armor.iter().map(|t| (t.ko.as_str(), t.n)).collect::<Vec<_>>(), vec![("중장갑", 2), ("경장갑", 1)]);
-        assert_eq!(m.attack.iter().map(|t| (t.ko.as_str(), t.n)).collect::<Vec<_>>(), vec![("일반", 3)]);
+        assert_eq!(m.armor.iter().map(|t| (t.ko.as_str(), t.heads, (t.share * 100.0).round() as i64)).collect::<Vec<_>>(), vec![("중장갑", 2, 67), ("경장갑", 1, 33)]);
+        assert_eq!(m.attack.iter().map(|t| (t.ko.as_str(), t.heads, t.share)).collect::<Vec<_>>(), vec![("일반", 3, 1.0)]);
     }
 
     #[test]

@@ -4,12 +4,15 @@
 //! level (`RaidRef`). The wiki knows the raids by name, their difficulties and seasons. This joins them
 //! into the `MissionBrief` the matchup tables and the squad verdict read.
 //!
-//! The screen is the truth for what the player sees: where it names the boss's armor, attack type or
-//! level, those replace the wiki's values in the brief, and where the two differ the difference is
-//! reported (`Disagreement`), because it says something about the data or about the reading.
+//! Static against dynamic: the screen only says which encounter is open (mode, boss, difficulty, and for
+//! same-named raids the armor word, the one thing that tells them apart). The encounter's armor and attack
+//! mix, level and terrain are static data of the wiki and come from the wiki alone: the same encounter gives
+//! the same brief whatever type words the screen shows. The armor, attack and level words of the screen
+//! (`RaidScreenWords`) are a cross-check: a difference is reported (`Disagreement`) because it says the wiki
+//! model is incomplete (as 드럼통 게 was before its 경장갑 parts were weighted in), never used as a value.
 //! Nothing is picked silently: several raids of one name, or no difficulty on the screen, show as such.
 use anyhow::Result;
-use baocr_extract::raid::{RaidRef, DIFFICULTIES};
+use baocr_extract::raid::{RaidRef, RaidScreenWords, DIFFICULTIES};
 use baocr_extract::scene::RaidMode;
 use baocr_wikidb::{pick_season, MissionBrief, RaidCandidate, RaidDifficulty, RaidKind, SeasonMode, SeasonPick, Tally, Wiki};
 
@@ -76,8 +79,8 @@ pub fn lookup(wiki: &Wiki, raid: &RaidRef, now: i64) -> Result<RaidLookup> {
     if candidates.is_empty() {
         return Ok(RaidLookup::NotFound);
     }
-    let armors = wiki.decode_labels(LABEL_ARMOR, &raid.armors)?;
-    let attack_words: Vec<String> = raid.attack.iter().cloned().collect();
+    let armors = wiki.decode_labels(LABEL_ARMOR, &raid.words.armors)?;
+    let attack_words: Vec<String> = raid.words.attack.iter().cloned().collect();
     let attack = wiki.decode_labels(LABEL_ATTACK, &attack_words)?;
     let unknown_words: Vec<String> = armors.unknown.iter().chain(&attack.unknown).cloned().collect();
 
@@ -116,29 +119,10 @@ pub fn lookup(wiki: &Wiki, raid: &RaidRef, now: i64) -> Result<RaidLookup> {
         None
     };
     let Some(brief) = wiki.raid_mission(chosen.kind, chosen.id, idx, season.as_ref().map(|p| &p.season))? else { return Ok(RaidLookup::NotFound) };
-    let boss = difficulties.iter().find(|d| d.idx == idx).and_then(|d| d.boss.as_ref());
 
-    if let Some(db) = boss.and_then(|b| b.armor_type.as_deref()).filter(|_| !armors.codes.is_empty()) {
-        if armors.codes != [db] {
-            disagreements.push(Disagreement { what: "방어 타입", screen: join(&raid.armors), wiki: wiki.label(LABEL_ARMOR, db) });
-        }
-    }
-    if let (Some(code), Some(word)) = (attack.codes.first(), &raid.attack) {
-        // a screen with no difficulty may show any tier's attack type
-        let known: Vec<&str> = difficulties.iter().filter(|d| on_screen.is_none() || d.idx == idx).filter_map(|d| d.boss.as_ref()?.bullet_type.as_deref()).collect();
-        if !known.contains(&code.as_str()) {
-            let wiki_side: Vec<String> = known.iter().map(|c| wiki.label(LABEL_ATTACK, c)).collect();
-            disagreements.push(Disagreement { what: "공격 타입", screen: word.clone(), wiki: wiki_side.join(" · ") });
-        }
-    }
-    if let (Some(screen), Some(db)) = (raid.level, brief.recommended_level) {
-        if i64::from(screen) != db {
-            disagreements.push(Disagreement { what: "레벨", screen: screen.to_string(), wiki: db.to_string() });
-        }
-    }
-
-    let mut brief = wiki.with_screen_types(brief, boss, &armors.codes, attack.codes.first().map(String::as_str))?;
-    brief.recommended_level = raid.level.map(i64::from).or(brief.recommended_level);
+    let mut disagreements = disagreements;
+    disagreements.extend(cross_check(wiki, &raid.words, &armors.codes, attack.codes.first().map(String::as_str), &brief, &difficulties, idx, on_screen.is_some()));
+    let mut brief = brief;
     if on_screen.is_none() {
         // the title would name the first difficulty the brief happens to be built from
         brief.name = chosen.name.clone();
@@ -151,6 +135,31 @@ pub fn lookup(wiki: &Wiki, raid: &RaidRef, now: i64) -> Result<RaidLookup> {
         })
         .collect();
     Ok(RaidLookup::Found(Box::new(RaidFound { raid: chosen, picked_by_armor, difficulty: on_screen, difficulties, brief, attack_by_difficulty, season, disagreements, unknown_words })))
+}
+
+/// Where the screen's words differ from the wiki's data of the encounter. Only reports: it changes nothing.
+/// The armor is reported when the screen shows an armor the wiki's mix of the encounter lacks (the wiki
+/// may hold more); the attack type when no difficulty in question has it; the level when both give one.
+#[allow(clippy::too_many_arguments)]
+pub fn cross_check(wiki: &Wiki, words: &RaidScreenWords, screen_armors: &[String], screen_attack: Option<&str>, brief: &MissionBrief, difficulties: &[RaidDifficulty], idx: i64, difficulty_known: bool) -> Vec<Disagreement> {
+    let mut out = Vec::new();
+    if screen_armors.iter().any(|a| !brief.armor.iter().any(|s| &s.code == a)) {
+        out.push(Disagreement { what: "방어 타입", screen: join(&words.armors), wiki: brief.armor.iter().map(|s| s.ko.clone()).collect::<Vec<_>>().join(" · ") });
+    }
+    if let (Some(code), Some(word)) = (screen_attack, &words.attack) {
+        // a screen with no difficulty may show any tier's attack type
+        let known: Vec<&str> = difficulties.iter().filter(|d| !difficulty_known || d.idx == idx).filter_map(|d| d.boss.as_ref()?.bullet_type.as_deref()).collect();
+        if !known.contains(&code) {
+            let wiki_side: Vec<String> = known.iter().map(|c| wiki.label(LABEL_ATTACK, c)).collect();
+            out.push(Disagreement { what: "공격 타입", screen: word.clone(), wiki: wiki_side.join(" · ") });
+        }
+    }
+    if let (Some(screen), Some(db)) = (words.level, brief.recommended_level) {
+        if i64::from(screen) != db {
+            out.push(Disagreement { what: "레벨", screen: screen.to_string(), wiki: db.to_string() });
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -196,6 +205,11 @@ mod tests {
     const DUAL_ARMOR_SCREEN: usize = 11;
 
     fn wiki() -> Wiki {
+        wiki_with(true)
+    }
+
+    /// `parts`: the database weighs 드럼통 게's 경장갑 parts into its armor mix (as the collector does).
+    fn wiki_with(parts: bool) -> Wiki {
         let conn = Connection::open_in_memory().unwrap();
         baocr_wikidb::create(&conn).unwrap();
         let mut sql = String::from(
@@ -214,8 +228,14 @@ mod tests {
                 "INSERT INTO enemy VALUES ({en},'e','{name}','Boss','Main','Normal','{armor}','S',1,'{{}}'),({hard},'e','{name}','Boss','Main','Explosion','{armor}','S',1,'{{}}');
                  INSERT INTO raid (id, kind, path_name, name_ko, display_ko, dungeon_type, terrain, released_global, source_id, raw) VALUES ({id},'Raid','r{id}','{name}','{name}',NULL,'[\"Street\",\"Indoor\"]',1,1,'{{}}');
                  INSERT INTO raid_difficulty (raid_kind, raid_id, idx, label, level, floor_start, battle_duration, boss_enemy_id, released_global) VALUES ('Raid',{id},0,'Normal',NULL,NULL,180,{en},1),('Raid',{id},5,'Insane',NULL,NULL,180,{hard},1);
-                 INSERT INTO raid_difficulty_enemy VALUES ('Raid',{id},0,0,{en}),('Raid',{id},5,0,{hard});"
+                 INSERT INTO raid_difficulty_enemy VALUES ('Raid',{id},0,0,{en}),('Raid',{id},5,0,{hard});
+                 INSERT INTO raid_difficulty_enemy_weight VALUES ('Raid',{id},0,0,17,1,100,100,NULL),('Raid',{id},5,0,80,1,100,100,NULL);"
             );
+            if parts && id == 14 {
+                sql += "INSERT INTO enemy VALUES (5014,'p','강철 집게','Minion','Main','Normal','LightArmor','S',1,'{}'),(5114,'p','강철 집게','Minion','Main','Explosion','LightArmor','S',1,'{}');
+                        INSERT INTO raid_difficulty_enemy VALUES ('Raid',14,0,1,5014),('Raid',14,5,1,5114);
+                        INSERT INTO raid_difficulty_enemy_weight VALUES ('Raid',14,0,1,17,1,50,50,NULL),('Raid',14,5,1,80,1,50,50,NULL);";
+            }
         }
         sql += "INSERT INTO enemy VALUES (3001,'s','세트의 분노','Boss','Main','Normal','Unarmed','S',1,'{}'),(3002,'s','세트의 분노','Boss','Main','Normal','LightArmor','S',1,'{}');
              INSERT INTO raid (id, kind, path_name, name_ko, display_ko, dungeon_type, terrain, released_global, source_id, raw) VALUES
@@ -224,6 +244,7 @@ mod tests {
              INSERT INTO raid_difficulty (raid_kind, raid_id, idx, label, level, floor_start, battle_duration, boss_enemy_id, released_global) VALUES
                ('MultiFloorRaid',1000000,0,NULL,NULL,1,180,3001,1),('MultiFloorRaid',1000001,0,NULL,NULL,1,180,3002,1),('InteractiveWorldRaid',8540000,0,'A',17,NULL,180,1001,1);
              INSERT INTO raid_difficulty_enemy VALUES ('MultiFloorRaid',1000000,0,0,3001),('MultiFloorRaid',1000001,0,0,3002),('InteractiveWorldRaid',8540000,0,0,1001);
+             INSERT INTO raid_difficulty_enemy_weight VALUES ('MultiFloorRaid',1000000,0,0,25,1,100,100,NULL),('MultiFloorRaid',1000001,0,0,25,1,100,100,NULL),('InteractiveWorldRaid',8540000,0,0,17,1,100,100,NULL);
              INSERT INTO raid_season (mode, season_id, season_display, raid_kind, raid_id, terrain, start_at, end_at, open_difficulty) VALUES
                ('Raid',1,'1','Raid',4,'Street',100,200,NULL),('Raid',2,'2','Raid',4,'Indoor',300,400,NULL),('Eliminate',9,'9','Raid',4,'Outdoor',500,600,NULL);";
         conn.execute_batch(&sql).unwrap();
@@ -242,43 +263,72 @@ mod tests {
     }
 
     #[test]
-    fn each_boss_of_the_mock_list_is_found_and_its_armor_agrees_with_the_database_but_for_the_dual_armor() {
-        let w = wiki();
+    fn the_cross_check_reports_the_dual_armor_only_when_the_database_lacks_the_parts() {
+        let screens: Vec<RaidRef> = (0..=14).map(|i| mock_boss_from_list(&boxes(&format!("raid-mock-m{i:02}"))).unwrap()).collect();
+        // a database that holds 드럼통 게's lead enemy alone does not show what the screen shows
+        let lacking = wiki_with(false);
         let mut disagreeing = Vec::new();
-        for i in 0..=14 {
-            let screen = mock_boss_from_list(&boxes(&format!("raid-mock-m{i:02}"))).unwrap();
-            let f = found(lookup(&w, &screen, 0).unwrap_or_else(|e| panic!("m{i:02}: {e}")));
+        for (i, screen) in screens.iter().enumerate() {
+            let f = found(lookup(&lacking, screen, 0).unwrap_or_else(|e| panic!("m{i:02}: {e}")));
             assert!(f.unknown_words.is_empty(), "m{i:02}: {:?}", f.unknown_words);
+            assert_eq!(f.difficulty, None, "a boss list names no difficulty");
             if !f.disagreements.is_empty() {
                 disagreeing.push((i, f.disagreements.clone()));
             }
-            assert_eq!(f.difficulty, None, "a boss list names no difficulty");
         }
-        // 드럼통게 shows 특수장갑/경장갑 and the database holds only 특수장갑 for its lead enemy
         assert_eq!(disagreeing, vec![(DUAL_ARMOR_SCREEN, vec![Disagreement { what: "방어 타입", screen: "특수장갑 · 경장갑".into(), wiki: "특수장갑".into() }])]);
+        // one that weighs the parts in reproduces both armors by itself: nothing to report anywhere
+        let complete = wiki();
+        for (i, screen) in screens.iter().enumerate() {
+            assert_eq!(found(lookup(&complete, screen, 0).unwrap()).disagreements, vec![], "m{i:02}");
+        }
     }
 
     #[test]
-    fn the_dual_armor_of_the_screen_goes_into_the_brief_and_the_attack_table_follows_it() {
+    fn the_armor_mix_of_a_dual_armor_boss_comes_from_the_database_parts() {
         let w = wiki();
         let f = found(lookup(&w, &mock_boss_from_list(&boxes("raid-mock-m11")).unwrap(), 0).unwrap());
-        assert_eq!(armor_codes(&f), ["LightArmor", "Unarmed"], "both armors, the screen being what the player sees");
+        assert_eq!(f.brief.armor.iter().map(|s| (s.code.as_str(), (s.share * 100.0).round() as i64)).collect::<Vec<_>>(), vec![("Unarmed", 67), ("LightArmor", 33)]);
         let plain = found(lookup(&w, &mock_boss_from_list(&boxes("raid-mock-m03")).unwrap(), 0).unwrap());
         assert_eq!(armor_codes(&plain), ["Unarmed"]);
         assert_eq!(plain.brief.best_attack[0].code, "Mystic");
         assert_ne!(f.brief.best_attack.iter().map(|t| t.n).collect::<Vec<_>>(), plain.brief.best_attack.iter().map(|t| t.n).collect::<Vec<_>>());
     }
 
+    /// The same encounter gives the same brief whatever armor, attack and level words the screen shows or
+    /// misses: only the report of differences changes.
     #[test]
-    fn the_room_popup_gives_the_difficulty_and_the_level_and_a_boss_list_gives_neither() {
+    fn the_lookup_does_not_depend_on_the_screens_type_words() {
+        let w = wiki();
+        let room = room_from_info(&boxes("raid-mock-room-info")).unwrap();
+        let list = mock_boss_from_list(&boxes("raid-mock-m11")).unwrap();
+        for base in [room, list] {
+            let reference = found(lookup(&w, &RaidRef { words: RaidScreenWords::default(), ..base.clone() }, 0).unwrap());
+            let variants = [
+                RaidScreenWords { armors: vec![], attack: None, level: None },
+                RaidScreenWords { armors: vec!["경장갑".into()], attack: Some("신비".into()), level: Some(99) },
+                RaidScreenWords { armors: vec!["중장갑".into(), "탄력장갑".into()], attack: Some("폭발".into()), level: Some(1) },
+                RaidScreenWords { armors: vec!["알수없는".into()], attack: Some("???".into()), level: None },
+                base.words.clone(),
+            ];
+            for words in variants {
+                // armor words key same-named raids apart; a boss with one raid of its name is found without them
+                let f = found(lookup(&w, &RaidRef { words: words.clone(), ..base.clone() }, 0).unwrap());
+                assert_eq!((&f.brief, &f.difficulty, &f.attack_by_difficulty, &f.raid, &f.season), (&reference.brief, &reference.difficulty, &reference.attack_by_difficulty, &reference.raid, &reference.season), "{words:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_room_popup_gives_the_difficulty_and_a_boss_list_gives_neither_and_the_level_is_the_wikis() {
         let w = wiki();
         let room = room_from_info(&boxes("raid-mock-room-info")).unwrap();
         let f = found(lookup(&w, &room, 0).unwrap());
         assert_eq!((f.difficulty, f.brief.difficulty, f.brief.recommended_level, f.brief.name.as_str()), (Some(0), 0, Some(17), "시로&쿠로 (Normal)"));
         assert!(f.disagreements.is_empty(), "{:?}", f.disagreements);
         // Insane is the sixth row: idx 5, where the attack type switches
-        let insane = found(lookup(&w, &RaidRef { difficulty: Some(5), attack: None, ..room.clone() }, 0).unwrap());
-        assert_eq!((insane.difficulty, insane.brief.attack[0].code.as_str()), (Some(5), "Explosion"));
+        let insane = found(lookup(&w, &RaidRef { difficulty: Some(5), ..room.clone() }, 0).unwrap());
+        assert_eq!((insane.difficulty, insane.brief.attack[0].code.as_str(), insane.brief.recommended_level), (Some(5), "Explosion", Some(80)));
         // the same boss on the list (no difficulty): titled by the boss alone, not by the first difficulty it was built from
         let list = found(lookup(&w, &mock_boss_from_list(&boxes("raid-mock-m00")).unwrap(), 0).unwrap());
         assert_eq!((list.difficulty, list.brief.name.as_str(), list.difficulties.len()), (None, "시로&쿠로", 2));
@@ -289,20 +339,24 @@ mod tests {
     }
 
     #[test]
-    fn the_screens_attack_type_and_level_win_and_a_difference_is_reported() {
+    fn a_wrong_attack_type_or_level_on_the_screen_is_reported_and_the_wikis_values_stay() {
         let w = wiki();
         let room = room_from_info(&boxes("raid-mock-room-info")).unwrap();
-        let wrong = found(lookup(&w, &RaidRef { attack: Some("신비".into()), level: Some(30), ..room }, 0).unwrap());
-        assert_eq!(wrong.brief.attack[0].code, "Mystic", "the screen says mystic");
-        assert_eq!(wrong.brief.recommended_level, Some(30));
-        assert_eq!(wrong.disagreements, vec![Disagreement { what: "공격 타입", screen: "신비".into(), wiki: "일반".into() }]);
+        let words = RaidScreenWords { attack: Some("신비".into()), level: Some(30), ..room.words.clone() };
+        let wrong = found(lookup(&w, &RaidRef { words, ..room }, 0).unwrap());
+        assert_eq!(wrong.brief.attack[0].code, "Normal", "the wiki says normal");
+        assert_eq!(wrong.brief.recommended_level, Some(17));
+        assert_eq!(
+            wrong.disagreements,
+            vec![Disagreement { what: "공격 타입", screen: "신비".into(), wiki: "일반".into() }, Disagreement { what: "레벨", screen: "30".into(), wiki: "17".into() }]
+        );
     }
 
     #[test]
-    fn a_word_that_is_no_label_is_reported_and_the_brief_keeps_the_wikis_value() {
+    fn a_word_that_is_no_label_is_reported_and_the_brief_is_the_wikis() {
         let w = wiki();
         let mut screen = mock_boss_from_list(&boxes("raid-mock-m03")).unwrap();
-        screen.armors = vec!["특수장갓".into()];
+        screen.words.armors = vec!["특수장갓".into()];
         let f = found(lookup(&w, &screen, 0).unwrap());
         assert_eq!((f.unknown_words.as_slice(), armor_codes(&f)), (["특수장갓".to_string()].as_slice(), vec!["Unarmed"]));
     }
@@ -321,7 +375,7 @@ mod tests {
             other => panic!("{other:?}"),
         }
         // an armor that fits neither stays ambiguous
-        let other = RaidRef { armors: vec!["중장갑".into()], ..stage };
+        let other = RaidRef { words: RaidScreenWords { armors: vec!["중장갑".into()], ..stage.words.clone() }, ..stage };
         assert!(matches!(lookup(&w, &other, 0).unwrap(), RaidLookup::Ambiguous(_)));
     }
 
@@ -360,10 +414,10 @@ mod tests {
         for i in 0..=14 {
             let screen = mock_boss_from_list(&boxes(&format!("raid-mock-m{i:02}"))).unwrap();
             let f = found(lookup(&w, &screen, 0).unwrap());
-            eprintln!("m{i:02} {} {:?} -> raid {} {:?} {:?}", screen.boss, screen.armors, f.raid.id, f.raid.name, f.disagreements);
+            eprintln!("m{i:02} {} {:?} -> raid {} {:?} {:?}", screen.boss, screen.words.armors, f.raid.id, f.raid.name, f.disagreements);
             assert!(f.unknown_words.is_empty(), "m{i:02}");
             mismatches.extend(f.disagreements.iter().map(|d| (i, d.clone())));
         }
-        assert_eq!(mismatches.iter().map(|(i, d)| (*i, d.what)).collect::<Vec<_>>(), vec![(DUAL_ARMOR_SCREEN, "방어 타입")], "{mismatches:?}");
+        assert!(mismatches.is_empty(), "the database alone must reproduce what the screens show: {mismatches:?}");
     }
 }
