@@ -8,7 +8,7 @@
 //!
 //! Everything here is raw screen text. Turning the armor and attack words into the database's
 //! codes is the wiki's job (`Wiki::decode_labels`), so this crate needs no database.
-use crate::scene::{norm, RaidMode, Scene};
+use crate::scene::{norm, Layout, RaidMode, Scene};
 use baocr_core::ocr_api::TextBox;
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -164,9 +164,23 @@ fn pills(boxes: &[TextBox], inside: impl Fn(&TextBox) -> bool) -> (Option<String
     (attack, armor_words(&norm(&armor.text)))
 }
 
+/// Where the "방 정보" popup's top block (difficulty, boss, level, attack and armor) sits: the popup is
+/// squeezed vertically in 16:9, so its block rises by about 110 px.
+fn room_block_y(layout: Layout) -> (f32, f32) {
+    match layout {
+        Layout::Ratio43 => (290.0, 470.0),
+        Layout::Ratio169 => (170.0, 300.0),
+    }
+}
+
 /// What the "방 정보" popup of a mock-raid room names: difficulty, boss, level and the boss's attack and armor.
 pub fn room_from_info(boxes: &[TextBox]) -> Option<RaidRef> {
-    let in_popup = |b: &TextBox| b.x0 > 130.0 && b.x1 < 1130.0 && b.y0 > 290.0 && b.y1 < 470.0;
+    room_from_info_in(boxes, Layout::Ratio43)
+}
+
+pub fn room_from_info_in(boxes: &[TextBox], layout: Layout) -> Option<RaidRef> {
+    let (top, bottom) = room_block_y(layout);
+    let in_popup = |b: &TextBox| b.x0 > 130.0 && b.x1 < 1130.0 && b.y0 > top && b.y1 < bottom;
     let difficulty = boxes.iter().filter(|b| in_popup(b) && b.x0 < 330.0).find_map(|b| difficulty_index(&b.text).map(|i| (i, b)))?;
     let boss = below(boxes, difficulty.1, 40.0, 40.0)?;
     let (attack, armors) = pills(boxes, in_popup);
@@ -192,6 +206,15 @@ pub fn boss_from_unrestricted_select(boxes: &[TextBox]) -> Option<RaidRef> {
 /// Boss, level, attack and armor of the 제약해제결전 stage screen. The terrain is an icon, and the
 /// stage chosen among 01, 02, ... is a highlight: neither is text, so neither is read.
 pub fn unrestricted_stage(boxes: &[TextBox]) -> Option<RaidRef> {
+    unrestricted_stage_in(boxes, Layout::Ratio43)
+}
+
+/// There is no 16:9 recording of this screen, so its pill row is not located there: nothing is read
+/// rather than words from a guessed place.
+pub fn unrestricted_stage_in(boxes: &[TextBox], layout: Layout) -> Option<RaidRef> {
+    if layout != Layout::Ratio43 {
+        return None;
+    }
     let boss = unrestricted_boss(boxes, true)?;
     let (attack, armors) = pills(boxes, |b| b.x0 > 800.0 && b.y0 > 380.0 && b.y1 < 460.0);
     Some(RaidRef { words: RaidScreenWords { armors, attack, level: recommended_level(boxes) }, ..RaidRef::named(RaidMode::UnrestrictedRaid, &boss.text) })
@@ -210,14 +233,19 @@ impl RaidTracker {
 
     /// Feed the screen just recognised (with its OCR text) and get the encounter now in play.
     pub fn update(&mut self, scene: Scene, boxes: &[TextBox]) -> Option<&RaidRef> {
+        self.update_in(scene, boxes, Layout::Ratio43)
+    }
+
+    /// [`update`](Self::update) for a frame of the given layout.
+    pub fn update_in(&mut self, scene: Scene, boxes: &[TextBox], layout: Layout) -> Option<&RaidRef> {
         match scene {
             Scene::RaidSelect => self.set(boss_from_raid_select(boxes)),
             Scene::MockRaidBosses => self.set(mock_boss_from_list(boxes)),
             Scene::UnrestrictedRaidSelect => self.set(boss_from_unrestricted_select(boxes)),
-            Scene::UnrestrictedRaidStage => self.set(unrestricted_stage(boxes)),
+            Scene::UnrestrictedRaidStage => self.set(unrestricted_stage_in(boxes, layout)),
             // the popup opens over the boss list: it adds what the list does not show to the same boss
             Scene::RaidRoomInfo => {
-                if let Some(room) = room_from_info(boxes) {
+                if let Some(room) = room_from_info_in(boxes, layout) {
                     let merged = match self.raid.take() {
                         Some(list) if list.mode == room.mode && list.same_boss(&room.boss) => RaidRef { terrains: list.terrains, ..room },
                         _ => room,
@@ -232,7 +260,7 @@ impl RaidTracker {
                 }
             }
             // the same boss list, other bosses' lists and the popups of the screens above keep what is known
-            Scene::UnrestrictedRaidStages | Scene::QuickFormation | Scene::Battle | Scene::Unknown => {}
+            Scene::UnrestrictedRaidStages | Scene::QuickFormation | Scene::Battle | Scene::AlertPopup | Scene::Unknown => {}
             // anywhere else the player is no longer in a raid encounter (a campaign mission, the menu, another mode)
             Scene::Lobby
             | Scene::LobbyIdle
@@ -258,7 +286,13 @@ impl RaidTracker {
             | Scene::Recruit
             | Scene::EventList
             | Scene::SocialMenu
-            | Scene::Notice => self.raid = None,
+            | Scene::Notice
+            | Scene::MenuCollection
+            | Scene::Options
+            | Scene::Title
+            | Scene::DailyAttendance
+            | Scene::EventStages
+            | Scene::RaidTallying => self.raid = None,
         }
         self.raid.as_ref()
     }
@@ -392,5 +426,48 @@ mod tests {
         let r = t.update(Scene::RaidRoomInfo, &boxes("raid-mock-room-info")).unwrap();
         assert_eq!(r.boss, "시로&쿠로");
         assert!(r.terrains.is_empty());
+    }
+
+    use crate::scene::{classify_in, Layout};
+
+    fn feed_in(t: &mut RaidTracker, file: &str) -> Option<RaidRef> {
+        let b = boxes(file);
+        let scene = classify_in(&b, None, Layout::Ratio169);
+        t.update_in(scene, &b, Layout::Ratio169).cloned()
+    }
+
+    #[test]
+    fn the_16_9_boss_list_names_boss_armor_terrains_and_rows() {
+        let list = mock_boss_from_list(&boxes("w169-mock-bosses")).unwrap();
+        assert_eq!((list.boss.as_str(), list.words.armors.as_slice(), list.terrains.as_slice()), ("고즈", ["특수장갑".to_string()].as_slice(), ["실내".to_string(), "야외".to_string()].as_slice()));
+        let rows = difficulty_rows(&boxes("w169-mock-bosses"));
+        assert_eq!(rows.iter().map(|r| r.index).collect::<Vec<_>>(), vec![0, 1, 2, 3], "the fifth row is cut by the score strip, which is no row");
+        assert!(rows.iter().all(|r| r.boss == "고즈"), "{rows:?}");
+    }
+
+    #[test]
+    fn the_16_9_room_popup_names_difficulty_boss_level_attack_and_armor() {
+        let r = room_from_info_in(&boxes("w169-mock-room-info"), Layout::Ratio169).unwrap();
+        assert_eq!((r.mode, r.boss.as_str(), r.difficulty, r.words.level), (RaidMode::MockTotalAssault, "고즈", Some(0), Some(17)));
+        assert_eq!((r.words.attack.as_deref(), r.words.armors.as_slice()), (Some("일반"), ["특수장갑".to_string()].as_slice()));
+        assert!(room_from_info(&boxes("w169-mock-room-info")).is_none(), "the 4:3 block is not where the 16:9 popup has it");
+    }
+
+    #[test]
+    fn the_16_9_formation_knows_the_encounter_and_the_tallying_screen_forgets_it() {
+        let mut t = RaidTracker::default();
+        let list = feed_in(&mut t, "w169-mock-bosses").unwrap();
+        let room = feed_in(&mut t, "w169-mock-room-info").unwrap();
+        assert_eq!((room.boss.as_str(), room.difficulty, room.terrains.as_slice()), ("고즈", Some(0), list.terrains.as_slice()));
+        assert_eq!(feed_in(&mut t, "w169-raid-formation").unwrap(), room);
+        assert_eq!(feed_in(&mut t, "w169-raid-quick-formation").unwrap(), room);
+        assert_eq!(feed_in(&mut t, "w169-alert-date-changed").unwrap(), room, "a dialog keeps the encounter");
+        assert!(feed_in(&mut t, "w169-raid-tallying").is_none());
+    }
+
+    #[test]
+    fn the_unrestricted_stage_is_not_read_in_16_9_without_a_recording() {
+        assert!(unrestricted_stage_in(&boxes("unrestricted-raid-stage01"), Layout::Ratio169).is_none());
+        assert!(unrestricted_stage_in(&boxes("unrestricted-raid-stage01"), Layout::Ratio43).is_some());
     }
 }

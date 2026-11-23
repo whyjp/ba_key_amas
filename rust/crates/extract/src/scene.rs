@@ -80,6 +80,20 @@ pub enum Scene {
     SocialMenu,
     /// 공지: the notice popup over the main menu.
     Notice,
+    /// 메뉴 모음: the menu popup (옵션, 계정, 장비, ...) over the main menu.
+    MenuCollection,
+    /// 옵션: the settings popup over the main menu.
+    Options,
+    /// 알림: a small dialog that asks for a confirmation, over whatever screen opened it.
+    AlertPopup,
+    /// The title screen ("TAP TO START").
+    Title,
+    /// 아로나의 출석부: the daily attendance sheet.
+    DailyAttendance,
+    /// 이벤트: the stages of a running event (Story, Quest, 개최 기간).
+    EventStages,
+    /// 총력전 between the end of a season and its results: "시즌 집계 중입니다" instead of the difficulty rows.
+    RaidTallying,
     Unknown,
 }
 
@@ -149,6 +163,13 @@ impl Scene {
             Scene::EventList => "이벤트 일람",
             Scene::SocialMenu => "소셜",
             Scene::Notice => "공지",
+            Scene::MenuCollection => "메뉴 모음",
+            Scene::Options => "옵션",
+            Scene::AlertPopup => "알림",
+            Scene::Title => "타이틀",
+            Scene::DailyAttendance => "출석부",
+            Scene::EventStages => "이벤트",
+            Scene::RaidTallying => "총력전 (집계 중)",
             Scene::Unknown => "",
         }
     }
@@ -169,10 +190,10 @@ fn header(boxes: &[TextBox]) -> String {
 }
 
 /// Where a popup's title sits (y range). The popup keeps its width in both layouts but is squeezed
-/// vertically in 16:9, so its title rises from about y 200..260 to about y 90..140.
+/// vertically in 16:9, so its title rises from about y 200..260 to about y 90..140 (the taller 메뉴 모음 title reaches y 326 in 4:3).
 fn popup_title_band(layout: Layout) -> (f32, f32) {
     match layout {
-        Layout::Ratio43 => (170.0, 300.0),
+        Layout::Ratio43 => (170.0, 340.0),
         Layout::Ratio169 => (60.0, 200.0),
     }
 }
@@ -211,6 +232,10 @@ pub fn classify_in(boxes: &[TextBox], pixel_scene: Option<Scene>, layout: Layout
     if let Some(s) = pixel_scene {
         return s;
     }
+    // a dialog opens over any screen, whose own title may still be readable under it
+    if popup_title_is(boxes, "알림", layout) {
+        return Scene::AlertPopup;
+    }
     if has(boxes, "적정보") && has(boxes, "상성정보") {
         return Scene::EnemyInfo;
     }
@@ -227,6 +252,18 @@ pub fn classify_in(boxes: &[TextBox], pixel_scene: Option<Scene>, layout: Layout
         return Scene::TimeAttackNextSeason;
     }
     // popups over the main menu show its bottom bar too, so they are told before the menu itself
+    if popup_title_is(boxes, "메뉴모음", layout) {
+        return Scene::MenuCollection;
+    }
+    if popup_title_is(boxes, "옵션", layout) {
+        return Scene::Options;
+    }
+    if has(boxes, "출석부") && has(boxes, "일차") {
+        return Scene::DailyAttendance;
+    }
+    if has(boxes, "TAPTOSTART") {
+        return Scene::Title;
+    }
     if has(boxes, "서클") && has(boxes, "친구") && has(boxes, "조력자") {
         return Scene::SocialMenu;
     }
@@ -248,10 +285,13 @@ pub fn classify_in(boxes: &[TextBox], pixel_scene: Option<Scene>, layout: Layout
         "상점" => Scene::Shop,
         "모집" => Scene::Recruit,
         "이벤트일람" => Scene::EventList,
+        "이벤트" if has(boxes, "Story") && has(boxes, "Quest") => Scene::EventStages,
         "업무" if has(boxes, "스포일러") => Scene::SpoilerWarning,
         "업무" => Scene::WorkHub,
         h if DUNGEON_HEADERS.contains(&h) && has(boxes, "스테이지목록") => Scene::DungeonList,
         h if DUNGEON_HEADERS.contains(&h) && has(boxes, "Select") => Scene::DungeonSelect,
+        // the 16:9 work hub shows no header, only its places
+        "" if has(boxes, "현상수배") && has(boxes, "특별의뢰") && has(boxes, "학원교류회") => Scene::WorkHub,
         _ if is_lobby_in(boxes, layout) => Scene::Lobby,
         _ => Scene::Unknown,
     }
@@ -265,6 +305,7 @@ fn raid_scene(header: &str, boxes: &[TextBox]) -> Option<Scene> {
     }
     match header {
         "총력전" if has(boxes, "BattleSelect") => Some(Scene::RaidSelect),
+        "총력전" if has(boxes, "시즌집계중") => Some(Scene::RaidTallying),
         "모의총력전" if has(boxes, "보스선택") => Some(Scene::MockRaidBosses),
         "제약해제결전" if has(boxes, "단계선택") || has(boxes, "클리어부대") => Some(Scene::UnrestrictedRaidStage),
         "제약해제결전" if has(boxes, "단계클리어시") => Some(Scene::UnrestrictedRaidStages),
@@ -314,9 +355,34 @@ impl MissionRef {
 static NUMBERED: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\s*(\d{1,2})\s*[-–—]\s*(\d{1,2})\s*[|｜lI]?\s*(.+?)\s*$").unwrap());
 static STAGE_LINE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\s*(\d{1,2})\s*[|｜lI]?\s*(\D.+?)\s*$").unwrap());
 
-/// The mission named on the "임무 정보" popup (its title line, around y 300..410).
+/// Where the text parsers look on one screen, in frame pixels. The game keeps the size of its UI in both
+/// layouts but lays it out differently: popups are squeezed vertically, so their lines sit higher in 16:9,
+/// and the squad screen's rows move by their own amounts (each measured on its recordings).
+struct Spots {
+    /// The mission line of the "임무 정보" popup (y range of a box).
+    info_line: (f32, f32),
+    /// The mission name in the enemy popup's title row.
+    enemy_title: (f32, f32),
+    /// The names of the strikers and of the specials on the squad screen (range of a box's top).
+    strikers: (f32, f32),
+    specials: (f32, f32),
+}
+
+fn spots(layout: Layout) -> Spots {
+    match layout {
+        Layout::Ratio43 => Spots { info_line: (300.0, 410.0), enemy_title: (190.0, 300.0), strikers: (690.0, 745.0), specials: (880.0, 935.0) },
+        Layout::Ratio169 => Spots { info_line: (200.0, 275.0), enemy_title: (70.0, 150.0), strikers: (510.0, 570.0), specials: (640.0, 700.0) },
+    }
+}
+
+/// The mission named on the "임무 정보" popup (its title line, around y 300..410 in 4:3).
 pub fn mission_from_info(boxes: &[TextBox]) -> Option<MissionRef> {
-    boxes.iter().filter(|b| b.y0 > 300.0 && b.y1 < 410.0 && b.x0 < 560.0).find_map(|b| {
+    mission_from_info_in(boxes, Layout::Ratio43)
+}
+
+pub fn mission_from_info_in(boxes: &[TextBox], layout: Layout) -> Option<MissionRef> {
+    let (top, bottom) = spots(layout).info_line;
+    boxes.iter().filter(|b| b.y0 > top && b.y1 < bottom && b.x0 < 560.0).find_map(|b| {
         if let Some(c) = NUMBERED.captures(&b.text) {
             let name = c[3].trim().to_string();
             let number = (c[1].parse().ok()?, c[2].parse().ok()?);
@@ -328,11 +394,16 @@ pub fn mission_from_info(boxes: &[TextBox]) -> Option<MissionRef> {
     })
 }
 
-/// The mission named on the enemy popup (its title, around y 200..300).
+/// The mission named on the enemy popup (its title, around y 200..300 in 4:3).
 pub fn mission_from_enemy_popup(boxes: &[TextBox]) -> Option<MissionRef> {
+    mission_from_enemy_popup_in(boxes, Layout::Ratio43)
+}
+
+pub fn mission_from_enemy_popup_in(boxes: &[TextBox], layout: Layout) -> Option<MissionRef> {
+    let (top, bottom) = spots(layout).enemy_title;
     boxes
         .iter()
-        .filter(|b| b.y0 > 190.0 && b.y1 < 300.0 && (b.x0 + b.x1) / 2.0 > 450.0 && (b.x0 + b.x1) / 2.0 < 830.0)
+        .filter(|b| b.y0 > top && b.y1 < bottom && (b.x0 + b.x1) / 2.0 > 450.0 && (b.x0 + b.x1) / 2.0 < 830.0)
         .map(|b| b.text.trim().to_string())
         .find(|t| t.chars().count() >= 2 && !t.contains('×'))
         .map(|name| MissionRef::named(&name))
@@ -349,15 +420,20 @@ pub fn place_from_list(boxes: &[TextBox]) -> Option<String> {
 /// (as OCR read them, to be matched to students by the caller), each with whether it was
 /// read in the specials' row.
 pub fn squad_names(boxes: &[TextBox]) -> Vec<(String, bool)> {
+    squad_names_in(boxes, Layout::Ratio43)
+}
+
+pub fn squad_names_in(boxes: &[TextBox], layout: Layout) -> Vec<(String, bool)> {
     let has_hangul = |t: &str| t.chars().any(|c| ('\u{AC00}'..='\u{D7A3}').contains(&c));
+    let Spots { strikers, specials, .. } = spots(layout);
     boxes
         .iter()
         .filter(|b| {
-            let strikers = b.y0 >= 690.0 && b.y0 <= 745.0 && b.x0 >= 200.0 && b.x1 <= 1100.0;
-            let specials = b.y0 >= 880.0 && b.y0 <= 935.0 && b.x0 >= 470.0 && b.x1 <= 1000.0;
-            (strikers || specials) && has_hangul(&b.text)
+            let in_strikers = b.y0 >= strikers.0 && b.y0 <= strikers.1 && b.x0 >= 200.0 && b.x1 <= 1100.0;
+            let in_specials = b.y0 >= specials.0 && b.y0 <= specials.1 && b.x0 >= 470.0 && b.x1 <= 1000.0;
+            (in_strikers || in_specials) && has_hangul(&b.text)
         })
-        .map(|b| (b.text.trim().to_string(), b.y0 >= 880.0))
+        .map(|b| (b.text.trim().to_string(), b.y0 >= specials.0))
         .collect()
 }
 
@@ -376,9 +452,14 @@ impl MissionTracker {
 
     /// Feed the screen just recognised (with its OCR text) and get the mission now in play.
     pub fn update(&mut self, scene: Scene, boxes: &[TextBox]) -> Option<&MissionRef> {
+        self.update_in(scene, boxes, Layout::Ratio43)
+    }
+
+    /// [`update`](Self::update) for a frame of the given layout.
+    pub fn update_in(&mut self, scene: Scene, boxes: &[TextBox], layout: Layout) -> Option<&MissionRef> {
         match scene {
             Scene::MissionInfo => {
-                if let Some(mut m) = mission_from_info(boxes) {
+                if let Some(mut m) = mission_from_info_in(boxes, layout) {
                     if m.stage_no.is_some() {
                         m.place = self.place.clone();
                     }
@@ -392,7 +473,7 @@ impl MissionTracker {
             }
             // the enemy popup opens on top of the info popup: it can only add a name, never replace a numbered mission
             Scene::EnemyInfo => {
-                if let Some(m) = mission_from_enemy_popup(boxes) {
+                if let Some(m) = mission_from_enemy_popup_in(boxes, layout) {
                     let same = self.mission.as_ref().is_some_and(|cur| norm(&cur.name) == norm(&m.name));
                     if !same {
                         self.mission = Some(m);
@@ -400,9 +481,11 @@ impl MissionTracker {
                 }
             }
             // the stage list names the place its stages belong to
+            // (no 16:9 recording of a stage list yet: its card is not located there, so no place is read)
             Scene::DungeonList => {
                 self.mission = None;
-                self.place = place_from_list(boxes).or_else(|| self.place.take());
+                let read = if layout == Layout::Ratio43 { place_from_list(boxes) } else { None };
+                self.place = read.or_else(|| self.place.take());
             }
             // back at a place from which another mission is picked (or none), or in a mode that has no campaign mission: forget
             Scene::DungeonSelect
@@ -431,11 +514,18 @@ impl MissionTracker {
             | Scene::Recruit
             | Scene::EventList
             | Scene::SocialMenu
-            | Scene::Notice => {
+            | Scene::Notice
+            | Scene::MenuCollection
+            | Scene::Options
+            | Scene::Title
+            | Scene::DailyAttendance
+            | Scene::EventStages
+            | Scene::RaidTallying => {
                 self.mission = None;
                 self.place = None;
             }
-            Scene::MissionMap | Scene::Squad | Scene::QuickFormation | Scene::Battle | Scene::Unknown => {}
+            // a dialog over a screen leaves what the screen under it showed
+            Scene::MissionMap | Scene::Squad | Scene::QuickFormation | Scene::Battle | Scene::AlertPopup | Scene::Unknown => {}
         }
         self.mission.as_ref()
     }
@@ -633,5 +723,85 @@ mod tests {
         let mut t = MissionTracker::default();
         let m = t.update(Scene::EnemyInfo, &boxes("enemy-info")).unwrap();
         assert_eq!(m.number, None);
+    }
+
+    #[test]
+    fn the_menu_popups_are_recognised_over_the_main_menu() {
+        assert_eq!(classify(&boxes("menu-collection"), None), Scene::MenuCollection);
+        assert_eq!(classify(&boxes("menu-options-game"), None), Scene::Options);
+        assert_eq!(classify(&boxes("menu-options-graphic"), None), Scene::Options);
+        // a popup title is a popup title only where a popup puts it: the 옵션 button of the menu popup is not one
+        let mut menu = boxes("menu-collection");
+        menu.retain(|b| !b.text.contains("메뉴 모음"));
+        assert_eq!(classify(&menu, None), Scene::Lobby);
+    }
+
+    #[test]
+    fn every_screen_recorded_in_16_9_is_recognised() {
+        for (file, want) in [
+            ("w169-lobby", Scene::Lobby),
+            ("w169-work-hub", Scene::WorkHub),
+            ("w169-mission-list", Scene::MissionList),
+            ("w169-mission-info", Scene::MissionInfo),
+            ("w169-enemy-info", Scene::EnemyInfo),
+            ("w169-squad", Scene::Squad),
+            ("w169-quick-formation", Scene::QuickFormation),
+            ("w169-mock-bosses", Scene::MockRaidBosses),
+            ("w169-mock-room-info", Scene::RaidRoomInfo),
+            ("w169-raid-formation", Scene::RaidFormation(RaidMode::MockTotalAssault)),
+            ("w169-raid-quick-formation", Scene::QuickFormation),
+            ("w169-raid-tallying", Scene::RaidTallying),
+            ("w169-notice", Scene::Notice),
+            ("w169-alert-date-changed", Scene::AlertPopup),
+            ("w169-alert-level", Scene::AlertPopup),
+            ("w169-title", Scene::Title),
+            ("w169-daily-attendance", Scene::DailyAttendance),
+            ("w169-event-open", Scene::EventStages),
+        ] {
+            assert_eq!(classify_in(&boxes(file), None, Layout::Ratio169), want, "{file}");
+        }
+    }
+
+    #[test]
+    fn a_dialog_over_a_popup_leaves_the_mission_as_it_was() {
+        let mut t = MissionTracker::default();
+        t.update_in(Scene::MissionInfo, &boxes("w169-mission-info"), Layout::Ratio169);
+        let kept = t.update_in(Scene::AlertPopup, &boxes("w169-alert-level"), Layout::Ratio169).cloned();
+        assert_eq!(kept.map(|m| m.number), Some(Some((19, 3))), "the dialog names nothing and keeps the mission");
+        // the title screen forgets it
+        assert!(t.update_in(Scene::Title, &boxes("w169-title"), Layout::Ratio169).is_none());
+    }
+
+    #[test]
+    fn the_16_9_mission_popups_name_the_mission() {
+        let m = mission_from_info_in(&boxes("w169-mission-info"), Layout::Ratio169).unwrap();
+        assert_eq!((m.number, norm(&m.name)), (Some((19, 3)), "설원지구제2지역".to_string()));
+        assert_eq!(mission_from_info(&boxes("w169-mission-info")), None, "the 4:3 band does not hold the 16:9 title");
+        let e = mission_from_enemy_popup_in(&boxes("w169-enemy-info"), Layout::Ratio169).unwrap();
+        assert_eq!(e.name, "설원 지구 제2 지역");
+        let mut t = MissionTracker::default();
+        assert_eq!(t.update_in(Scene::MissionInfo, &boxes("w169-mission-info"), Layout::Ratio169).unwrap().number, Some((19, 3)));
+        assert_eq!(t.update_in(Scene::EnemyInfo, &boxes("w169-enemy-info"), Layout::Ratio169).unwrap().number, Some((19, 3)));
+        assert_eq!(t.update_in(Scene::Squad, &boxes("w169-squad"), Layout::Ratio169).unwrap().number, Some((19, 3)));
+        assert!(t.update_in(Scene::MissionList, &boxes("w169-mission-list"), Layout::Ratio169).is_none());
+    }
+
+    #[test]
+    fn the_16_9_squad_screen_names_its_strikers_and_specials() {
+        let names = squad_names_in(&boxes("w169-squad"), Layout::Ratio169);
+        let texts: Vec<&str> = names.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(texts, vec!["호시노(무장)", "하나코(수영복)", "시로코*테러", "미카", "아코", "키사키"], "{names:?}");
+        assert_eq!(names.iter().map(|(_, special)| *special).collect::<Vec<_>>(), vec![false, false, false, false, true, true]);
+        // the empty raid formation shows no student, and the quick formation popup only the specials under it
+        assert!(squad_names_in(&boxes("w169-raid-formation"), Layout::Ratio169).is_empty());
+        let under_popup = squad_names_in(&boxes("w169-quick-formation"), Layout::Ratio169);
+        assert_eq!(under_popup.iter().filter(|(_, special)| *special).map(|(n, _)| n.as_str()).collect::<Vec<_>>(), vec!["아코", "키사키"], "{under_popup:?}");
+    }
+
+    #[test]
+    fn the_new_screens_have_labels() {
+        for scene in [Scene::MenuCollection, Scene::Options, Scene::AlertPopup, Scene::Title, Scene::DailyAttendance, Scene::EventStages, Scene::RaidTallying] {
+            assert!(!scene.label().is_empty(), "{scene:?}");
+        }
     }
 }
