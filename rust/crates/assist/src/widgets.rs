@@ -108,12 +108,15 @@ impl Widget for Formation {
     }
 }
 
-/// Distance of a student card's icon row above its name label's top (frame pixels): on the
-/// portrait, clear of the level at its top and the stars at its bottom.
-const ICONS_ABOVE_NAME: f32 = 58.0;
-/// The grid's viewport: a row whose portrait is mostly scrolled out of it gets no icons.
-const GRID_ICONS_TOP: f32 = 326.0;
-const GRID_ICONS_BOTTOM: f32 = 640.0;
+/// Icons stand in a column on a portrait's right edge, half on the portrait and half off
+/// it, so they stay off the face. The column starts this far above the name label's top,
+/// which is just under the squad-number badge in the portrait's top right corner.
+const COLUMN_TOP_ABOVE_NAME: i32 = 68;
+/// Distance from a card's centre to its portrait's right edge (frame pixels).
+const CARD_HALF_WIDTH: i32 = 52;
+/// The grid's viewport: a card whose portrait is mostly scrolled out of it gets no icons.
+const GRID_ICONS_TOP: i32 = 322;
+const GRID_ICONS_BOTTOM: i32 = 600;
 
 fn icons_of(s: &StudentBrief, terrain: Option<&str>) -> Vec<Icon> {
     let mut icons = Vec::new();
@@ -131,12 +134,12 @@ pub fn card_marks(cards: &[CardName], students: &[StudentBrief], terrain: Option
     cards
         .iter()
         .filter_map(|c| {
-            let cy = c.y0 - ICONS_ABOVE_NAME;
-            if !(GRID_ICONS_TOP..=GRID_ICONS_BOTTOM).contains(&cy) {
+            let top = c.y0.round() as i32 - COLUMN_TOP_ABOVE_NAME;
+            if !(GRID_ICONS_TOP..=GRID_ICONS_BOTTOM).contains(&top) {
                 return None;
             }
             let s = Wiki::match_student_as(students, &c.text, kind)?;
-            Some(Mark { cx: c.x.round() as i32, cy: cy.round() as i32, icons: icons_of(&s, terrain) })
+            Some(Mark::column_from_top(c.x.round() as i32 + CARD_HALF_WIDTH, top, icons_of(&s, terrain)))
         })
         .collect()
 }
@@ -159,15 +162,17 @@ impl Widget for PortraitIcons {
     }
 }
 
-/// Centres of the six slots of the squad strip at the bottom of the 빠른 편성 popup:
-/// four strikers, then two specials (frame pixels; the icons sit mid-portrait).
-const SLOT_CENTERS: [(i32, i32); 6] = [(68, 718), (160, 718), (255, 718), (347, 718), (445, 718), (535, 718)];
+/// Right edges of the six slots of the squad strip at the bottom of the 빠른 편성 popup:
+/// four strikers, then two specials (frame pixels). The icon columns straddle these edges.
+const SLOT_RIGHT_EDGES: [i32; 6] = [111, 205, 300, 392, 490, 579];
+/// Top of the column: below the leader badge of the first slot.
+const SLOT_COLUMN_TOP: i32 = 700;
 
 /// Slot centres for a squad: the strikers fill the first four, the specials the last two.
 pub fn slot_marks(team: &[StudentBrief], terrain: Option<&str>) -> Vec<Mark> {
     let strikers = team.iter().filter(|s| s.squad_type == "Main").take(4).enumerate().map(|(i, s)| (i, s));
     let specials = team.iter().filter(|s| s.squad_type != "Main").take(2).enumerate().map(|(i, s)| (4 + i, s));
-    strikers.chain(specials).map(|(slot, s)| Mark { cx: SLOT_CENTERS[slot].0, cy: SLOT_CENTERS[slot].1, icons: icons_of(s, terrain) }).collect()
+    strikers.chain(specials).map(|(slot, s)| Mark::column_from_top(SLOT_RIGHT_EDGES[slot], SLOT_COLUMN_TOP, icons_of(s, terrain))).collect()
 }
 
 /// Icons over the squad strip at the bottom of the 빠른 편성 popup.
@@ -207,13 +212,14 @@ mod tests {
         let cards = vec![
             CardName { text: "호시노(무장)".into(), x: 736.0, y0: 429.0 },
             CardName { text: "케이".into(), x: 1181.0, y0: 432.0 },
-            CardName { text: "케이".into(), x: 1181.0, y0: 380.0 }, // portrait mostly above the grid
+            CardName { text: "케이".into(), x: 1181.0, y0: 370.0 }, // portrait mostly above the grid
             CardName { text: "알수없음".into(), x: 900.0, y0: 430.0 },
         ];
         let marks = card_marks(&cards, &students, Some("Outdoor"), None);
         assert_eq!(marks.len(), 2, "a row scrolled out and an unknown name get no icons");
         assert_eq!(marks[0].icons, vec![Icon::Face(4), Icon::Attack("Pierce".into()), Icon::Armor("HeavyArmor".into())]);
-        assert_eq!((marks[0].cx, marks[0].cy), (736, 371));
+        // the column's middle is on the portrait's right edge, its top just below the badge
+        assert_eq!((marks[0].cx, marks[0].top(), marks[0].vertical), (736 + 52, 429 - 68, true));
         assert_eq!(card_marks(&cards, &students, None, None)[0].icons.len(), 2, "no terrain: only the types");
     }
 
@@ -236,7 +242,7 @@ mod tests {
             student(3, "c", "Mystic", "Unarmed", 4, "Support"),
         ];
         let marks = slot_marks(&team, Some("Outdoor"));
-        assert_eq!(marks.iter().map(|m| (m.cx, m.cy)).collect::<Vec<_>>(), vec![(68, 718), (160, 718), (445, 718)]);
+        assert_eq!(marks.iter().map(|m| (m.cx, m.top())).collect::<Vec<_>>(), vec![(111, 700), (205, 700), (490, 700)]);
         assert!(slot_marks(&[], None).is_empty());
     }
 

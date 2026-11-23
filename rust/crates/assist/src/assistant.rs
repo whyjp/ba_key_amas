@@ -314,8 +314,8 @@ mod tests {
             let shown = r.fake.0.borrow();
             // one icon row on the grid card, one per squad member on the strip at the bottom
             assert_eq!(shown.marks.len(), 3, "{:?}", shown.marks);
-            assert!(shown.marks.iter().any(|m| m.cx == 68 && m.cy == 718), "first striker slot");
-            assert!(shown.marks.iter().any(|m| m.cx == 445), "first special slot");
+            assert!(shown.marks.iter().any(|m| m.cx == 111 && m.top() == 700), "first striker slot");
+            assert!(shown.marks.iter().any(|m| m.cx == 490), "first special slot");
         }
         r.fake.0.borrow_mut().clicks.push("place:slot_stats".into());
         a.poll();

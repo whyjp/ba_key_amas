@@ -16,12 +16,31 @@ pub enum Icon {
     Armor(String),
 }
 
-/// A row of icons centred on (`cx`, `cy`) in the 1280x960 frame.
+/// A row (or column) of icons centred on (`cx`, `cy`) in the 1280x960 frame.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Mark {
     pub cx: i32,
     pub cy: i32,
     pub icons: Vec<Icon>,
+    /// Stacked top to bottom instead of left to right.
+    pub vertical: bool,
+}
+
+impl Mark {
+    pub fn row(cx: i32, cy: i32, icons: Vec<Icon>) -> Mark {
+        Mark { cx, cy, icons, vertical: false }
+    }
+
+    /// A column whose first icon starts at `top` and whose middle is at `cx`.
+    pub fn column_from_top(cx: i32, top: i32, icons: Vec<Icon>) -> Mark {
+        let height = row_width(icons.len()).round() as i32;
+        Mark { cx, cy: top + height / 2, icons, vertical: true }
+    }
+
+    /// Where the column's first icon starts (frame pixels).
+    pub fn top(&self) -> i32 {
+        self.cy - (row_width(self.icons.len()) / 2.0).round() as i32
+    }
 }
 
 /// Icon size in the 1280x960 frame.
@@ -116,11 +135,15 @@ pub fn render_marks(client_w: u32, client_h: u32, marks: &[Mark], fonts: &Fonts)
     for m in marks {
         let size = ICON * k;
         let total = row_width(m.icons.len()) * k;
-        let mut x = m.cx as f32 * k - total / 2.0;
-        let y = m.cy as f32 * k - size / 2.0;
+        let step = (ICON + GAP) * k;
+        let (mut x, mut y) = if m.vertical { (m.cx as f32 * k - size / 2.0, m.cy as f32 * k - total / 2.0) } else { (m.cx as f32 * k - total / 2.0, m.cy as f32 * k - size / 2.0) };
         for icon in &m.icons {
             draw_icon(&mut img, fonts, icon, x, y, size);
-            x += (ICON + GAP) * k;
+            if m.vertical {
+                y += step;
+            } else {
+                x += step;
+            }
         }
     }
     img
@@ -133,7 +156,7 @@ mod tests {
 
     fn sample() -> Vec<Mark> {
         let strip = |level: u8| vec![Icon::Face(level), Icon::Attack("Explosion".into()), Icon::Armor("HeavyArmor".into())];
-        (0..5).map(|i| Mark { cx: 160 + 220 * i, cy: 120, icons: strip(i as u8) }).collect()
+        (0..5).map(|i| if i % 2 == 0 { Mark::row(160 + 220 * i, 120, strip(i as u8)) } else { Mark::column_from_top(160 + 220 * i, 90, strip(i as u8)) }).collect()
     }
 
     #[test]
@@ -157,9 +180,22 @@ mod tests {
     }
 
     #[test]
+    fn a_column_stacks_downward_from_its_top_and_a_row_does_not() {
+        let Some(f) = load_fonts() else { return };
+        let icons = vec![Icon::Face(4), Icon::Attack("Explosion".into()), Icon::Armor("HeavyArmor".into())];
+        let col = Mark::column_from_top(300, 200, icons.clone());
+        assert_eq!(col.top(), 200);
+        let img = render_marks(1280, 960, &[col.clone()], &f);
+        let drawn = |x: u32, y: u32| img.get_pixel(x, y)[3] > 0;
+        assert!(drawn(300, 210) && drawn(300, 232) && drawn(300, 254), "three icons one below the other");
+        assert!(!drawn(300, 190) && !drawn(300, 275), "nothing above the top or below the stack");
+        assert!(!drawn(280, 232) && !drawn(322, 232), "one icon wide");
+    }
+
+    #[test]
     fn faces_differ_by_level_and_types_by_kind() {
         let Some(f) = load_fonts() else { return };
-        let one = |icon: Icon| render_marks(100, 100, &[Mark { cx: 640, cy: 480, icons: vec![icon] }], &f);
+        let one = |icon: Icon| render_marks(100, 100, &[Mark::row(640, 480, vec![icon])], &f);
         let k = 100.0 / 1280.0;
         let at = |img: &RgbaImage| *img.get_pixel((640.0 * k) as u32, (468.0 * k) as u32);
         assert_ne!(at(&one(Icon::Face(4))), at(&one(Icon::Face(0))));
