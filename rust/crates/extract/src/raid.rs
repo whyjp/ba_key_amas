@@ -250,7 +250,15 @@ impl RaidTracker {
             | Scene::TimeAttackNextSeason
             | Scene::EliminateSelect
             | Scene::EliminateClosed
-            | Scene::SpoilerWarning => self.raid = None,
+            | Scene::SpoilerWarning
+            | Scene::Cafe
+            | Scene::Schedule
+            | Scene::Craft
+            | Scene::Shop
+            | Scene::Recruit
+            | Scene::EventList
+            | Scene::SocialMenu
+            | Scene::Notice => self.raid = None,
         }
         self.raid.as_ref()
     }

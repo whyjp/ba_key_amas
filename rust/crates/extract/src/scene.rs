@@ -63,6 +63,22 @@ pub enum Scene {
     EliminateClosed,
     /// The warning before 제약해제결전 ("강력한 스포일러가 포함되어 있습니다") over the work hub.
     SpoilerWarning,
+    /// 카페.
+    Cafe,
+    /// 스케줄: the places to visit ("Location Select").
+    Schedule,
+    /// 제조: crafting.
+    Craft,
+    /// 상점.
+    Shop,
+    /// 모집: the recruitment (gacha) screen.
+    Recruit,
+    /// 이벤트 일람: the list of running events.
+    EventList,
+    /// 소셜: the menu of 서클, 친구 and 조력자, over the main menu.
+    SocialMenu,
+    /// 공지: the notice popup over the main menu.
+    Notice,
     Unknown,
 }
 
@@ -124,6 +140,14 @@ impl Scene {
             Scene::EliminateSelect => "대결전",
             Scene::EliminateClosed => "대결전 (휴식기)",
             Scene::SpoilerWarning => "스포일러 경고",
+            Scene::Cafe => "카페",
+            Scene::Schedule => "스케줄",
+            Scene::Craft => "제조",
+            Scene::Shop => "상점",
+            Scene::Recruit => "모집",
+            Scene::EventList => "이벤트 일람",
+            Scene::SocialMenu => "소셜",
+            Scene::Notice => "공지",
             Scene::Unknown => "",
         }
     }
@@ -180,6 +204,13 @@ pub fn classify(boxes: &[TextBox], pixel_scene: Option<Scene>) -> Scene {
     if popup_title_is(boxes, "다음시즌정보") {
         return Scene::TimeAttackNextSeason;
     }
+    // popups over the main menu show its bottom bar too, so they are told before the menu itself
+    if has(boxes, "서클") && has(boxes, "친구") && has(boxes, "조력자") {
+        return Scene::SocialMenu;
+    }
+    if has(boxes, "진행이벤트") && has(boxes, "공략게시판") {
+        return Scene::Notice;
+    }
     let header = header(boxes);
     if let Some(scene) = raid_scene(&header, boxes) {
         return scene;
@@ -188,6 +219,13 @@ pub fn classify(boxes: &[TextBox], pixel_scene: Option<Scene>) -> Scene {
         "임무" if has(boxes, "투입부대") || has(boxes, "임무개시") => Scene::MissionMap,
         "임무" if has(boxes, "Normal") && has(boxes, "Hard") => Scene::MissionList,
         "편성" => Scene::Squad,
+        "카페" => Scene::Cafe,
+        // the game's own word is 스케줄; OCR reads the last syllable both ways
+        "스케줄" | "스케쥴" => Scene::Schedule,
+        "제조" => Scene::Craft,
+        "상점" => Scene::Shop,
+        "모집" => Scene::Recruit,
+        "이벤트일람" => Scene::EventList,
         "업무" if has(boxes, "스포일러") => Scene::SpoilerWarning,
         "업무" => Scene::WorkHub,
         h if DUNGEON_HEADERS.contains(&h) && has(boxes, "스테이지목록") => Scene::DungeonList,
@@ -363,7 +401,15 @@ impl MissionTracker {
             | Scene::TimeAttackNextSeason
             | Scene::EliminateSelect
             | Scene::EliminateClosed
-            | Scene::SpoilerWarning => {
+            | Scene::SpoilerWarning
+            | Scene::Cafe
+            | Scene::Schedule
+            | Scene::Craft
+            | Scene::Shop
+            | Scene::Recruit
+            | Scene::EventList
+            | Scene::SocialMenu
+            | Scene::Notice => {
                 self.mission = None;
                 self.place = None;
             }
@@ -409,6 +455,15 @@ mod tests {
             ("dungeon-list-school", Scene::DungeonList),
             ("dungeon-info-bounty", Scene::MissionInfo),
             ("dungeon-info-week", Scene::MissionInfo),
+            ("menu-formation", Scene::Squad),
+            ("menu-cafe", Scene::Cafe),
+            ("menu-schedule", Scene::Schedule),
+            ("menu-craft", Scene::Craft),
+            ("menu-shop", Scene::Shop),
+            ("menu-recruit", Scene::Recruit),
+            ("menu-events", Scene::EventList),
+            ("menu-social", Scene::SocialMenu),
+            ("menu-notice", Scene::Notice),
         ] {
             assert_eq!(classify(&boxes(file), None), want, "{file}");
         }
