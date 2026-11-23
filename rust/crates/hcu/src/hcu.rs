@@ -106,6 +106,7 @@ pub struct Hcu {
     stats: std::sync::Mutex<std::collections::BTreeMap<String, (u64, f64)>>,
     /// Size of the GUI frame last reported by HCU (screenshots and input results both carry it).
     frame: std::sync::Mutex<(i64, i64)>,
+    retrying: std::sync::atomic::AtomicBool,
 }
 
 impl Hcu {
@@ -114,7 +115,7 @@ impl Hcu {
     }
 
     pub fn with_runner(runner: Box<dyn Runner>) -> Self {
-        Self { runner, no_sleep: false, stats: Default::default(), frame: Default::default() }
+        Self { runner, no_sleep: false, stats: Default::default(), frame: Default::default(), retrying: Default::default() }
     }
 
     /// Binary from `$HCU_BIN`, else `vendor/hcu/computer-use[.exe]` beside the
@@ -209,6 +210,14 @@ impl Hcu {
         let out = self.run_args(args)?;
         let r: Record = serde_json::from_str(out.trim()).map_err(|e| anyhow!("HCU {:?}: {} ({})", args, e, out))?;
         if !r.ok {
+            // The screen's layout changed since the last frame HCU gave out: input is
+            // refused (nothing was sent), the remedy is a fresh screenshot, then again.
+            let is_input = matches!(args.get(1), Some(&"click") | Some(&"double_click") | Some(&"move") | Some(&"--json"));
+            if is_input && !r.input_emitted && r.code == "gui_frame_stale" && !self.retrying.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                let again = self.screenshot().and_then(|_| self.call_inner(args));
+                self.retrying.store(false, std::sync::atomic::Ordering::SeqCst);
+                return again;
+            }
             bail!("HCU {:?}: {} {} (input_emitted={})", args, r.code, r.hint, r.input_emitted);
         }
         Ok(r)

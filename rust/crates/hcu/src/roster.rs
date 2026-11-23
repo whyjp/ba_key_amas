@@ -64,8 +64,13 @@ pub fn scroll_to_top_by(h: &Hcu, region: R4, moves: usize) -> Result<RgbImage> {
 }
 
 pub fn scroll_to_top(h: &Hcu, region: R4) -> Result<RgbImage> {
-    scroll_to_top_by(h, region, 6)
+    scroll_to_top_by(h, region, TOP_MOVES)
 }
+
+/// Wheel movements sent in the single call that goes back to the top. Extra movements
+/// in one call cost almost nothing and the list stops at its start, so one call is
+/// enough from anywhere in the list (about 15 movements cross a 106-student roster).
+const TOP_MOVES: usize = 40;
 
 /// Grid lines seen so far, counted by line instead of by portrait.
 ///
@@ -207,7 +212,7 @@ fn count_pages(h: &Hcu, region: R4, lines: Option<i32>, delta: i32, on_count: &m
         drop(tx);
         // back to the top while the last frames are still being tallied
         let to_top = match &captured {
-            Ok(moves) => scroll_to_top_by(h, region, (*moves * 2).max(6)).map(|_| ()),
+            Ok(_) => scroll_to_top_by(h, region, TOP_MOVES).map(|_| ()),
             Err(_) => Ok(()),
         };
         let tally = worker.join().map_err(|_| anyhow!("the page tally panicked"))?;

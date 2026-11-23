@@ -58,7 +58,9 @@ fn read_popup_ends(h: &Hcu, region: [f64; 4]) -> Result<(RgbImage, RgbImage)> {
     let (fx, fy) = to_frame(region, 640, 560);
     let mut last_err = anyhow!("stat popup ends not read");
     for _ in 0..2 {
-        h.scroll(fx, fy, -12)?;
+        // one movement covers only about half the popup, and it reopens where it was left:
+        // enough movements in one call to reach the top from anywhere
+        h.scroll_n(fx, fy, -12, POPUP_UP_MOVES)?;
         let top = settle_quiet(h, region).context("stat popup top")?;
         // two wheel movements in one call: one is not always enough to reach the end
         h.scroll_n(fx, fy, 6, 2)?;
@@ -70,6 +72,9 @@ fn read_popup_ends(h: &Hcu, region: [f64; 4]) -> Result<(RgbImage, RgbImage)> {
     }
     Err(last_err)
 }
+
+/// Wheel movements (one call) that bring the stat popup to its top from any offset.
+const POPUP_UP_MOVES: usize = 4;
 
 /// The top and bottom of the popup differ in far more than this fraction of pixels.
 const POPUP_ENDS_DIFFER: f64 = 0.02;
@@ -162,6 +167,9 @@ mod tests {
             w.inputs(),
             vec![
                 "click 1138.00 320.00",
+                "scroll 640.00 560.00 -12",
+                "scroll 640.00 560.00 -12",
+                "scroll 640.00 560.00 -12",
                 "scroll 640.00 560.00 -12",
                 "scroll 640.00 560.00 6",
                 "scroll 640.00 560.00 6",
