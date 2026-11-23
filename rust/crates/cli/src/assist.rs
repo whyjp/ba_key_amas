@@ -6,6 +6,7 @@
 //! It can be started before the game, after it, or while it restarts: the window is looked
 //! for again whenever it is not known, and forgotten when it stops answering.
 use anyhow::{bail, Result};
+use crate::profile::Profile;
 use crate::scan::{self, ScanRequest};
 use baocr_assist::{read_library, Assistant, Command, Observer, Settings};
 use baocr_core::ocr_api::Ocr;
@@ -58,10 +59,14 @@ pub fn run(ocr: Arc<dyn Ocr>, hcu: &Hcu, region_spec: &str, wiki_path: &Path, ou
 
     let (mut region, mut prev, mut handled, mut still, mut loops, mut failures) = (None::<[f64; 4]>, None, None, 0u32, 0u32, 0u32);
     let mut said_waiting = false;
+    let mut prof = Profile::from_env();
     while !stop.load(Ordering::Relaxed) {
         loops += 1;
-        assistant.poll();
-        assistant.tick(SystemTime::now());
+        prof.report();
+        prof.time("poll", || {
+            assistant.poll();
+            assistant.tick(SystemTime::now());
+        });
         for command in assistant.take_commands() {
             match command {
                 Command::Quit => {
@@ -124,7 +129,7 @@ pub fn run(ocr: Arc<dyn Ocr>, hcu: &Hcu, region_spec: &str, wiki_path: &Path, ou
             }
         }
         let Some(r) = region else { continue };
-        let img = match game_capture(hcu, r) {
+        let img = match prof.time("capture", || game_capture(hcu, r)) {
             Ok(i) => {
                 failures = 0;
                 i
@@ -140,24 +145,27 @@ pub fn run(ocr: Arc<dyn Ocr>, hcu: &Hcu, region_spec: &str, wiki_path: &Path, ou
                 continue;
             }
         };
-        let key = frame_key(&img);
-        let moving = prev.as_ref().map_or(true, |p| frame_distance(p, &key) >= STILL);
+        let (key, moving) = prof.time("key", || {
+            let key = frame_key(&img);
+            let moving = prev.as_ref().map_or(true, |p| frame_distance(p, &key) >= STILL);
+            (key, moving)
+        });
         still = if moving { 0 } else { still + 1 };
         prev = Some(key);
         if moving {
             // icons placed for the old view would sit on the wrong things until the new one is read
-            assistant.transition();
+            prof.time("transition", || assistant.transition());
         }
         let new_view = handled.as_ref().map_or(true, |h| frame_distance(h, &key) > STILL);
         if still >= 1 && new_view {
-            let boxes = ocr.boxes(&img).unwrap_or_default();
+            let boxes = prof.time("ocr", || ocr.boxes(&img).unwrap_or_default());
             // the student list and profile are told apart by pixels, only when the text names no screen
-            let fallback = match screen_kind(&img) {
+            let fallback = prof.time("kind", || match screen_kind(&img) {
                 Screen::Profile => Scene::StudentProfile,
                 Screen::Roster => Scene::StudentList,
                 Screen::Other => Scene::Unknown,
-            };
-            let scene = assistant.on_frame(&img, &boxes, fallback);
+            });
+            let scene = prof.time("observe+present", || assistant.on_frame(&img, &boxes, fallback));
             println!("screen: {scene:?}");
             handled = Some(key);
         }

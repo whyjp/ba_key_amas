@@ -10,10 +10,71 @@ use crate::render::{load_fonts, Fonts, Ltrb};
 use crate::marks::render_marks;
 use crate::{Card, Shown};
 use std::ffi::c_void;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+/// `BAOCR_PROFILE=1`: time the parts of the overlay thread's tick and print the totals every 5 s.
+mod prof {
+    use super::*;
+
+    #[derive(Clone, Copy)]
+    pub enum Part {
+        Geometry,
+        Covered,
+        RenderCard,
+        Hash,
+        RenderIngame,
+        RenderMarks,
+        Blit,
+        Update,
+        Busy,
+    }
+    const NAMES: [&str; 9] = ["game_geometry", "covered", "render_card", "state_hash", "render_ingame", "render_marks", "blit", "UpdateLayeredWindow", "tick busy"];
+    static ON: AtomicBool = AtomicBool::new(false);
+    static NS: [AtomicU64; 9] = [const { AtomicU64::new(0) }; 9];
+    static N: [AtomicU32; 9] = [const { AtomicU32::new(0) }; 9];
+
+    pub fn enable() {
+        ON.store(std::env::var_os("BAOCR_PROFILE").is_some(), Ordering::Relaxed);
+    }
+
+    pub fn time<T>(part: Part, f: impl FnOnce() -> T) -> T {
+        if !ON.load(Ordering::Relaxed) {
+            return f();
+        }
+        let t = Instant::now();
+        let r = f();
+        add(part, t.elapsed());
+        r
+    }
+
+    pub fn add(part: Part, d: Duration) {
+        if ON.load(Ordering::Relaxed) {
+            NS[part as usize].fetch_add(d.as_nanos() as u64, Ordering::Relaxed);
+            N[part as usize].fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// Print and reset the totals once `window` has passed since `since`.
+    pub fn report(since: &mut Instant, window: Duration) {
+        if !ON.load(Ordering::Relaxed) || since.elapsed() < window {
+            return;
+        }
+        let secs = since.elapsed().as_secs_f64();
+        *since = Instant::now();
+        let ticks = N[Part::Busy as usize].swap(0, Ordering::Relaxed).max(1);
+        let mut line = format!("overlay profile {secs:.1}s, {ticks} ticks:");
+        for (i, name) in NAMES.iter().enumerate() {
+            let (ns, n) = (NS[i].swap(0, Ordering::Relaxed), if i == Part::Busy as usize { ticks } else { N[i].swap(0, Ordering::Relaxed) });
+            if n > 0 {
+                line += &format!(" {name} {:.2}ms x{n} (sum {:.0}ms);", ns as f64 / 1e6 / n as f64, ns as f64 / 1e6);
+            }
+        }
+        eprintln!("{line}");
+    }
+}
 
 #[repr(C)]
 struct Point {
@@ -362,10 +423,10 @@ impl Layer {
             self.canvas = Canvas::new(screen_dc, w, h);
         }
         if let Some(c) = self.canvas.as_mut() {
-            c.blit(img);
+            prof::time(prof::Part::Blit, || c.blit(img));
             let (p, size, src) = (Point { x: pos.0, y: pos.1 }, Size { cx: w, cy: h }, Point { x: 0, y: 0 });
             let blend = BlendFunction { op: 0, flags: 0, alpha: 255, format: 1 };
-            UpdateLayeredWindow(self.hwnd, screen_dc, &p, &size, c.dc, &src, 0, &blend, ULW_ALPHA);
+            prof::time(prof::Part::Update, || UpdateLayeredWindow(self.hwnd, screen_dc, &p, &size, c.dc, &src, 0, &blend, ULW_ALPHA));
             if !self.visible {
                 ShowWindow(self.hwnd, SW_SHOWNOACTIVATE);
                 self.visible = true;
@@ -418,14 +479,18 @@ fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, stop: Arc<Atom
         // a drag of the card by its header: where in the card it was picked up, and where it is now
         let mut drag: Option<(i32, i32)> = None;
         let mut drag_at: Option<(i32, i32)> = None;
+        prof::enable();
+        let mut prof_since = Instant::now();
         while !stop.load(Ordering::Relaxed) {
+            let tick_start = Instant::now();
+            prof::report(&mut prof_since, Duration::from_secs(5));
             let mut msg: Msg = std::mem::zeroed();
             while PeekMessageW(&mut msg, 0, 0, 0, PM_REMOVE) != 0 {
                 TranslateMessage(&msg);
                 DispatchMessageW(&msg);
             }
             if tick % 8 == 0 {
-                rect = game_geometry(); // follow the window if it moves
+                rect = prof::time(prof::Part::Geometry, game_geometry); // follow the window if it moves
             }
             // clicks on the card's buttons
             let game_present_now = rect.is_some();
@@ -450,12 +515,13 @@ fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, stop: Arc<Atom
                 let w = primary_work();
                 ((w.2 - 2, w.1, w.2, w.1 + 200), (w.2 - 2, w.1, w.2, w.1 + 200), w, 0)
             });
-            if game_present && covered(game, [card.hwnd, ingame.hwnd, marks.hwnd, tip.hwnd], outer) {
+            if game_present && prof::time(prof::Part::Covered, || covered(game, [card.hwnd, ingame.hwnd, marks.hwnd, tip.hwnd], outer)) {
                 card.hide();
                 ingame.hide();
                 marks.hide();
                 tip.hide();
                 tick = tick.wrapping_add(1);
+                prof::add(prof::Part::Busy, tick_start.elapsed());
                 std::thread::sleep(Duration::from_millis(90));
                 continue;
             }
@@ -465,8 +531,8 @@ fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, stop: Arc<Atom
             match &shown.card {
                 Card::Hidden => card.hide(),
                 Card::Panel(p) => {
-                    let (img, hits) = render_panel_hits(panel_width(cw) as u32, p, &fonts);
-                    let key = hash_of(&(format!("{p:?}"), cw, ch));
+                    let (img, hits) = prof::time(prof::Part::RenderCard, || render_panel_hits(panel_width(cw) as u32, p, &fonts));
+                    let key = prof::time(prof::Part::Hash, || hash_of(&(format!("{p:?}"), cw, ch)));
                     let size = (img.width() as i32, img.height() as i32);
                     // against the game on the docked side; with no room, inside it rather than nowhere
                     let docked = if game_present {
@@ -525,9 +591,9 @@ fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, stop: Arc<Atom
                 // a card inside the game
                 match &shown.ingame {
                     Some(p) => {
-                        let img = render_panel(ingame_panel_width(cw) as u32, p, &fonts);
+                        let img = prof::time(prof::Part::RenderIngame, || render_panel(ingame_panel_width(cw) as u32, p, &fonts));
                         let at = ingame_origin(client, (img.width() as i32, img.height() as i32));
-                        let key = hash_of(&(format!("{p:?}"), cw, ch)) ^ hash_of(&at);
+                        let key = prof::time(prof::Part::Hash, || hash_of(&(format!("{p:?}"), cw, ch)) ^ hash_of(&at));
                         ingame.show(screen_dc, &img, at, key);
                     }
                     None => ingame.hide(),
@@ -538,7 +604,7 @@ fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, stop: Arc<Atom
                 } else {
                     let key = hash_of(&(&shown.marks, client.0, client.1, cw, ch));
                     if !(marks.visible && marks.drawn == Some(key)) {
-                        let img = render_marks(cw as u32, ch as u32, &shown.marks, &fonts);
+                        let img = prof::time(prof::Part::RenderMarks, || render_marks(cw as u32, ch as u32, &shown.marks, &fonts));
                         marks.show(screen_dc, &img, (client.0, client.1), key);
                     }
                 }
@@ -547,6 +613,7 @@ fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, stop: Arc<Atom
                 marks.hide();
             }
             tick = tick.wrapping_add(1);
+            prof::add(prof::Part::Busy, tick_start.elapsed());
             // a drag needs the card to follow the cursor smoothly
             std::thread::sleep(Duration::from_millis(if drag.is_some() { 16 } else { 90 }));
         }
