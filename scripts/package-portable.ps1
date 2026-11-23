@@ -4,7 +4,7 @@ param([string]$Out = "D:\dist\ba-scanner")
 $ErrorActionPreference = "Stop"
 $root = Split-Path $PSScriptRoot -Parent
 $env:CARGO_HOME = "D:/cargo-home"; $env:CARGO_TARGET_DIR = "D:/cargo-target/baocr"
-Push-Location "$root\rust"; cargo build --release -p baocr; Pop-Location
+Push-Location "$root\rust"; cargo build --release -p baocr --features directml; Pop-Location
 $rel = "$env:CARGO_TARGET_DIR/release"
 New-Item -ItemType Directory -Force $Out, "$Out\models", "$Out\wikidb", "$Out\vendor\hcu" | Out-Null
 Copy-Item "$rel\baocr.exe" "$Out\ba-scanner.exe" -Force
