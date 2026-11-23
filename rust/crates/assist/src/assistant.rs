@@ -29,6 +29,7 @@ const BUTTON_INGAME: &str = "ingame";
 const BUTTON_PLACE: &str = "place:";
 const BUTTON_SCAN: &str = "scan:start";
 const BUTTON_SCAN_DEEP: &str = "scan:deep";
+const BUTTON_PROGRESS_SCAN: &str = "scan:progress";
 /// Sent by the card's 종료 button and by the tray icon's 종료.
 const BUTTON_QUIT: &str = "quit";
 /// Folds and unfolds the student-list section.
@@ -40,6 +41,8 @@ const BUTTON_STUDENT_SECTION: &str = "section:student";
 pub enum Command {
     /// Scan the student list; `deep` also reads the popup and the two tabs of each student.
     StartScan { deep: bool },
+    /// Read the account's progress (schedule ranks, story and event progress) from the game's screens.
+    StartProgressScan,
     /// End the add-on.
     Quit,
 }
@@ -296,6 +299,12 @@ impl<'a, S: Surface> Assistant<'a, S> {
             }
             return false;
         }
+        if event == BUTTON_PROGRESS_SCAN {
+            if !self.scanning && !self.commands.contains(&Command::StartProgressScan) {
+                self.commands.push(Command::StartProgressScan);
+            }
+            return false;
+        }
         if event == BUTTON_SCAN_DEEP {
             self.settings.scan_deep = !self.settings.scan_deep;
             return true;
@@ -323,6 +332,8 @@ impl<'a, S: Surface> Assistant<'a, S> {
             rows.push(Row::Button { id: BUTTON_SCAN_DEEP.into(), label: "스캔 · 상세 포함".into(), value: on_off(self.settings.scan_deep), on: self.settings.scan_deep });
             rows.push(Row::Button { id: BUTTON_SCAN.into(), label: "학생 정보 스캔".into(), value: "시작".into(), on: false });
         }
+        rows.push(Row::Heading("진행 상태".into()));
+        rows.push(Row::Button { id: BUTTON_PROGRESS_SCAN.into(), label: "진행 상태 스캔".into(), value: "시작".into(), on: false });
         rows.push(Row::Heading("표시".into()));
         rows.push(Row::Button { id: BUTTON_INGAME.into(), label: "인게임 표시".into(), value: on_off(self.settings.ingame_visible), on: self.settings.ingame_visible });
         for w in &self.widgets {
@@ -818,6 +829,19 @@ mod tests {
         a.poll();
         assert_eq!(a.take_commands(), vec![Command::StartScan { deep: true }]);
         assert!(a.settings().scan_deep);
+    }
+
+    #[test]
+    fn the_progress_scan_is_its_own_command_and_waits_for_a_running_scan() {
+        let (r, ocr) = (rig(), NoOcr);
+        let mut a = assistant(&r, &ocr);
+        click(&r, "scan:progress");
+        a.poll();
+        assert_eq!(a.take_commands(), vec![Command::StartProgressScan]);
+        a.begin_scan();
+        click(&r, "scan:progress");
+        a.poll();
+        assert!(a.take_commands().is_empty(), "one scan at a time");
     }
 
     #[test]

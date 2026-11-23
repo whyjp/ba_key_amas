@@ -8,6 +8,7 @@
 use anyhow::{bail, Result};
 use crate::dump::DumpSurface;
 use crate::profile::Profile;
+use crate::progress_scan;
 use crate::scan::{self, ScanRequest};
 use baocr_assist::observe::BattleGate;
 use baocr_assist::{read_library, Assistant, Command, Observation, Observer, Settings, Surface};
@@ -124,6 +125,31 @@ fn run_on<S: Surface>(surface: S, ocr: Arc<dyn Ocr>, session: &HcuSession, regio
                 Command::Quit => {
                     println!("add-on closed");
                     return Ok(());
+                }
+                Command::StartProgressScan => {
+                    let Some(r) = region else {
+                        println!("progress scan: the game window is not found");
+                        continue;
+                    };
+                    cancel.store(false, Ordering::SeqCst);
+                    assistant.begin_scan();
+                    let last = RefCell::new(BannerState::counting(0));
+                    match progress_scan::scan_progress(ocr.clone(), &session.exclusive(), r, &crate::progress_dir(), &|s| {
+                        *last.borrow_mut() = s.clone();
+                        assistant.scan_progress(s)
+                    }) {
+                        Ok(s) => println!("progress scan finished: {} sections, {}", s.sections_read, s.file.display()),
+                        Err(e) => eprintln!("progress scan failed: {e:#}"),
+                    }
+                    assistant.release_input();
+                    if cancel.swap(false, Ordering::SeqCst) {
+                        let l = last.borrow().clone();
+                        assistant.scan_progress(BannerState::failed(l.done, l.total, "ESC로 중단했습니다. 입력 제어권이 돌아왔습니다"));
+                        println!("progress scan stopped by the player; input control returned");
+                    }
+                    std::thread::sleep(Duration::from_secs(4));
+                    assistant.scan_finished(read_library(out));
+                    (prev, handled, still) = (None, None, 0);
                 }
                 Command::StartScan { deep } => {
                     let Some(r) = region else {
