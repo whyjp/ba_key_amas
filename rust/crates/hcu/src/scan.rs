@@ -54,6 +54,23 @@ pub fn wait_stable_next(h: &Hcu, region: [f64; 4], prev: &DetailKey) -> Result<O
     Ok(None)
 }
 
+/// The first profile as it looks once it holds still. It is captured right after the profile opened,
+/// often mid-slide, and it is the reference the wrap back to the first student is recognised by: a frame
+/// caught a few pixels off would never match the settled one, and the scan would run into a repeat.
+fn settled(h: &Hcu, region: [f64; 4], first: RgbImage) -> Result<RgbImage> {
+    let mut last = first;
+    for _ in 0..12 {
+        h.nap(100);
+        let cur = game_capture(h, region)?;
+        let still = frame_distance(&frame_key(&last), &frame_key(&cur)) < 1.5;
+        last = cur;
+        if still {
+            break;
+        }
+    }
+    Ok(last)
+}
+
 /// Walks sequential profiles with the right arrow, handing each captured
 /// student (detail frame plus, with `deep`, the menu frames) to `sink`.
 ///
@@ -75,6 +92,7 @@ pub fn scan_arrows(
     if roster_visible_pixels(&img) {
         bail!("open the first student profile before --scan-arrows");
     }
+    img = settled(h, region, img)?;
     let first = detail_key(&img);
     let mut seen: Vec<DetailKey> = Vec::new();
     for i in 0..max_students {

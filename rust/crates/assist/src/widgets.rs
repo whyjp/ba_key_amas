@@ -5,7 +5,7 @@ use crate::widget::{is_mission_screen, is_raid_screen, Context, Kind, Lookup, Ou
 use baocr_extract::raid::{RaidRef, DIFFICULTIES};
 use baocr_extract::scene::{RaidMode, Scene};
 use baocr_extract::CardName;
-use baocr_overlay::{Chip, Frame, Icon, Mark, Row, Tone};
+use baocr_overlay::{Chip, Frame, Hue, Icon, Mark, Row, Tone, TypeTag};
 use baocr_wikidb::{evaluate, rate, FormationScore, MissionBrief, Rating, SeasonRelation, Share, StudentBrief, Tally, TypeTable, Verdict, Wiki};
 
 /// The types of an encounter with their share of the enemy HP, the small ones merged into "기타".
@@ -255,8 +255,32 @@ fn marks_of(s: &StudentBrief, brief: Option<&MissionBrief>, terrain: Option<&str
             (std::iter::once(Icon::Fit(grade)).chain(face).collect(), Some(grade))
         }
         Some(Rating::NotRated(_)) => (vec![Icon::Special], None),
-        None => (face.into_iter().collect(), None),
+        // no mission to rate against: the fixed facts of the student, straight from the database
+        None => (attack_icon(&s.bullet_type).into_iter().chain(armor_icon(&s.armor_type)).chain(face).collect(), None),
     }
+}
+
+fn attack_icon(code: &str) -> Option<Icon> {
+    let (hue, glyph) = match code {
+        "Explosion" => (Hue::Red, '폭'),
+        "Pierce" => (Hue::Yellow, '관'),
+        "Mystic" => (Hue::Blue, '신'),
+        "Sonic" => (Hue::Purple, '진'),
+        _ => return None,
+    };
+    Some(Icon::Attack(TypeTag { hue, glyph }))
+}
+
+fn armor_icon(code: &str) -> Option<Icon> {
+    let (hue, glyph) = match code {
+        "LightArmor" => (Hue::Red, '경'),
+        "HeavyArmor" => (Hue::Yellow, '중'),
+        "Unarmed" => (Hue::Blue, '특'),
+        "ElasticArmor" => (Hue::Purple, '탄'),
+        "CompositeArmor" => (Hue::Grey, '복'),
+        _ => return None,
+    };
+    Some(Icon::Armor(TypeTag { hue, glyph }))
 }
 
 /// Marks for the student cards on screen.
@@ -441,9 +465,11 @@ mod tests {
         assert_eq!((marks[0].cx, marks[0].top(), marks[0].vertical), (736 + 52, 429 - 68, true));
         let frame = marks[0].frame.unwrap();
         assert_eq!((frame.left, frame.right, frame.grade), (736 - 55, 736 + 55, Grade::Excellent));
-        // no mission known: nothing to rate, only the terrain face (and none without a terrain)
-        assert_eq!(card_marks(&cards, &students, None, Some("Outdoor"), &t, None)[0].icons, vec![Icon::Face(4)]);
-        assert!(card_marks(&cards, &students, None, None, &t, None).is_empty());
+        // no mission known: nothing to rate, so the fixed facts from the database: attack type, armor type, terrain face
+        let pierce = Icon::Attack(TypeTag { hue: Hue::Yellow, glyph: '관' });
+        let heavy = Icon::Armor(TypeTag { hue: Hue::Yellow, glyph: '중' });
+        assert_eq!(card_marks(&cards, &students, None, Some("Outdoor"), &t, None)[0].icons, vec![pierce.clone(), heavy.clone(), Icon::Face(4)]);
+        assert_eq!(card_marks(&cards, &students, None, None, &t, None)[0].icons, vec![pierce, heavy], "without a terrain the face is left out, the types stay");
     }
 
     #[test]

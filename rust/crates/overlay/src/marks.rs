@@ -19,6 +19,27 @@ pub enum Icon {
     Fit(Grade),
     /// A special judged by its skill role, not by types: no grade.
     Special,
+    /// The student's attack type, a fixed fact from the database.
+    Attack(TypeTag),
+    /// The student's armor type, a fixed fact from the database.
+    Armor(TypeTag),
+}
+
+/// The game's colours for attack and armor types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Hue {
+    Red,
+    Yellow,
+    Blue,
+    Purple,
+    Grey,
+}
+
+/// A type badge: its colour and the one syllable written on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TypeTag {
+    pub hue: Hue,
+    pub glyph: char,
 }
 
 /// A portrait's outline in the 1280x960 frame, tinted by the grade of its student.
@@ -67,6 +88,7 @@ impl Mark {
 
 /// Icon sizes (width, height) in the 1280x960 frame: the better the grade, the bigger the badge.
 const FACE: f32 = 22.0;
+const TYPE_BADGE: f32 = 21.0;
 const GAP: f32 = 3.0;
 /// Below this share of the frame scale icons stop shrinking: a mark of a few pixels says nothing.
 const MIN_SCALE: f32 = 0.5;
@@ -78,6 +100,7 @@ fn extent(icon: &Icon) -> (f32, f32) {
         Icon::Fit(Grade::Good) => (28.0, 28.0),
         Icon::Fit(_) => (19.0, 19.0),
         Icon::Special => (30.0, 17.0),
+        Icon::Attack(_) | Icon::Armor(_) => (TYPE_BADGE, TYPE_BADGE),
     }
 }
 
@@ -99,6 +122,16 @@ fn face_color(level: u8) -> [u8; 3] {
         2 => [244, 206, 72],
         1 => [244, 154, 72],
         _ => [232, 92, 84],
+    }
+}
+
+fn hue_rgb(hue: Hue) -> [u8; 3] {
+    match hue {
+        Hue::Red => [214, 76, 72],
+        Hue::Yellow => [222, 168, 52],
+        Hue::Blue => [72, 130, 220],
+        Hue::Purple => [150, 96, 200],
+        Hue::Grey => [130, 136, 150],
     }
 }
 
@@ -180,6 +213,17 @@ fn draw_icon(img: &mut RgbaImage, fonts: &Fonts, icon: &Icon, x: f32, y: f32, k:
                 }
             }
         }
+        Icon::Attack(tag) | Icon::Armor(tag) => {
+            // attack: a round badge, armor: a square one, so the two read apart even in one colour
+            let radius = if matches!(icon, Icon::Attack(_)) { w / 2.0 } else { w * 0.22 };
+            fill_rrect(img, x - edge, y - edge, w + edge * 2.0, h + edge * 2.0, radius + edge, |_, _| (OUTLINE, 0.85));
+            let rgb = hue_rgb(tag.hue);
+            fill_rrect(img, x, y, w, h, radius, |_, py| (rgb, 1.0 - 0.16 * py / h));
+            let px = h * 0.68;
+            let glyph = tag.glyph.to_string();
+            let tw = text_width(&fonts.bold, px, &glyph);
+            draw_text(img, &fonts.bold, px, x + (w - tw) / 2.0, y + (h - px * 1.2) / 2.0, TEXT, 1.0, &glyph);
+        }
         Icon::Special => {
             fill_rrect(img, x - edge, y - edge, w + edge * 2.0, h + edge * 2.0, h * 0.3, |_, _| (OUTLINE, 0.85));
             let rgb = Tone::Neutral.rgb();
@@ -256,6 +300,11 @@ mod tests {
                 Mark::column_from_top(cx + 52, 90, vec![Icon::Fit(grades[i as usize]), Icon::Face(i as u8 + 1)]).framed(Frame { left: cx - 54, top: 40, right: cx + 54, bottom: 190, grade: grades[i as usize] })
             })
             .chain([Mark::column_from_top(1180, 90, vec![Icon::Special])])
+            .chain([Mark::column_from_top(1100, 300, vec![
+                Icon::Attack(TypeTag { hue: Hue::Red, glyph: '폭' }),
+                Icon::Armor(TypeTag { hue: Hue::Blue, glyph: '특' }),
+                Icon::Face(3),
+            ])])
             .collect()
     }
 

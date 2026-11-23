@@ -255,3 +255,14 @@ fn the_fast_frame_key_is_the_block_mean() {
     assert_eq!(&k[3..6], &[10, 20, 30]);
     assert_eq!(fast_frame_key(&RgbImage::new(10, 10)), [0u8; 3072], "a frame too small to key is blank, not a panic");
 }
+
+#[test]
+fn art_only_screens_are_never_taken_for_a_battle() {
+    // the main menu with its UI hidden shows only the illustration: no text, big saturated areas
+    let dir = format!("{}/../../../fixtures/screens", env!("CARGO_MANIFEST_DIR"));
+    for name in ["lobby-idle", "lobby", "work-hub-full"] {
+        let path = format!("{dir}/{name}.png");
+        let Ok(img) = image::open(&path) else { continue };
+        assert!(!looks_like_battle(&img.to_rgb8()), "{name} looks like a battle");
+    }
+}

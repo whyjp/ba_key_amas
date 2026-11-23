@@ -21,7 +21,7 @@ mod scan;
 #[cfg(windows)]
 mod win;
 
-pub use marks::{render_marks, Frame, Icon, Mark};
+pub use marks::{render_marks, Frame, Hue, Icon, Mark, TypeTag};
 pub use dock::{Anchor, Corner, Dock, Presentation, Side};
 pub use hints::{inside, HintEvent, HintKind, HintScheduler, HotZone, Ms, Policy as HintPolicy, Reason as HintReason, Request as HintRequest};
 #[cfg(windows)]
