@@ -11,6 +11,5 @@ image.workspace = true
 anyhow.workspace = true
 regex.workspace = true
 once_cell.workspace = true
-csv.workspace = true
 sha1.workspace = true
 chrono.workspace = true

@@ -10,48 +10,29 @@ fn tmp(name: &str) -> PathBuf {
 }
 
 #[test]
-fn export_escapes_ocr() {
-    let out = tmp("escape");
-    let mut s = Student { name: "<script>alert(1)</script>".into(), ..Default::default() };
+fn a_student_is_written_as_json_only() {
+    let out = tmp("student");
+    let mut s = Student { name: "<b>리오</b>".into(), ..Default::default() };
     s.raw_ocr.insert("test".into(), "<bad>".into());
     export_student(&s, &out).unwrap();
-    let h = std::fs::read_to_string(out.join("student.html")).unwrap();
-    assert!(!h.contains("<script>alert(1)</script>"));
-    assert!(h.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
-    assert!(out.join("student.json").exists() && out.join("student.csv").exists());
+    assert_eq!(load_student(&out).unwrap(), s, "the JSON round-trips, markup characters included");
+    let files: Vec<String> = std::fs::read_dir(&out).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+    assert_eq!(files, vec!["student.json"], "no CSV or HTML");
 }
 
 #[test]
-fn save_report_renders_html() {
+fn the_report_is_written_as_json_only() {
     let out = tmp("report");
     let r = RosterReport {
         schema_version: 3,
-        entries: vec![RosterEntry {
-            id: "001".into(),
-            student: Student { name: "리오".into(), is_pinned: Some(true), ..Default::default() },
-            ..Default::default()
-        }],
+        entries: vec![RosterEntry { id: "001".into(), student: Student { name: "리오".into(), is_pinned: Some(true), ..Default::default() }, ..Default::default() }],
         ..Default::default()
     };
     save_report(&r, &out).unwrap();
-    let h = std::fs::read_to_string(out.join("students.html")).unwrap();
-    assert!(h.contains("리오") && h.contains(r#"data-pin="true""#) && h.contains("고정"));
-    assert!(h.contains(r#"id="armor""#) && h.contains("update()</script>"));
-    let csv = std::fs::read_to_string(out.join("students.csv")).unwrap();
-    assert!(csv.starts_with("id,page,status,detail_path,name,"));
-    assert!(csv.ends_with("\r\n") && !csv.starts_with('\u{feff}'));
-}
-
-#[test]
-fn csv_header_and_row_align() {
-    let (h, r) = student_csv(&Student::default());
-    assert_eq!(h.len(), r.len());
-    assert_eq!(h.len(), 12 + meta_columns(&Student::default()).len() + 20);
-    assert_eq!(&h[..3], ["name", "level", "rarity_stars"]);
-    assert_eq!(h.last().unwrap(), "equipment_4_level");
-    // Go quoting: comma, quote, newline, leading space.
-    let rec = csv_record(&["a,b".into(), "q\"x".into(), " lead".into(), "ok".into(), "".into()]);
-    assert_eq!(rec, "\"a,b\",\"q\"\"x\",\" lead\",ok,\r\n");
+    let back: RosterReport = serde_json::from_slice(&std::fs::read(out.join("students.json")).unwrap()).unwrap();
+    assert_eq!(back.entries[0].student.name, "리오");
+    let files: Vec<String> = std::fs::read_dir(&out).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+    assert_eq!(files, vec!["students.json"], "no CSV or HTML");
 }
 
 #[test]
@@ -137,8 +118,6 @@ fn real_go_output() {
         let d = out.join("details").join(&e.id);
         export_student(&s, &d).unwrap();
         assert_eq!(load_student(&d).unwrap(), s, "student.json round trip {}", e.id);
-        let (h, r) = student_csv(&s);
-        assert_eq!(h.len(), r.len());
         if !s.name.is_empty() {
             names.push(s.name.clone());
         }
@@ -151,21 +130,7 @@ fn real_go_output() {
     let rep = rebuild_report(&out, &ix_out, go_report);
     assert_eq!(rep.entries.len(), ix.sorted().len());
     save_report(&rep, &out).unwrap();
-    let html = std::fs::read_to_string(out.join("students.html")).unwrap();
     assert!(!names.is_empty());
-    for n in &names {
-        assert!(html.contains(&crate::html::esc(n)), "missing {n}");
-    }
     let back: RosterReport = serde_json::from_slice(&std::fs::read(out.join("students.json")).unwrap()).unwrap();
     assert_eq!(back.entries.len(), rep.entries.len());
-}
-
-/// The Go students.csv header must match ours exactly (skip when absent).
-#[test]
-fn csv_header_matches_go() {
-    let Ok(go) = std::fs::read_to_string("D:/work-github/bluearchive-ocr/output-fast-full2/students.csv") else { return };
-    let go_header = go.split("\r\n").next().unwrap();
-    let mut h = vec!["id".to_string(), "page".into(), "status".into(), "detail_path".into()];
-    h.extend(student_csv(&Student::default()).0);
-    assert_eq!(csv_record(&h).trim_end(), go_header);
 }
