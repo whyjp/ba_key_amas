@@ -16,3 +16,7 @@ regex = "1"
 sha1 = "0.10"
 chrono = { version = "0.4", features = ["serde"] }
 once_cell = "1"
+
+[profile.dev]
+# full debug info made every test binary ~2 GB to link and filled the disk; line tables keep backtraces
+debug = "line-tables-only"
