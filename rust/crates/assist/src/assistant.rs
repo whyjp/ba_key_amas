@@ -4,6 +4,7 @@
 //! on screen, asks every `Widget` what it would show, and sends each output where the
 //! `Settings` say (beside the game, inside it, nowhere) through the `Surface`. Clicks on
 //! the card's buttons come back as events and change the settings.
+use crate::library::LibraryInfo;
 use crate::observe::{Observation, Observer};
 use crate::settings::{Placement, Settings};
 use crate::surface::Surface;
@@ -11,7 +12,7 @@ use crate::widget::{is_mission_screen, Context, Kind, Lookup, Output, Widget, Wi
 use crate::widgets;
 use baocr_core::ocr_api::TextBox;
 use baocr_extract::scene::Scene;
-use baocr_overlay::{Dock, PanelState, Row};
+use baocr_overlay::{BannerState, Dock, PanelState, Row};
 use baocr_wikidb::{StudentBrief, TypeTable, Wiki};
 use image::RgbImage;
 use std::path::PathBuf;
@@ -19,6 +20,16 @@ use std::path::PathBuf;
 const BUTTON_MENU: &str = "menu";
 const BUTTON_INGAME: &str = "ingame";
 const BUTTON_PLACE: &str = "place:";
+const BUTTON_SCAN: &str = "scan:start";
+const BUTTON_SCAN_DEEP: &str = "scan:deep";
+
+/// Something the player asked for that the add-on itself does not do: the program's main loop
+/// carries it out (it is the only thing that sends input to the game).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Command {
+    /// Scan the student list; `deep` also reads the popup and the two tabs of each student.
+    StartScan { deep: bool },
+}
 
 pub struct Assistant<'a, S: Surface> {
     observer: Observer<'a>,
@@ -31,6 +42,9 @@ pub struct Assistant<'a, S: Surface> {
     surface: S,
     menu_open: bool,
     last: Observation,
+    library: LibraryInfo,
+    scanning: bool,
+    commands: Vec<Command>,
 }
 
 fn lookup(wiki: &Wiki, obs: &Observation) -> Lookup {
@@ -50,13 +64,40 @@ fn lookup(wiki: &Wiki, obs: &Observation) -> Lookup {
 impl<'a, S: Surface> Assistant<'a, S> {
     pub fn new(observer: Observer<'a>, wiki: &'a Wiki, students: &'a [StudentBrief], types: &'a TypeTable, settings: Settings, settings_path: Option<PathBuf>, surface: S) -> Self {
         surface.set_dock(settings.dock());
-        Assistant { observer, wiki, students, types, widgets: widgets::all(), settings, settings_path, surface, menu_open: false, last: Observation::new(Scene::Unknown) }
+        Assistant { observer, wiki, students, types, widgets: widgets::all(), settings, settings_path, surface, menu_open: false, last: Observation::new(Scene::Unknown), library: LibraryInfo::default(), scanning: false, commands: Vec::new() }
     }
 
     /// The game went away: forget everything read from it and show nothing.
     pub fn forget(&mut self) {
         self.observer.forget();
         self.show(Observation::new(Scene::Unknown));
+    }
+
+    /// What is stored about the player's students (shown in the menu).
+    pub fn set_library(&mut self, info: LibraryInfo) {
+        self.library = info;
+        self.present();
+    }
+
+    /// Requests made through the menu since the last call.
+    pub fn take_commands(&mut self) -> Vec<Command> {
+        std::mem::take(&mut self.commands)
+    }
+
+    /// A scan is starting: the card gives way to the progress banner.
+    pub fn begin_scan(&mut self) {
+        self.scanning = true;
+    }
+
+    pub fn scan_progress(&self, state: BannerState) {
+        self.surface.banner(state);
+    }
+
+    /// The scan is over: the card comes back, with the new state of the list.
+    pub fn scan_finished(&mut self, info: LibraryInfo) {
+        self.scanning = false;
+        self.library = info;
+        self.forget();
     }
 
     pub fn settings(&self) -> &Settings {
@@ -109,6 +150,17 @@ impl<'a, S: Surface> Assistant<'a, S> {
             self.menu_open = !self.menu_open;
             return true;
         }
+        if event == BUTTON_SCAN {
+            // one scan at a time; a click while scanning is ignored
+            if !self.scanning && !self.commands.contains(&Command::StartScan { deep: self.settings.scan_deep }) {
+                self.commands.push(Command::StartScan { deep: self.settings.scan_deep });
+            }
+            return false;
+        }
+        if event == BUTTON_SCAN_DEEP {
+            self.settings.scan_deep = !self.settings.scan_deep;
+            return true;
+        }
         if event == BUTTON_INGAME {
             self.settings.ingame_visible = !self.settings.ingame_visible;
             return true;
@@ -128,10 +180,17 @@ impl<'a, S: Surface> Assistant<'a, S> {
             let p = self.settings.placement(w.id());
             rows.push(Row::Button { id: format!("{BUTTON_PLACE}{}", w.id().key()), label: w.title().into(), value: p.label(w.kind()).into(), on: p != Placement::Off });
         }
+        // the student list: when it was last refreshed, and the scan the player starts by hand
+        rows.push(Row::Info { label: "학생 정보".into(), value: self.library.describe() });
+        rows.push(Row::Button { id: BUTTON_SCAN_DEEP.into(), label: "스캔 · 상세 포함".into(), value: if self.settings.scan_deep { "켜짐" } else { "꺼짐" }.into(), on: self.settings.scan_deep });
+        rows.push(Row::Button { id: BUTTON_SCAN.into(), label: "학생 정보 스캔".into(), value: "시작".into(), on: false });
         rows
     }
 
     fn present(&self) {
+        if self.scanning {
+            return; // the progress banner is up
+        }
         let obs = &self.last;
         let cx = Context { obs, lookup: lookup(self.wiki, obs), students: self.students, types: self.types };
         let (mut outside, mut ingame): (Vec<Row>, Vec<Row>) = (Vec::new(), Vec::new());
@@ -209,6 +268,7 @@ mod tests {
         marks: Vec<Mark>,
         clicks: Vec<String>,
         docks: Vec<Dock>,
+        banners: Vec<BannerState>,
     }
 
     #[derive(Clone, Default)]
@@ -229,6 +289,9 @@ mod tests {
         }
         fn set_dock(&self, dock: Dock) {
             self.0.borrow_mut().docks.push(dock);
+        }
+        fn banner(&self, state: BannerState) {
+            self.0.borrow_mut().banners.push(state);
         }
     }
 
@@ -364,6 +427,48 @@ mod tests {
         let shown = r.fake.0.borrow();
         let main = shown.main.as_ref().unwrap();
         assert_eq!((main.scene.as_str(), main.rows.len()), ("메인 메뉴", 1), "just the settings button");
+    }
+
+    #[test]
+    fn the_menu_shows_when_the_student_list_was_updated_and_the_scan_is_started_by_hand() {
+        let (r, ocr) = (rig(), NoOcr);
+        let mut a = assistant(&r, &ocr);
+        a.set_library(LibraryInfo { updated: Some("2026-11-23 18:02".into()), count: 106 });
+        r.fake.0.borrow_mut().clicks.push("menu".into());
+        a.poll();
+        let menu = rows_of(r.fake.0.borrow().main.as_ref().unwrap());
+        assert!(menu.contains("2026-11-23 18:02 갱신 · 106명") && menu.contains("scan:start") && menu.contains("scan:deep"), "{menu}");
+        // nothing is scanned until the player asks; the detail option is off by default
+        assert!(a.take_commands().is_empty());
+        r.fake.0.borrow_mut().clicks.push("scan:start".into());
+        a.poll();
+        assert_eq!(a.take_commands(), vec![Command::StartScan { deep: false }]);
+        // the option changes what is asked for, and is kept
+        r.fake.0.borrow_mut().clicks.push("scan:deep".into());
+        a.poll();
+        r.fake.0.borrow_mut().clicks.push("scan:start".into());
+        a.poll();
+        assert_eq!(a.take_commands(), vec![Command::StartScan { deep: true }]);
+        assert!(a.settings().scan_deep);
+    }
+
+    #[test]
+    fn during_a_scan_the_banner_stays_up_and_new_requests_are_ignored_until_it_ends() {
+        let (r, ocr) = (rig(), NoOcr);
+        let mut a = assistant(&r, &ocr);
+        a.begin_scan();
+        let before = r.fake.0.borrow().main.clone();
+        a.scan_progress(BannerState::scanning(5, Some(106)));
+        a.show(squad_obs(Scene::Squad));
+        assert_eq!(r.fake.0.borrow().main, before, "the card is not redrawn over the banner");
+        assert_eq!(r.fake.0.borrow().banners, vec![BannerState::scanning(5, Some(106))]);
+        r.fake.0.borrow_mut().clicks.push("scan:start".into());
+        a.poll();
+        assert!(a.take_commands().is_empty(), "one scan at a time");
+        a.scan_finished(LibraryInfo { updated: Some("2026-11-23 19:00".into()), count: 106 });
+        r.fake.0.borrow_mut().clicks.push("menu".into());
+        a.poll();
+        assert!(rows_of(r.fake.0.borrow().main.as_ref().unwrap()).contains("2026-11-23 19:00"), "the card is back with the new time");
     }
 
     #[test]

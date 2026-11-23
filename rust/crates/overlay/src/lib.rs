@@ -125,20 +125,20 @@ impl Overlay {
 
     /// Counting the roster; `n` students found so far.
     pub fn counting_n(&self, n: usize) {
-        self.set(BannerState { phase: Phase::Counting, done: n, total: None, note: String::new() });
+        self.set(BannerState::counting(n));
     }
 
     /// `total` is None while it is not known.
     pub fn scanning(&self, done: usize, total: Option<usize>) {
-        self.set(BannerState { phase: Phase::Scanning, done, total, note: String::new() });
+        self.set(BannerState::scanning(done, total));
     }
 
     pub fn finished(&self, done: usize, total: Option<usize>) {
-        self.set(BannerState { phase: Phase::Done, done, total, note: String::new() });
+        self.set(BannerState::finished(done, total));
     }
 
     pub fn failed(&self, done: usize, total: Option<usize>, note: &str) {
-        self.set(BannerState { phase: Phase::Failed, done, total, note: note.to_string() });
+        self.set(BannerState::failed(done, total, note));
     }
 
     /// Keep the final message visible for `secs`, then close.

@@ -9,13 +9,15 @@
 //! Each part depends only on the ones above it in this list, so a widget can be added without
 //! touching the observer, and a different surface (or none, in tests) can replace the overlay.
 pub mod assistant;
+pub mod library;
 pub mod observe;
 pub mod settings;
 pub mod surface;
 pub mod widget;
 pub mod widgets;
 
-pub use assistant::Assistant;
+pub use assistant::{Assistant, Command};
+pub use library::{read_library, LibraryInfo};
 pub use observe::{Observation, Observer};
 pub use settings::{Placement, Settings};
 pub use surface::Surface;

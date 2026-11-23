@@ -254,6 +254,7 @@ dependencies = [
  "baocr-overlay",
  "baocr-pixels",
  "baocr-wikidb",
+ "chrono",
  "image",
  "rusqlite",
  "serde",
@@ -265,9 +266,7 @@ name = "baocr-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "chrono",
  "image",
- "once_cell",
  "regex",
  "serde",
  "serde_json",

@@ -102,6 +102,25 @@ pub struct BannerState {
     pub note: String,
 }
 
+impl BannerState {
+    /// Counting the roster; `n` students found so far.
+    pub fn counting(n: usize) -> Self {
+        Self { phase: Phase::Counting, done: n, total: None, note: String::new() }
+    }
+
+    pub fn scanning(done: usize, total: Option<usize>) -> Self {
+        Self { phase: Phase::Scanning, done, total, note: String::new() }
+    }
+
+    pub fn finished(done: usize, total: Option<usize>) -> Self {
+        Self { phase: Phase::Done, done, total, note: String::new() }
+    }
+
+    pub fn failed(done: usize, total: Option<usize>, note: &str) -> Self {
+        Self { phase: Phase::Failed, done, total, note: note.to_string() }
+    }
+}
+
 impl Default for BannerState {
     fn default() -> Self {
         Self { phase: Phase::Counting, done: 0, total: None, note: String::new() }

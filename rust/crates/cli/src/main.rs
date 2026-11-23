@@ -7,17 +7,16 @@
 //!   --watch              passive updater: screenshots only, stores changed values
 //!   --grab <png>         save the current game region (no input)
 mod assist;
+mod scan;
 use anyhow::{bail, Context, Result};
-use baocr_core::model::RosterReport;
-use baocr_core::ocr_api::{Ocr, ScanSink};
+use baocr_core::ocr_api::Ocr;
 use baocr_export::{Index, Store};
 use baocr_extract::{Extractor, Options, FRAME_MYSTIC};
-use baocr_hcu::{check_aspect, detect_region, ensure_profile, prepare_scan, game_capture, new_capture, parse_frame_region, scan_arrows, Hcu, HcuSource, Watcher};
+use baocr_hcu::{check_aspect, detect_region, game_capture, parse_frame_region, Hcu, HcuSource, Watcher};
 use baocr_ocr::PpOcr;
-use baocr_overlay::Overlay;
-use baocr_pipeline::{reextract, Pipeline};
+use baocr_overlay::{BannerState, Overlay};
+use baocr_pipeline::reextract;
 use clap::Parser;
-use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -72,9 +71,9 @@ struct Args {
     /// Concurrent extraction workers.
     #[arg(long, default_value_t = 3)]
     workers: usize,
-    /// Output directory.
-    #[arg(long, default_value = "output-rs")]
-    out: PathBuf,
+    /// Output directory (default: the add-on's student folder, %APPDATA%\baocr\students).
+    #[arg(long)]
+    out: Option<PathBuf>,
     /// HCU frame rectangle of the Blue Archive client "x0,y0,x1,y1", or "auto" to find the game window.
     #[arg(long, default_value = "auto")]
     region: String,
@@ -84,6 +83,13 @@ struct Args {
     /// Directory with the OCR models (default: $BAOCR_MODELS, ./models, ../models).
     #[arg(long)]
     models: Option<PathBuf>,
+}
+
+impl Args {
+    /// Where students.json, index.json and details/ go: `--out`, else the add-on's own folder.
+    fn out_dir(&self) -> PathBuf {
+        self.out.clone().unwrap_or_else(|| std::env::var_os("APPDATA").map(|d| PathBuf::from(d).join("baocr").join("students")).unwrap_or_else(|| PathBuf::from("students")))
+    }
 }
 
 fn load_ocr(args: &Args) -> Result<PpOcr> {
@@ -124,8 +130,8 @@ fn main() -> Result<()> {
 
     // The add-on (the default): it finds the game window itself, whenever that appears.
     if chosen == 0 || args.assist {
-        let ocr = load_ocr(&args)?;
-        return assist::run(&ocr, &Hcu::from_env(), &args.region, &args.wiki);
+        let ocr: Arc<dyn Ocr> = Arc::new(load_ocr(&args)?);
+        return assist::run(ocr, &Hcu::from_env(), &args.region, &args.wiki, &args.out_dir(), args.workers);
     }
 
     // Everything below drives or watches the game.
@@ -163,122 +169,33 @@ fn run_image(args: &Args, path: &PathBuf, opts: &Options) -> Result<()> {
     if s.name.is_empty() {
         bail!("detail OCR did not find a student name; no export");
     }
-    std::fs::create_dir_all(&args.out)?;
-    img.save(args.out.join("detail.png"))?;
-    baocr_export::export_student(&s, &args.out)?;
+    let out = args.out_dir();
+    std::fs::create_dir_all(&out)?;
+    img.save(out.join("detail.png"))?;
+    baocr_export::export_student(&s, &out)?;
     println!("{}", serde_json::to_string_pretty(&s)?);
     Ok(())
 }
 
-/// Forwards frames to the pipeline and moves the banner's n/m forward.
-struct ProgressSink<'a> {
-    inner: &'a Pipeline,
-    overlay: Option<&'a Overlay>,
-    total: Option<usize>,
-}
-
-impl ScanSink for ProgressSink<'_> {
-    fn submit(&self, i: usize, frames: BTreeMap<String, image::RgbImage>) {
-        self.inner.submit(i, frames);
-        if let Some(o) = self.overlay {
-            o.scanning(i + 1, self.total);
-        }
-    }
-    fn name_of(&self, i: usize) -> String {
-        self.inner.name_of(i)
-    }
-    fn peek_name(&self, img: &image::RgbImage) -> String {
-        self.inner.peek_name(img)
-    }
-    fn first_student(&self) -> Result<baocr_core::model::Student> {
-        self.inner.first_student()
-    }
-    fn aborted(&self) -> Option<(String, String)> {
-        self.inner.aborted()
-    }
-}
-
-/// Plain-language reason shown on the banner when a scan stops early.
-fn stop_note(reason: &str) -> String {
-    match reason {
-        "focus_lost" => "게임 창이 활성 상태가 아니어서 중단했습니다".into(),
-        "layout_mismatch" => "4:3 창모드 화면이 아니어서 중단했습니다".into(),
-        "two_empty_names" => "학생 이름을 읽지 못해 중단했습니다".into(),
-        "deep_failed" => "메뉴 화면 캡처에 실패해 중단했습니다".into(),
-        "repeated_profile" => "같은 학생이 반복되어 중단했습니다".into(),
-        other => format!("중단됨: {other}"),
-    }
-}
-
 fn run_scan(args: &Args, hcu: &Hcu, region: [f64; 4], opts: Options) -> Result<()> {
-    let deep = !args.fast;
     let overlay = (!args.no_overlay).then(Overlay::start);
-    let ov = overlay.as_ref();
-
-    // Learn the total first (scroll through the roster once) so progress reads n/m,
-    // and start from the first student.
-    if let Some(o) = ov {
-        o.counting();
-    }
-    let ocr: Arc<dyn Ocr> = Arc::new(load_ocr(args)?);
-    // The main menu is recognised by its bottom labels, and 학생 is found there.
-    let student_button = |img: &image::RgbImage| baocr_extract::lobby_student_button(&*ocr, img);
-    let total = match prepare_scan(hcu, region, &student_button, |n| {
-        if let Some(o) = ov {
-            o.counting_n(n);
-        }
-    }) {
-        Ok(t) => {
-            println!("students in the roster: {t}");
-            Some(t)
-        }
-        Err(e) => {
-            eprintln!("could not count the roster ({e:#}); scanning from the open profile without a total");
-            if let Err(e2) = ensure_profile(hcu, region, &student_button) {
-                if let Some(o) = ov {
-                    o.failed(0, None, "학생 목록, 학생 프로필 또는 메인 메뉴 화면을 먼저 열어 주세요");
-                    std::thread::sleep(std::time::Duration::from_secs(4));
-                }
-                return Err(e2);
-            }
-            None
+    let report = |s: BannerState| {
+        if let Some(o) = &overlay {
+            o.set(s);
         }
     };
-    let from_first = args.from_first || total.is_some();
-    if let Some(o) = ov {
-        o.scanning(0, total);
+    let ocr: Arc<dyn Ocr> = Arc::new(load_ocr(args)?);
+    let out = args.out_dir();
+    let req = scan::ScanRequest { out: &out, deep: !args.fast, workers: args.workers, max_students: args.max_students, from_first: args.from_first };
+    let summary = scan::scan_students(ocr, hcu, region, &req, opts, &report);
+    if overlay.is_some() {
+        // let the final state be read
+        std::thread::sleep(std::time::Duration::from_secs(if summary.is_ok() { 3 } else { 4 }));
     }
-
-    let pipeline = Pipeline::new(&args.out, ocr.clone(), opts, deep, args.workers)?;
-    let sink = ProgressSink { inner: &pipeline, overlay: ov, total };
-    hcu.stats_reset();
-    let scan_started = std::time::Instant::now();
-    let outcome = scan_arrows(hcu, region, &args.out, args.max_students, from_first, deep, &sink)?;
-    if std::env::var_os("BAOCR_HCU_STATS").is_some() {
-        eprintln!("scan loop {:.1}s; HCU time by command:\n{}", scan_started.elapsed().as_secs_f64(), hcu.stats_report());
+    match summary?.error {
+        Some(e) => bail!(e),
+        None => Ok(()),
     }
-    let base = RosterReport { schema_version: 3, capture: Some(new_capture(region)), ..Default::default() };
-    let rep = pipeline.finish(base, &outcome.stop_reason, outcome.wrapped, from_first)?;
-    println!(
-        "arrows: entries={} complete={} reason={} unresolved={}",
-        rep.entries.len(),
-        rep.complete,
-        rep.stop_reason,
-        rep.unresolved.len()
-    );
-    if let Some(o) = ov {
-        let n = rep.entries.len();
-        if outcome.error.is_none() || matches!(outcome.stop_reason.as_str(), "wrapped_to_first" | "max_students") {
-            o.finished(n, total.or(Some(n)));
-        } else {
-            o.failed(n, total, &stop_note(&outcome.stop_reason));
-        }
-        std::thread::sleep(std::time::Duration::from_secs(3)); // let the final state be read
-    }
-    if let Some(e) = outcome.error {
-        bail!(e);
-    }
-    Ok(())
 }
 
 /// Passive screen learning: every stable frame that differs from the last saved one is
@@ -321,7 +238,8 @@ fn run_learn(args: &Args, hcu: &Hcu, region: [f64; 4], dir: &std::path::Path) ->
 
 fn run_watch(args: &Args, hcu: &Hcu, region: [f64; 4], opts: Options) -> Result<()> {
     let ocr = load_ocr(args)?;
-    let store = Store::open(&args.out)?;
+    let out = args.out_dir();
+    let store = Store::open(&out)?;
     let ex = Extractor::new(&ocr);
     let mut w = Watcher::new(
         HcuSource { hcu, region },
@@ -335,7 +253,7 @@ fn run_watch(args: &Args, hcu: &Hcu, region: [f64; 4], opts: Options) -> Result<
     let stop = Arc::new(AtomicBool::new(false));
     let flag = stop.clone();
     ctrlc::set_handler(move || flag.store(true, Ordering::Relaxed))?;
-    println!("watching (screenshots only, no input); Ctrl-C to stop; store: {}", args.out.display());
+    println!("watching (screenshots only, no input); Ctrl-C to stop; store: {}", out.display());
     w.run(&stop, |u| println!("update: {u}"), |e| eprintln!("watch: {e}"));
     Ok(())
 }

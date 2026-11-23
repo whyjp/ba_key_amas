@@ -37,6 +37,8 @@ pub struct Settings {
     /// thousandths. Moved by dragging the card's header.
     pub dock_right: bool,
     pub dock_y_permille: i32,
+    /// The roster scan also reads the stat popup and the level-up and mystic tabs (slower).
+    pub scan_deep: bool,
 }
 
 impl Default for Settings {
@@ -51,6 +53,7 @@ impl Default for Settings {
             ]),
             dock_right: true,
             dock_y_permille: 0,
+            scan_deep: false,
         }
     }
 }
