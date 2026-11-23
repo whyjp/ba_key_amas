@@ -91,6 +91,13 @@ impl Wiki {
         Wiki { conn }
     }
 
+    /// (attack type, armor type, multiplier where 1.0 is 100 %).
+    pub(crate) fn type_rows(&self) -> Result<Vec<(String, String, f64)>> {
+        let mut st = self.conn.prepare("SELECT bullet_type, armor_type, multiplier_bp FROM type_effectiveness")?;
+        let rows = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)? as f64 / 10000.0)))?;
+        rows.collect::<std::result::Result<_, _>>().map_err(Into::into)
+    }
+
     /// Every Global-released student.
     pub fn students(&self) -> Result<Vec<StudentBrief>> {
         let mut st = self.conn.prepare(
@@ -117,12 +124,29 @@ impl Wiki {
     /// tolerated only when exactly one student is that close. Ambiguity gives None: a
     /// wrong match would put the wrong icons on a portrait.
     pub fn match_student(students: &[StudentBrief], ocr: &str) -> Option<StudentBrief> {
+        Wiki::match_student_as(students, ocr, None)
+    }
+
+    /// Like `match_student`, with the kind of squad slot the name was read in ("Main" for
+    /// a striker, "Support" for a special) to tell students that share a name apart.
+    pub fn match_student_as(students: &[StudentBrief], ocr: &str, squad_type: Option<&str>) -> Option<StudentBrief> {
+        if let Some(kind) = squad_type {
+            let of_kind: Vec<StudentBrief> = students.iter().filter(|s| s.squad_type == kind).cloned().collect();
+            if let Some(found) = Wiki::closest(&of_kind, ocr) {
+                return Some(found);
+            }
+        }
+        Wiki::closest(students, ocr)
+    }
+
+    fn closest(students: &[StudentBrief], ocr: &str) -> Option<StudentBrief> {
         let want: Vec<char> = norm(ocr).chars().collect();
         if want.len() < 2 {
             return None;
         }
         let mut best: Option<(usize, &StudentBrief)> = None;
         let mut tie = false;
+        let mut tied: Vec<&StudentBrief> = Vec::new();
         for s in students {
             let have: Vec<char> = norm(&s.name).chars().collect();
             let d = distance(&want, &have);
@@ -131,12 +155,22 @@ impl Wiki {
             }
             match best {
                 Some((bd, _)) if d > bd => {}
-                Some((bd, _)) if d == bd => tie = true,
+                Some((bd, _)) if d == bd => {
+                    tie = true;
+                    tied.push(s);
+                }
                 _ => {
                     best = Some((d, s));
                     tie = false;
+                    tied = vec![s];
                 }
             }
+        }
+        // students that share a name but look the same to the helpers (same types and
+        // adaptation) are not worth refusing over
+        let same_icons = |a: &StudentBrief, b: &StudentBrief| (&a.bullet_type, &a.armor_type, a.street, a.outdoor, a.indoor) == (&b.bullet_type, &b.armor_type, b.street, b.outdoor, b.indoor);
+        if tie && tied.iter().all(|t| same_icons(t, tied[0])) {
+            return Some(tied[0].clone());
         }
         best.filter(|_| !tie).map(|(_, s)| s.clone())
     }
@@ -292,9 +326,21 @@ mod tests {
         assert_eq!(id("순"), None, "too short to trust one wrong character");
         assert_eq!(id("아무개"), None);
         assert_eq!(id(""), None);
-        // two students equally close: no answer
-        let twins = vec![mk(10, "마리(체육복)"), mk(11, "마리(체육목)")];
+        // two students equally close and different to the helpers: no answer
+        let mut other = mk(11, "마리(체육목)");
+        other.bullet_type = "Mystic".into();
+        let twins = vec![mk(10, "마리(체육복)"), other];
         assert_eq!(Wiki::match_student(&twins, "마리(체육북)"), None);
+        // the same name twice: the kind of slot decides, and identical-looking twins are not refused
+        let mut special = mk(21, "호시노(무장)");
+        special.squad_type = "Support".into();
+        special.bullet_type = "Mystic".into();
+        let pair = vec![mk(20, "호시노(무장)"), special];
+        assert_eq!(Wiki::match_student(&pair, "호시노(무장)"), None, "no hint, different students");
+        assert_eq!(Wiki::match_student_as(&pair, "호시노(무장)", Some("Support")).map(|s| s.id), Some(21));
+        assert_eq!(Wiki::match_student_as(&pair, "호시노(무장)", Some("Main")).map(|s| s.id), Some(20));
+        let clones = vec![mk(30, "호시노(무장)"), mk(31, "호시노(무장)")];
+        assert_eq!(Wiki::match_student(&clones, "호시노(무장)").map(|s| s.id), Some(30));
     }
 
     #[test]

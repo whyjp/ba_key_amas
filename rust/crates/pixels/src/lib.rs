@@ -638,6 +638,25 @@ pub fn same_cards(a: &[Card], b: &[Card]) -> bool {
     a.len() == b.len() && a.iter().zip(b).all(|(x, y)| signature_distance(&x.signature, &y.signature) <= 2.0)
 }
 
+/// Is the student card whose name label has its horizontal centre at `cx` and its top at
+/// `y0` (1280x960 frame) outlined in the lime green the 빠른 편성 grid draws around the
+/// students already in the squad? The band is just inside the card's left edge (not the
+/// neighbour's right border), from the portrait's top down to the label.
+pub fn quick_card_selected(img: &RgbImage, cx: i32, y0: i32) -> bool {
+    let (x0, x1, ya, yb) = (cx - 53, cx - 48, y0 - 100, y0 - 20);
+    let (mut lime, mut total) = (0u32, 0u32);
+    for y in ya.max(0)..yb.min(img.height() as i32) {
+        for x in x0.max(0)..x1.min(img.width() as i32) {
+            let p = img.get_pixel(x as u32, y as u32).0;
+            total += 1;
+            if p[1] >= 230 && p[2] <= 80 && (150..=230).contains(&p[0]) {
+                lime += 1;
+            }
+        }
+    }
+    total > 0 && lime as f64 / total as f64 >= 0.2
+}
+
 /// Pixel part of Go `rosterVisible`: not a profile, scrollbar thumb sized like
 /// the roster's, six-card grid present, and the green-tinted All tab at (395,110).
 pub fn roster_visible_pixels(img: &RgbImage) -> bool {

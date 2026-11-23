@@ -45,6 +45,18 @@ cannot exclude it, it is not shown. Mission data comes from the wiki DB
 (`wikidb/schema.sql`, built by `baocr-wikidb` from SchaleDB's Global/Korean data).
 `wiki.db` is a local build artefact, not redistributed.
 
+In the 빠른 편성 popup it also draws small icons **on** each student portrait (the
+mission terrain's adaptation face as the game shows it, attack type, armor type) from a
+second click-through layer over the game, and the card gains a squad verdict (유리 /
+평균 / 불리) with attack, defense and terrain bars. The verdict is a rough guide: it
+compares the squad's attack and armor types and terrain adaptation with the mission's
+enemies, relative to the average released student (adaptation grades are approximated as
+80/90/100/110/120 %; it is not a battle simulation). The squad is read from the 편성
+screen's name labels and the lime-outlined cards of the popup.
+Limits: students are identified by the name written on the card, so the popup must be in
+its list view (the compact view shows no names; the card says so); the mission is known
+only if `--assist` was running when its 임무 정보 popup was opened.
+
 Workspace crates: `core` (schema, OCR trait), `names`, `pixels`, `equipment`,
 `export` (CSV/HTML/store/index), `ocr` (engine), `extract` (profile + menu pass),
 `pipeline` (async workers, re-extraction), `hcu` (game control, scan loop, watcher),

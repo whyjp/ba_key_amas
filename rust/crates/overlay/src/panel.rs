@@ -25,6 +25,8 @@ pub enum Tone {
     ElasticArmor,
     CompositeArmor,
     Good,
+    Mid,
+    Bad,
 }
 
 impl Tone {
@@ -53,6 +55,8 @@ impl Tone {
             Tone::Sonic | Tone::ElasticArmor => [132, 84, 184],
             Tone::CompositeArmor => [78, 150, 110],
             Tone::Good => [46, 150, 96],
+            Tone::Mid => [196, 166, 56],
+            Tone::Bad => [190, 70, 70],
         }
     }
 }
@@ -71,6 +75,11 @@ pub enum Row {
     Chips { label: String, chips: Vec<Chip> },
     /// A plain line (wrapped), e.g. a hint or a warning.
     Note(String),
+    /// A bar around the average: `permille` is 1000 at average, above is better. Drawn on
+    /// a scale of 500..1500; `text` is shown beside the bar.
+    Meter { label: String, permille: i32, text: String },
+    /// The verdict as a wide badge.
+    Verdict { label: String, text: String, tone: Tone },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -158,6 +167,8 @@ pub fn render_panel(width: u32, state: &PanelState, fonts: &Fonts) -> RgbaImage 
             Row::Info { value, .. } => wrap(&fonts.regular, 14.0 * s, value_w, value).len() as f32 * 21.0 * s + 5.0 * s,
             Row::Chips { chips, .. } => chip_layout(fonts, 12.0 * s, s, value_w, chips).0 as f32 * 25.0 * s + 5.0 * s,
             Row::Note(t) => wrap(&fonts.regular, 12.5 * s, wf - pad * 2.0, t).len() as f32 * 18.0 * s + 5.0 * s,
+            Row::Meter { .. } => 22.0 * s + 5.0 * s,
+            Row::Verdict { .. } => 28.0 * s + 7.0 * s,
         };
     }
     h += 12.0 * s;
@@ -211,6 +222,31 @@ pub fn render_panel(width: u32, state: &PanelState, fonts: &Fonts) -> RgbaImage 
                 }
                 y += 5.0 * s;
             }
+            Row::Meter { label, permille, text } => {
+                draw_text(&mut img, &fonts.regular, 12.5 * s, pad, y + 2.0 * s, TEXT_SOFT, 0.9, label);
+                let (bx, bw, bh) = (pad + label_w, value_w - 52.0 * s, 10.0 * s);
+                let by = y + 6.0 * s;
+                fill_rrect(&mut img, bx, by, bw, bh, bh / 2.0, |_, _| ([14, 28, 52], 0.9));
+                let frac = ((*permille).clamp(500, 1500) as f32 - 500.0) / 1000.0;
+                let (mid, pos) = (bx + bw / 2.0, bx + bw * frac);
+                let (from, to) = if pos >= mid { (mid, pos) } else { (pos, mid) };
+                let rgb = if (*permille - 1000).abs() < 30 { [150, 160, 180] } else if *permille > 1000 { [64, 196, 110] } else { [226, 96, 88] };
+                if to - from > 1.0 {
+                    fill_rrect(&mut img, from, by, to - from, bh, bh / 2.0, |_, _| (rgb, 1.0));
+                }
+                fill_rrect(&mut img, mid - 1.0 * s, by - 2.0 * s, 2.0 * s, bh + 4.0 * s, 1.0 * s, |_, _| ([255, 255, 255], 0.85));
+                draw_text(&mut img, &fonts.bold, 12.5 * s, bx + bw + 8.0 * s, y + 2.0 * s, TEXT, 1.0, text);
+                y += 22.0 * s + 5.0 * s;
+            }
+            Row::Verdict { label, text, tone } => {
+                draw_text(&mut img, &fonts.regular, 12.5 * s, pad, y + 6.0 * s, TEXT_SOFT, 0.9, label);
+                let (bx, bw, bh) = (pad + label_w, value_w, 28.0 * s);
+                let rgb = tone.rgb();
+                fill_rrect(&mut img, bx, y, bw, bh, 8.0 * s, |_, py| (lerp(rgb, [0, 0, 0], py / bh * 0.25), 0.97));
+                let tw = text_width(&fonts.bold, 15.0 * s, text);
+                draw_text(&mut img, &fonts.bold, 15.0 * s, bx + (bw - tw) / 2.0, y + 5.0 * s, TEXT, 1.0, text);
+                y += 28.0 * s + 7.0 * s;
+            }
         }
     }
     img
@@ -239,6 +275,10 @@ mod tests {
                 },
                 Row::Chips { label: "추천 공격".into(), chips: vec![Chip { text: "신비 135%".into(), tone: Tone::Mystic }, Chip { text: "관통 120%".into(), tone: Tone::Pierce }] },
                 Row::Note("Hard 난이도는 적 구성이 다를 수 있습니다".into()),
+                Row::Verdict { label: "편성 판정".into(), text: "유리".into(), tone: Tone::Good },
+                Row::Meter { label: "공격 상성".into(), permille: 1420, text: "+42%".into() },
+                Row::Meter { label: "방어 상성".into(), permille: 870, text: "-13%".into() },
+                Row::Meter { label: "지형 적응".into(), permille: 1000, text: "평균".into() },
             ],
         }
     }

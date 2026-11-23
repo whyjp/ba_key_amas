@@ -205,6 +205,22 @@ pub fn quick_formation_cards(boxes: &[TextBox]) -> Vec<CardName> {
         .collect()
 }
 
+/// The students named on the 편성 screen: the four strikers' labels and the specials' labels
+/// (as OCR read them, to be matched to students by the caller), each with whether it was
+/// read in the specials' row.
+pub fn squad_names(boxes: &[TextBox]) -> Vec<(String, bool)> {
+    let has_hangul = |t: &str| t.chars().any(|c| ('\u{AC00}'..='\u{D7A3}').contains(&c));
+    boxes
+        .iter()
+        .filter(|b| {
+            let strikers = b.y0 >= 690.0 && b.y0 <= 745.0 && b.x0 >= 200.0 && b.x1 <= 1100.0;
+            let specials = b.y0 >= 880.0 && b.y0 <= 935.0 && b.x0 >= 470.0 && b.x1 <= 1000.0;
+            (strikers || specials) && has_hangul(&b.text)
+        })
+        .map(|b| (b.text.trim().to_string(), b.y0 >= 880.0))
+        .collect()
+}
+
 /// Remembers the mission across the screens that do not name it.
 #[derive(Debug, Default)]
 pub struct MissionTracker {
@@ -359,6 +375,14 @@ mod tests {
             assert!(t.update(Scene::DungeonSelect, &boxes("dungeon-select-bounty")).is_none());
         }
         assert_eq!(place_from_list(&boxes("dungeon-list-school")).as_deref(), Some("트리니티"));
+    }
+
+    #[test]
+    fn the_squad_screen_names_its_strikers_and_specials() {
+        let names = squad_names(&boxes("squad"));
+        let texts: Vec<&str> = names.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(texts, vec!["호시노(무장)", "하나코(수영복)", "시로코*테러", "사오리(드레스)", "아코", "키사키"], "{names:?}");
+        assert_eq!(names.iter().map(|(_, special)| *special).collect::<Vec<_>>(), vec![false, false, false, false, true, true]);
     }
 
     #[test]

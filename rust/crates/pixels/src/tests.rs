@@ -181,3 +181,12 @@ fn list_shift_measures_the_scroll() {
     // unrelated pages do not overlap
     assert_eq!(list_shift(&a, &load("roster-unowned-banner.png"), 700), None);
 }
+
+#[test]
+fn quick_formation_marks_the_students_already_in_the_squad() {
+    let img = image::open(format!("{}/../../../fixtures/screens/quick-formation.png", env!("CARGO_MANIFEST_DIR"))).unwrap().to_rgb8();
+    // first row: four lime-outlined cards (the squad), then two plain ones; second row: none
+    for (cx, y0, want) in [(626, 431, true), (736, 429, true), (848, 431, true), (958, 431, true), (1070, 429, false), (1181, 432, false), (626, 583, false), (736, 583, false), (958, 584, false), (1181, 580, false)] {
+        assert_eq!(quick_card_selected(&img, cx, y0), want, "card at x={cx} y={y0}");
+    }
+}
