@@ -4,7 +4,8 @@
 //! (clicks pass through), WS_EX_NOACTIVATE (never takes focus), WS_EX_TOPMOST,
 //! WS_EX_TOOLWINDOW (no taskbar button). WDA_EXCLUDEFROMCAPTURE keeps it out of
 //! screenshots where the OS supports it.
-use crate::panel::{ingame_origin, ingame_panel_width, panel_origin, panel_width, render_panel, render_panel_hits, Hit};
+use crate::dock::{dock_from_drop, dock_origin};
+use crate::panel::{ingame_origin, ingame_panel_width, panel_width, render_panel, render_panel_hits, Hit, DRAG_HANDLE};
 use crate::render::{banner_layout, banner_origin, load_fonts, render, Fonts, Ltrb};
 use crate::marks::render_marks;
 use crate::{Card, Shown};
@@ -112,6 +113,10 @@ extern "system" {
     fn GetMonitorInfoW(m: isize, info: *mut MonitorInfo) -> i32;
     fn ClientToScreen(h: isize, p: *mut Point) -> i32;
     fn IsIconic(h: isize) -> i32;
+    fn GetForegroundWindow() -> isize;
+    fn GetCursorPos(p: *mut Point) -> i32;
+    fn GetAsyncKeyState(vk: i32) -> i16;
+    fn GetClassNameW(h: isize, buf: *mut u16, max: i32) -> i32;
 }
 #[link(name = "gdi32")]
 extern "system" {
@@ -158,7 +163,7 @@ unsafe extern "system" fn wnd_proc(h: isize, m: u32, w: usize, l: isize) -> isiz
 
 /// Where the game is: client area and whole window (both left/top/right/bottom, screen
 /// pixels) and the work area of the monitor it is on. None if hidden or minimised.
-fn game_geometry() -> Option<(Ltrb, Ltrb, Ltrb)> {
+fn game_geometry() -> Option<(Ltrb, Ltrb, Ltrb, isize)> {
     unsafe {
         let title = std::env::var("BAOCR_OVERLAY_TITLE").unwrap_or_else(|_| "Blue Archive".into()); // override: demos/tests only
         let hwnd = FindWindowW(std::ptr::null(), wide(&title).as_ptr());
@@ -182,8 +187,37 @@ fn game_geometry() -> Option<(Ltrb, Ltrb, Ltrb)> {
         } else {
             (i32::MIN / 2, i32::MIN / 2, i32::MAX / 2, i32::MAX / 2)
         };
-        Some(((p.x, p.y, p.x + cw, p.y + ch), (o.left, o.top, o.right, o.bottom), work))
+        Some(((p.x, p.y, p.x + cw, p.y + ch), (o.left, o.top, o.right, o.bottom), work, hwnd))
     }
+}
+
+/// Is another window in front of the game and over it? Then the overlay must not be drawn on
+/// top of that window. The game itself, the overlay's own windows and the desktop shell do not count.
+unsafe fn covered(game: isize, own: [isize; 3], outer: Ltrb) -> bool {
+    let fg = GetForegroundWindow();
+    if fg == 0 || fg == game || own.contains(&fg) {
+        return false;
+    }
+    let mut class = [0u16; 64];
+    let n = GetClassNameW(fg, class.as_mut_ptr(), 64).max(0) as usize;
+    let class = String::from_utf16_lossy(&class[..n]);
+    if matches!(class.as_str(), "Progman" | "WorkerW" | "Shell_TrayWnd" | "Shell_SecondaryTrayWnd") {
+        return false;
+    }
+    let mut r = Rect { left: 0, top: 0, right: 0, bottom: 0 };
+    GetWindowRect(fg, &mut r) != 0 && r.left < outer.2 && r.right > outer.0 && r.top < outer.3 && r.bottom > outer.1
+}
+
+const VK_LBUTTON: i32 = 0x01;
+
+unsafe fn left_button_down() -> bool {
+    GetAsyncKeyState(VK_LBUTTON) as u16 & 0x8000 != 0
+}
+
+unsafe fn cursor() -> (i32, i32) {
+    let mut p = Point { x: 0, y: 0 };
+    GetCursorPos(&mut p);
+    (p.x, p.y)
 }
 
 /// A premultiplied-BGRA DIB the banner is rendered into.
@@ -365,6 +399,9 @@ fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, stop: Arc<Atom
         let mut rect = None;
         let mut tick: u32 = 0;
         let mut card_hits: Vec<Hit> = Vec::new();
+        // a drag of the card by its header: where in the card it was picked up, and where it is now
+        let mut drag: Option<(i32, i32)> = None;
+        let mut drag_at: Option<(i32, i32)> = None;
         while !stop.load(Ordering::Relaxed) {
             let mut msg: Msg = std::mem::zeroed();
             while PeekMessageW(&mut msg, 0, 0, 0, PM_REMOVE) != 0 {
@@ -379,7 +416,11 @@ fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, stop: Arc<Atom
             for (h, x, y) in clicks {
                 if h == card.hwnd {
                     if let Some(hit) = card_hits.iter().find(|hit| hit.contains(x, y)) {
-                        if let Ok(mut e) = events.lock() {
+                        if hit.id == DRAG_HANDLE {
+                            if left_button_down() {
+                                drag = Some((x, y));
+                            }
+                        } else if let Ok(mut e) = events.lock() {
                             e.push(hit.id.clone());
                         }
                     }
@@ -391,9 +432,14 @@ fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, stop: Arc<Atom
                     ingame.hide();
                     marks.hide();
                 }
-                Some((client, outer, work)) => {
+                Some((_, outer, _, game)) if covered(game, [card.hwnd, ingame.hwnd, marks.hwnd], outer) => {
+                    card.hide();
+                    ingame.hide();
+                    marks.hide();
+                }
+                Some((client, outer, work, _)) => {
                     let (cw, ch) = (client.2 - client.0, client.3 - client.1);
-                    let shown = state.lock().map(|g| g.clone()).unwrap_or(Shown { card: Card::Hidden, ingame: None, marks: Vec::new() });
+                    let shown = state.lock().map(|g| g.clone()).unwrap_or(Shown { card: Card::Hidden, ingame: None, marks: Vec::new(), dock: Default::default() });
                     // the card: the banner goes above/below the window, the panel beside it
                     let placed = match &shown.card {
                         Card::Hidden => None,
@@ -407,8 +453,34 @@ fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, stop: Arc<Atom
                             let (img, hits) = render_panel_hits(panel_width(cw) as u32, p, &fonts);
                             let key = hash_of(&(format!("{p:?}"), cw, ch));
                             let size = (img.width() as i32, img.height() as i32);
-                            // beside the game; with no room there, inside it rather than nowhere
-                            let at = panel_origin(client, outer, work, size).unwrap_or_else(|| ingame_origin(client, size));
+                            // against the game on the docked side; with no room, inside it rather than nowhere
+                            let docked = dock_origin(client, outer, work, size, shown.dock).unwrap_or_else(|| ingame_origin(client, size));
+                            let at = match drag {
+                                Some((gx, gy)) if left_button_down() => {
+                                    let (cx, cy) = cursor();
+                                    let p = (cx - gx, cy - gy);
+                                    drag_at = Some(p);
+                                    p
+                                }
+                                Some(_) => {
+                                    // let go: snap to the nearest side and report where it landed
+                                    drag = None;
+                                    match drag_at.take() {
+                                        Some(p) => {
+                                            let d = dock_from_drop(client, p, size);
+                                            if let Ok(mut g) = state.lock() {
+                                                g.dock = d;
+                                            }
+                                            if let Ok(mut e) = events.lock() {
+                                                e.push(d.encode());
+                                            }
+                                            dock_origin(client, outer, work, size, d).unwrap_or(docked)
+                                        }
+                                        None => docked,
+                                    }
+                                }
+                                None => docked,
+                            };
                             card_hits = hits;
                             Some((img, at, key ^ hash_of(&at)))
                         }
@@ -440,7 +512,8 @@ fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, stop: Arc<Atom
                 }
             }
             tick = tick.wrapping_add(1);
-            std::thread::sleep(Duration::from_millis(90));
+            // a drag needs the card to follow the cursor smoothly
+            std::thread::sleep(Duration::from_millis(if drag.is_some() { 16 } else { 90 }));
         }
         drop(card);
         drop(ingame);

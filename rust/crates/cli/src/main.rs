@@ -93,8 +93,9 @@ fn load_ocr(args: &Args) -> Result<PpOcr> {
 fn main() -> Result<()> {
     let args = Args::parse();
     let modes = [args.boxes.is_some(), args.image.is_some(), args.reextract.is_some(), args.scan_arrows, args.watch, args.grab.is_some(), args.learn.is_some(), args.assist];
-    if modes.iter().filter(|m| **m).count() != 1 {
-        bail!("choose exactly one of --image, --reextract, --scan-arrows, --watch, --grab, --learn, --assist");
+    let chosen = modes.iter().filter(|m| **m).count();
+    if chosen > 1 {
+        bail!("choose one of --image, --reextract, --scan-arrows, --watch, --grab, --learn, --assist (none starts the add-on)");
     }
     if args.from_first && !args.scan_arrows {
         bail!("--from-first requires --scan-arrows");
@@ -121,6 +122,12 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    // The add-on (the default): it finds the game window itself, whenever that appears.
+    if chosen == 0 || args.assist {
+        let ocr = load_ocr(&args)?;
+        return assist::run(&ocr, &Hcu::from_env(), &args.region, &args.wiki);
+    }
+
     // Everything below drives or watches the game.
     let hcu = Hcu::from_env();
     let region = if args.region == "auto" {
@@ -136,10 +143,6 @@ fn main() -> Result<()> {
         hcu.activate()?;
         game_capture(&hcu, region)?.save(path)?;
         return Ok(());
-    }
-    if args.assist {
-        let ocr = load_ocr(&args)?;
-        return assist::run(&ocr, &hcu, region, args.region == "auto", &args.wiki);
     }
     if let Some(dir) = &args.learn {
         return run_learn(&args, &hcu, region, dir);

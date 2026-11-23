@@ -4,6 +4,7 @@
 //! window, so it cannot take focus or swallow the scanner's clicks. It is also
 //! excluded from screen capture (when the OS supports it) so it never appears in
 //! the frames being read. On non-Windows targets it is a no-op.
+mod dock;
 mod marks;
 mod panel;
 mod render;
@@ -11,6 +12,7 @@ mod render;
 mod win;
 
 pub use marks::{render_marks, Icon, Mark};
+pub use dock::{dock_from_drop, dock_origin, Dock, Side};
 pub use panel::{ingame_origin, ingame_panel_width, panel_origin, panel_width, render_panel, render_panel_hits, Chip, Hit, PanelState, Row, Tone};
 
 pub use render::{banner_layout, banner_origin, Ltrb, load_fonts, render, BannerState, Fonts, Phase, BASE_H, BASE_W};
@@ -33,6 +35,8 @@ pub struct Shown {
     /// A card drawn inside the game (click-through), in addition to the one beside it.
     pub ingame: Option<PanelState>,
     pub marks: Vec<Mark>,
+    /// Where the card sits against the game window (the player can drag it).
+    pub dock: Dock,
 }
 
 /// Handle to the running banner. Dropping it closes the window.
@@ -57,7 +61,7 @@ impl Overlay {
     }
 
     fn start_with(first: Card) -> Overlay {
-        let state = Arc::new(Mutex::new(Shown { card: first, ingame: None, marks: Vec::new() }));
+        let state = Arc::new(Mutex::new(Shown { card: first, ingame: None, marks: Vec::new(), dock: Dock::default() }));
         let events = Arc::new(Mutex::new(Vec::new()));
         #[cfg(windows)]
         let worker = win::Worker::start(state.clone(), events.clone());
@@ -72,6 +76,13 @@ impl Overlay {
     fn show(&self, c: Card) {
         if let Ok(mut g) = self.state.lock() {
             g.card = c;
+        }
+    }
+
+    /// Where the card sits against the game window.
+    pub fn set_dock(&self, dock: Dock) {
+        if let Ok(mut g) = self.state.lock() {
+            g.dock = dock;
         }
     }
 

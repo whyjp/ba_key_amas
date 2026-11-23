@@ -11,7 +11,7 @@ use crate::widget::{is_mission_screen, Context, Kind, Lookup, Output, Widget, Wi
 use crate::widgets;
 use baocr_core::ocr_api::TextBox;
 use baocr_extract::scene::Scene;
-use baocr_overlay::{PanelState, Row};
+use baocr_overlay::{Dock, PanelState, Row};
 use baocr_wikidb::{StudentBrief, TypeTable, Wiki};
 use image::RgbImage;
 use std::path::PathBuf;
@@ -49,7 +49,14 @@ fn lookup(wiki: &Wiki, obs: &Observation) -> Lookup {
 
 impl<'a, S: Surface> Assistant<'a, S> {
     pub fn new(observer: Observer<'a>, wiki: &'a Wiki, students: &'a [StudentBrief], types: &'a TypeTable, settings: Settings, settings_path: Option<PathBuf>, surface: S) -> Self {
+        surface.set_dock(settings.dock());
         Assistant { observer, wiki, students, types, widgets: widgets::all(), settings, settings_path, surface, menu_open: false, last: Observation::new(Scene::Unknown) }
+    }
+
+    /// The game went away: forget everything read from it and show nothing.
+    pub fn forget(&mut self) {
+        self.observer.forget();
+        self.show(Observation::new(Scene::Unknown));
     }
 
     pub fn settings(&self) -> &Settings {
@@ -93,6 +100,11 @@ impl<'a, S: Surface> Assistant<'a, S> {
     }
 
     fn handle(&mut self, event: &str) -> bool {
+        // the card was dragged and snapped to a side: remember where
+        if let Some(dock) = Dock::decode(event) {
+            self.settings.set_dock(dock);
+            return true;
+        }
         if event == BUTTON_MENU {
             self.menu_open = !self.menu_open;
             return true;
@@ -196,6 +208,7 @@ mod tests {
         ingame: Option<PanelState>,
         marks: Vec<Mark>,
         clicks: Vec<String>,
+        docks: Vec<Dock>,
     }
 
     #[derive(Clone, Default)]
@@ -213,6 +226,9 @@ mod tests {
         }
         fn take_events(&self) -> Vec<String> {
             std::mem::take(&mut self.0.borrow_mut().clicks)
+        }
+        fn set_dock(&self, dock: Dock) {
+            self.0.borrow_mut().docks.push(dock);
         }
     }
 
@@ -348,6 +364,33 @@ mod tests {
         let shown = r.fake.0.borrow();
         let main = shown.main.as_ref().unwrap();
         assert_eq!((main.scene.as_str(), main.rows.len()), ("메인 메뉴", 1), "just the settings button");
+    }
+
+    #[test]
+    fn closing_the_game_forgets_the_mission_so_the_next_session_starts_clean() {
+        let (r, ocr) = (rig(), NoOcr);
+        let mut a = assistant(&r, &ocr);
+        a.show(squad_obs(Scene::Squad));
+        assert!(rows_of(r.fake.0.borrow().main.as_ref().unwrap()).contains("야외"));
+        a.forget();
+        let shown = r.fake.0.borrow();
+        let main = shown.main.as_ref().unwrap();
+        assert!(main.title.is_empty() && shown.marks.is_empty() && shown.ingame.is_none(), "{main:?}");
+    }
+
+    #[test]
+    fn a_dragged_card_is_remembered_and_the_saved_place_is_applied_at_start() {
+        let (r, ocr) = (rig(), NoOcr);
+        let path = std::env::temp_dir().join(format!("baocr-dock-{}.json", std::process::id()));
+        let mut settings = Settings::default();
+        settings.set_dock(Dock { side: baocr_overlay::Side::Left, y_permille: 250 });
+        let mut a = Assistant::new(Observer::new(&ocr, &r.students), &r.wiki, &r.students, &r.types, settings, Some(path.clone()), r.fake.clone());
+        assert_eq!(r.fake.0.borrow().docks, vec![Dock { side: baocr_overlay::Side::Left, y_permille: 250 }], "the saved place is applied first");
+        r.fake.0.borrow_mut().clicks.push("dock:r:610".into());
+        assert!(a.poll());
+        assert_eq!(a.settings().dock(), Dock { side: baocr_overlay::Side::Right, y_permille: 610 });
+        assert_eq!(Settings::load(&path).dock(), a.settings().dock(), "and saved");
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

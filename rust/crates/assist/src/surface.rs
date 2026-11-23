@@ -1,6 +1,6 @@
 //! The output port: where the assistant's cards and icons go. The assistant only knows
 //! this trait; the Windows overlay implements it, and tests use a recording fake.
-use baocr_overlay::{Mark, Overlay, PanelState};
+use baocr_overlay::{Dock, Mark, Overlay, PanelState};
 
 pub trait Surface {
     /// The add-on's main card, beside the game window (with the settings buttons).
@@ -11,6 +11,8 @@ pub trait Surface {
     fn marks(&self, marks: Vec<Mark>);
     /// Ids of the buttons clicked since the last call.
     fn take_events(&self) -> Vec<String>;
+    /// Where the main card sits against the game window.
+    fn set_dock(&self, dock: Dock);
 }
 
 impl Surface for Overlay {
@@ -25,5 +27,8 @@ impl Surface for Overlay {
     }
     fn take_events(&self) -> Vec<String> {
         Overlay::take_events(self)
+    }
+    fn set_dock(&self, dock: Dock) {
+        Overlay::set_dock(self, dock);
     }
 }

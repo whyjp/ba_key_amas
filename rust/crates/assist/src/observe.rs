@@ -48,6 +48,12 @@ impl<'a> Observer<'a> {
         Observer { ocr, students, tracker: MissionTracker::default(), squad: Vec::new() }
     }
 
+    /// Forget the mission and the squad (the game was closed: what was known is not true any more).
+    pub fn forget(&mut self) {
+        self.tracker = MissionTracker::default();
+        self.squad.clear();
+    }
+
     /// `boxes`: the frame's free-text OCR. `fallback`: the screen to assume when the text
     /// names none (the student list and profile are told apart by pixels, not text).
     pub fn observe(&mut self, img: &RgbImage, boxes: &[TextBox], fallback: Scene) -> Observation {

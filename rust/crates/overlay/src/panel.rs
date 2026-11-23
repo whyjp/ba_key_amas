@@ -94,6 +94,9 @@ pub struct PanelState {
     pub rows: Vec<Row>,
 }
 
+/// The id of the header's hit area: pressing it starts a drag instead of reporting a click.
+pub const DRAG_HANDLE: &str = "drag";
+
 /// A clickable area of a rendered panel, in the panel image's pixels.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Hit {
@@ -135,18 +138,7 @@ pub fn ingame_origin(client: Ltrb, size: (i32, i32)) -> (i32, i32) {
 /// else on the left, aligned with the top of the game. None when neither side has
 /// room: the panel is then not shown rather than drawn over the game.
 pub fn panel_origin(client: Ltrb, outer: Ltrb, work: Ltrb, size: (i32, i32)) -> Option<(i32, i32)> {
-    let (pw, ph) = size;
-    let gap = (((client.3 - client.1) as f32 * 0.012).round() as i32).max(6);
-    let y = client.1.clamp(work.1, (work.3 - ph).max(work.1));
-    let right = outer.2 + gap;
-    if right + pw <= work.2 {
-        return Some((right, y));
-    }
-    let left = outer.0 - gap - pw;
-    if left >= work.0 {
-        return Some((left, y));
-    }
-    None
+    crate::dock::dock_origin(client, outer, work, size, crate::dock::Dock::default())
 }
 
 const LABEL_W: f32 = 62.0;
@@ -226,6 +218,8 @@ pub fn render_panel_hits(width: u32, state: &PanelState, fonts: &Fonts) -> (Rgba
     let mut img = RgbaImage::from_pixel(width, hi, Rgba([0, 0, 0, 0]));
     let head = HEAD_H * s;
     card(&mut img, wf, hf, s, head, 12.0 * s, BODY);
+    // the header bar is where the card is picked up and moved
+    hits.push(Hit { id: DRAG_HANDLE.into(), x: 0.0, y: 0.0, w: wf, h: head });
 
     // header bar: screen name left, tool name right (before the cut corner)
     let scene = if state.scene.is_empty() { "ba-scanner" } else { state.scene.as_str() };
@@ -408,6 +402,9 @@ mod tests {
             ],
         };
         let (img, hits) = render_panel_hits(300, &state, &f);
+        assert_eq!(hits[0].id, DRAG_HANDLE, "the header is the drag handle");
+        assert!(hits[0].y == 0.0 && hits[0].h < 40.0 && hits[0].w == img.width() as f32);
+        let hits: Vec<Hit> = hits.into_iter().skip(1).collect();
         assert_eq!(hits.iter().map(|h| h.id.as_str()).collect::<Vec<_>>(), vec!["ingame", "place:mission"]);
         let first = &hits[0];
         assert!(first.contains((first.x + 5.0) as i32, (first.y + 5.0) as i32) && !first.contains(1, 1));

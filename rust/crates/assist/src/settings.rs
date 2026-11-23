@@ -1,5 +1,6 @@
 //! What the player chose: which widgets show, and where.
 use crate::widget::{Kind, WidgetId};
+use baocr_overlay::{Dock, Side};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -26,11 +27,16 @@ impl Placement {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Settings {
     /// Master switch for everything drawn inside the game. Off hides it all there; the
     /// card beside the game stays.
     pub ingame_visible: bool,
     pub placements: BTreeMap<WidgetId, Placement>,
+    /// The card's side of the game window (true: right) and its height down the window, in
+    /// thousandths. Moved by dragging the card's header.
+    pub dock_right: bool,
+    pub dock_y_permille: i32,
 }
 
 impl Default for Settings {
@@ -43,11 +49,22 @@ impl Default for Settings {
                 (WidgetId::PortraitIcons, Placement::InGame),
                 (WidgetId::SlotStats, Placement::InGame),
             ]),
+            dock_right: true,
+            dock_y_permille: 0,
         }
     }
 }
 
 impl Settings {
+    pub fn dock(&self) -> Dock {
+        Dock { side: if self.dock_right { Side::Right } else { Side::Left }, y_permille: self.dock_y_permille }
+    }
+
+    pub fn set_dock(&mut self, dock: Dock) {
+        self.dock_right = dock.side == Side::Right;
+        self.dock_y_permille = dock.y_permille;
+    }
+
     /// Where the widget is configured to go, falling back to the default for one the file lacks.
     pub fn placement(&self, id: WidgetId) -> Placement {
         self.placements.get(&id).copied().or_else(|| Settings::default().placements.get(&id).copied()).unwrap_or(Placement::Off)
@@ -134,9 +151,12 @@ mod tests {
         assert_eq!(Settings::load(&path), s);
         std::fs::write(&path, "not json").unwrap();
         assert_eq!(Settings::load(&path), Settings::default());
-        // a widget a file does not mention keeps its default
+        // a widget a file does not mention keeps its default, and so does a dock an old file lacks
         std::fs::write(&path, r#"{"ingame_visible":true,"placements":{}}"#).unwrap();
         assert_eq!(Settings::load(&path).placement(WidgetId::MissionInfo), Placement::Outside);
+        assert_eq!(Settings::load(&path).dock(), Dock::default());
+        std::fs::write(&path, r#"{"dock_right":false,"dock_y_permille":300}"#).unwrap();
+        assert_eq!(Settings::load(&path).dock(), Dock { side: Side::Left, y_permille: 300 }, "a file with only the dock still loads");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
