@@ -15,7 +15,7 @@ tabs (slower). While it runs the card shows its progress, the player's mouse and
 Output is JSON only (`students.json`, `index.json`, `details/NNN/student.json`) in
 `%APPDATA%\baocr\students` (or `--out`). Settings: `%APPDATA%\baocr\overlay.json`.
 
-**Portable exe.** `pwsh scripts/package-portable.ps1` builds `D:\dista-scanner` (ba-scanner.exe with
+**Portable exe.** `pwsh scripts/package-portable.ps1` builds `D:\dist\ba-scanner` (ba-scanner.exe with
 models/, wikidb/ and vendor/hcu/ beside it; no console window). A tray icon (right click, 종료) closes
 the add-on whatever state its windows are in; a fatal error is shown in a message box and written to
 `%APPDATA%\baocr\error.log`.
