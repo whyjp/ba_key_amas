@@ -53,6 +53,31 @@ pub struct Shown {
     pub dock: Dock,
     /// A scan holds the player's input: the card then keeps out of the game's way.
     pub locked: bool,
+    /// What the card layer shows right now (written by the overlay thread, read by `Overlay::view`).
+    pub view: ViewInfo,
+}
+
+/// What the card layer shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ViewShape {
+    #[default]
+    Nothing,
+    Card,
+    Tab,
+    /// Sliding between the two.
+    Strip,
+}
+
+/// The card layer's visible state, for tests and tools: shape, slide progress (0 folded .. 1000 open),
+/// its screen rectangle (left, top, right, bottom) and, for the open card, the hit areas in screen pixels.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ViewInfo {
+    pub shape: ViewShape,
+    pub slide_milli: u32,
+    pub rect: [i32; 4],
+    pub hits: Vec<(String, [i32; 4])>,
+    /// The anchor and presentation the overlay holds now (a drag or the pin button changes them here first).
+    pub dock: Dock,
 }
 
 /// Handle to the running banner. Dropping it closes the window.
@@ -85,7 +110,7 @@ impl Overlay {
     }
 
     fn start_with(first: Card) -> Overlay {
-        let state = Arc::new(Mutex::new(Shown { card: first, ingame: None, marks: Vec::new(), dock: Dock::default(), locked: false }));
+        let state = Arc::new(Mutex::new(Shown { card: first, ingame: None, marks: Vec::new(), dock: Dock::default(), locked: false, view: ViewInfo::default() }));
         let events = Arc::new(Mutex::new(Vec::new()));
         let wake = Arc::new(wake::Wake::default());
         #[cfg(windows)]
@@ -148,6 +173,11 @@ impl Overlay {
             g.ingame = p;
         }
         self.wake.notify();
+    }
+
+    /// What the card layer shows right now.
+    pub fn view(&self) -> ViewInfo {
+        self.state.lock().map(|g| ViewInfo { dock: g.dock, ..g.view.clone() }).unwrap_or_default()
     }
 
     /// The ids of the buttons clicked since the last call.
