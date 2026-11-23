@@ -79,7 +79,15 @@ pub struct ProcessRunner {
 
 impl Runner for ProcessRunner {
     fn run(&self, args: &[String]) -> Result<String> {
-        let out = Command::new(&self.binary).args(args).output().map_err(|e| anyhow!("run {}: {e}", self.binary.display()))?;
+        let mut cmd = Command::new(&self.binary);
+        cmd.args(args);
+        // the add-on has no console of its own: without this every call would flash a console window
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        }
+        let out = cmd.output().map_err(|e| anyhow!("run {}: {e}", self.binary.display()))?;
         let mut text = String::from_utf8_lossy(&out.stdout).into_owned();
         text.push_str(&String::from_utf8_lossy(&out.stderr));
         // A failing exit with a JSON record is reported through the record (ok/code/hint),
