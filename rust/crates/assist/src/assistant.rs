@@ -29,6 +29,8 @@ const BUTTON_SCAN: &str = "scan:start";
 const BUTTON_SCAN_DEEP: &str = "scan:deep";
 /// Sent by the card's 종료 button and by the tray icon's 종료.
 const BUTTON_QUIT: &str = "quit";
+/// Folds and unfolds the student-list section.
+const BUTTON_STUDENT_SECTION: &str = "section:student";
 
 /// Something the player asked for that the add-on itself does not do: the program's main loop
 /// carries it out (the scan is the only thing that sends input to the game).
@@ -211,7 +213,9 @@ impl<'a, S: Surface> Assistant<'a, S> {
         self.send_marks(Vec::new());
     }
 
-    fn send_main(&self, card: PanelState) {
+    fn send_main(&self, mut card: PanelState) {
+        // closing the add-on is the icon in the header of every main card
+        card.close = Some((BUTTON_QUIT.into(), "애드온 종료".into()));
         if changed(&mut self.sent.borrow_mut().main, &card) {
             self.surface.main_card(card);
         }
@@ -257,6 +261,10 @@ impl<'a, S: Surface> Assistant<'a, S> {
             self.settings.set_dock(dock);
             return true;
         }
+        if event == BUTTON_STUDENT_SECTION {
+            self.settings.student_open = !self.settings.student_open;
+            return true;
+        }
         if event == BUTTON_QUIT {
             if !self.commands.contains(&Command::Quit) {
                 self.commands.push(Command::Quit);
@@ -291,20 +299,19 @@ impl<'a, S: Surface> Assistant<'a, S> {
     /// The controls: the student list and its scan, the display switches, closing.
     fn control_rows(&self) -> Vec<Row> {
         let on_off = |on: bool| if on { "켜짐" } else { "꺼짐" }.to_string();
-        let mut rows = vec![
-            Row::Heading("학생 정보".into()),
-            Row::Hint { label: "갱신".into(), value: self.library.age_text(self.now), tip: self.library.exact_text() },
-            Row::Button { id: BUTTON_SCAN_DEEP.into(), label: "스캔 · 상세 포함".into(), value: on_off(self.settings.scan_deep), on: self.settings.scan_deep },
-            Row::Button { id: BUTTON_SCAN.into(), label: "학생 정보 스캔".into(), value: "시작".into(), on: false },
-            Row::Heading("표시".into()),
-            Row::Button { id: BUTTON_INGAME.into(), label: "인게임 표시".into(), value: on_off(self.settings.ingame_visible), on: self.settings.ingame_visible },
-        ];
+        let open = self.settings.student_open;
+        let mut rows = vec![Row::Section { id: BUTTON_STUDENT_SECTION.into(), title: "학생 정보".into(), open, summary: if open { String::new() } else { self.library.age_text(self.now) } }];
+        if open {
+            rows.push(Row::Hint { label: "갱신".into(), value: self.library.age_text(self.now), tip: self.library.exact_text() });
+            rows.push(Row::Button { id: BUTTON_SCAN_DEEP.into(), label: "스캔 · 상세 포함".into(), value: on_off(self.settings.scan_deep), on: self.settings.scan_deep });
+            rows.push(Row::Button { id: BUTTON_SCAN.into(), label: "학생 정보 스캔".into(), value: "시작".into(), on: false });
+        }
+        rows.push(Row::Heading("표시".into()));
+        rows.push(Row::Button { id: BUTTON_INGAME.into(), label: "인게임 표시".into(), value: on_off(self.settings.ingame_visible), on: self.settings.ingame_visible });
         for w in &self.widgets {
             let p = self.settings.placement(w.id());
             rows.push(Row::Button { id: format!("{BUTTON_PLACE}{}", w.id().key()), label: w.title().into(), value: p.label(w.kind()).into(), on: p != Placement::Off });
         }
-        rows.push(Row::Heading("애드온".into()));
-        rows.push(Row::Button { id: BUTTON_QUIT.into(), label: "애드온 종료".into(), value: "종료".into(), on: false });
         rows
     }
 
@@ -316,10 +323,8 @@ impl<'a, S: Surface> Assistant<'a, S> {
             Row::Info { label: "게임".into(), value: if self.game_present { "연결됨" } else { "대기 중" }.into() },
             Row::Heading("표시".into()),
             Row::Button { id: BUTTON_INGAME.into(), label: "인게임 표시".into(), value: on_off(self.settings.ingame_visible), on: self.settings.ingame_visible },
-            Row::Heading("애드온".into()),
-            Row::Button { id: BUTTON_QUIT.into(), label: "애드온 종료".into(), value: "종료".into(), on: false },
         ];
-        self.send_main(PanelState { scene: Scene::Battle.label().to_string(), title: String::new(), rows });
+        self.send_main(PanelState { scene: Scene::Battle.label().to_string(), title: String::new(), rows, ..Default::default() });
         self.send_ingame(None);
         self.send_marks(Vec::new());
     }
@@ -340,7 +345,7 @@ impl<'a, S: Surface> Assistant<'a, S> {
         if self.scanning {
             // the card is the scan: how far it is, and that the player's input is locked
             let (title, rows) = scan_rows(&self.scan_state.borrow(), self.input_locked);
-            self.send_main(PanelState { scene: "학생 스캔".into(), title, rows });
+            self.send_main(PanelState { scene: "학생 스캔".into(), title, rows, ..Default::default() });
             self.send_ingame(None);
             self.send_marks(Vec::new());
             return;
@@ -392,8 +397,8 @@ impl<'a, S: Surface> Assistant<'a, S> {
             eprintln!("assist: scene={:?} squad={:?} cards={:?} marks={} kind={:?}", obs.scene, obs.squad, obs.cards.iter().map(|c| c.text.as_str()).collect::<Vec<_>>(), marks.len(), obs.grid_kind);
         }
         let scene = if self.game_present { obs.scene.label().to_string() } else { "게임 대기 중".to_string() };
-        self.send_main(PanelState { scene, title: outside_title, rows });
-        self.send_ingame((!ingame.is_empty()).then(|| PanelState { scene: String::new(), title: ingame_title, rows: ingame }));
+        self.send_main(PanelState { scene, title: outside_title, rows, ..Default::default() });
+        self.send_ingame((!ingame.is_empty()).then(|| PanelState { scene: String::new(), title: ingame_title, rows: ingame, ..Default::default() }));
         self.send_marks(marks);
         // (`age_shown` is only read by `tick`, which takes `&mut self`; it is set there when shown)
     }
@@ -519,7 +524,7 @@ mod tests {
         let main = shown.main.as_ref().unwrap();
         let text = rows_of(main);
         assert_eq!(main.scene, "게임 대기 중", "no game found yet");
-        for needed in ["대기 중", "스캔 기록 없음", "scan:start", "scan:deep", "ingame", "place:formation", "quit"] {
+        for needed in ["대기 중", "스캔 기록 없음", "scan:start", "scan:deep", "ingame", "place:formation", "section:student"] {
             assert!(text.contains(needed), "{needed} in {text}");
         }
         drop(shown);
@@ -772,7 +777,7 @@ mod tests {
             let main = shown.main.as_ref().unwrap();
             assert_eq!(main.scene, "전투 중");
             let text = rows_of(main);
-            assert!(text.contains("quit") && text.contains("ingame") && text.contains("연결됨"), "{text}");
+            assert!(text.contains("ingame") && text.contains("연결됨"), "{text}");
             assert!(!text.contains("scan:start") && !text.contains("place:"), "nothing that reads or drives the game: {text}");
             assert!(shown.ingame.is_none() && shown.marks.is_empty(), "no stale cards or icons");
         }
@@ -787,6 +792,43 @@ mod tests {
         let shown = r.fake.0.borrow();
         assert!(rows_of(shown.main.as_ref().unwrap()).contains("scan:start"));
         assert!(shown.ingame.is_none() && shown.marks.is_empty());
+    }
+
+    #[test]
+    fn the_student_section_folds_and_unfolds_and_the_close_button_is_in_the_header() {
+        let (r, ocr) = (rig(), NoOcr);
+        let mut a = assistant(&r, &ocr);
+        a.show(Observation::new(Scene::Lobby));
+        {
+            let shown = r.fake.0.borrow();
+            let main = shown.main.as_ref().unwrap();
+            assert_eq!(main.close.as_ref().map(|c| c.0.as_str()), Some("quit"), "closing is the header icon");
+            let text = rows_of(main);
+            assert!(text.contains("scan:start") && !text.contains("애드온 종료"), "{text}");
+        }
+        click(&r, "section:student");
+        a.poll();
+        {
+            let shown = r.fake.0.borrow();
+            let main = shown.main.as_ref().unwrap();
+            let text = rows_of(main);
+            assert!(!text.contains("scan:start") && !text.contains("scan:deep"), "folded: no scan controls, {text}");
+            assert!(text.contains("section:student") && text.contains("ingame"), "the section header and the display switches stay: {text}");
+            let summary = main.rows.iter().find_map(|row| match row {
+                Row::Section { summary, open: false, .. } => Some(summary.clone()),
+                _ => None,
+            });
+            assert_eq!(summary.as_deref(), Some("스캔 기록 없음"), "a folded section still says how stale the list is");
+            assert_eq!(main.close.as_ref().map(|c| c.0.as_str()), Some("quit"));
+        }
+        assert!(!a.settings().student_open);
+        click(&r, "section:student");
+        a.poll();
+        assert!(rows_of(r.fake.0.borrow().main.as_ref().unwrap()).contains("scan:start"));
+        // the close icon reports quit through the same command as before
+        click(&r, "quit");
+        a.poll();
+        assert_eq!(a.take_commands(), vec![Command::Quit]);
     }
 
     #[test]

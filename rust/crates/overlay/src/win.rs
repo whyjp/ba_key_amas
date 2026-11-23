@@ -6,7 +6,7 @@
 //! screenshots where the OS supports it.
 use crate::cache::{Memo, Tracker};
 use crate::dock::{dock_from_drop, dock_origin, Dock};
-use crate::panel::{ingame_origin, ingame_panel_width, panel_width, render_panel, render_panel_hits, render_tooltip, Hit, PanelState, DRAG_HANDLE, PANEL_BASE_W};
+use crate::panel::{HINT_AREA, ingame_origin, ingame_panel_width, panel_width, render_panel, render_panel_hits, render_tooltip, Hit, PanelState, DRAG_HANDLE, PANEL_BASE_W};
 use crate::render::{load_fonts, Fonts, Ltrb};
 use crate::marks::{render_marks, Mark};
 use crate::{Card, Shown};
@@ -504,7 +504,7 @@ fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, stop: Arc<Atom
             let clicks: Vec<(isize, i32, i32)> = CLICKS.lock().map(|mut c| std::mem::take(&mut *c)).unwrap_or_default();
             for (h, x, y) in clicks {
                 if h == card.hwnd {
-                    if let Some(hit) = card_hits.iter().find(|hit| hit.contains(x, y) && hit.tip.is_none()) {
+                    if let Some(hit) = card_hits.iter().find(|hit| hit.contains(x, y) && hit.id != HINT_AREA) {
                         if hit.id == DRAG_HANDLE {
                             if left_button_down() && game_present_now {
                                 drag = Some((x, y));

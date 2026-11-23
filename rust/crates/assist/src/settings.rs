@@ -37,6 +37,8 @@ pub struct Settings {
     pub dock_right: bool,
     /// The roster scan also reads the stat popup and the level-up and mystic tabs (slower).
     pub scan_deep: bool,
+    /// The student-list section of the card is unfolded.
+    pub student_open: bool,
 }
 
 impl Default for Settings {
@@ -51,6 +53,7 @@ impl Default for Settings {
             ]),
             dock_right: true,
             scan_deep: false,
+            student_open: true,
         }
     }
 }

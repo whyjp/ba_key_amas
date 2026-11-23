@@ -31,7 +31,7 @@ pub fn scan_rows(state: &BannerState, locked: bool) -> (String, Vec<Row>) {
 /// The whole card for a scan on its own (the command-line scan has no menu around it).
 pub fn scan_card(state: &BannerState, locked: bool) -> PanelState {
     let (title, rows) = scan_rows(state, locked);
-    PanelState { scene: "학생 스캔".into(), title, rows }
+    PanelState { scene: "학생 스캔".into(), title, rows, ..Default::default() }
 }
 
 #[cfg(test)]

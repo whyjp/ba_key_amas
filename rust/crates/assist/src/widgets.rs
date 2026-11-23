@@ -403,7 +403,7 @@ mod tests {
         let dir = std::path::Path::new(&dir);
         let (b, t, team) = (brief(), types(), squad());
         let score = evaluate(&b, Some("Outdoor"), &team, &team, &t).unwrap();
-        let card = |rows: Vec<Row>| PanelState { scene: "편성".into(), title: "19-3 설원 지구 제2 지역".into(), rows };
+        let card = |rows: Vec<Row>| PanelState { scene: "편성".into(), title: "19-3 설원 지구 제2 지역".into(), rows, ..Default::default() };
         let mut mission = Vec::new();
         mission_rows(&mut mission, &b, &t, true);
         for (name, rows) in [("mission-card", mission), ("formation-card", formation_rows(&score, &b, Some("Outdoor"), &team, &t))] {

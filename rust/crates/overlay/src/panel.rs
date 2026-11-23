@@ -145,6 +145,8 @@ pub enum Row {
     Hint { label: String, value: String, tip: String },
     /// A small section title.
     Heading(String),
+    /// A section title that folds: pressing it reports `id`; `summary` is shown at the right while folded.
+    Section { id: String, title: String, open: bool, summary: String },
     /// A bar from empty to `done` of `total` (just the text when the total is not known yet).
     Progress { label: String, done: usize, total: Option<usize>, text: String },
 }
@@ -156,6 +158,8 @@ pub struct PanelState {
     /// Main line, e.g. "19-3 설원 지구 제2 지역". Empty on screens without one.
     pub title: String,
     pub rows: Vec<Row>,
+    /// A button in the header's right corner (id, tooltip), drawn as a power icon.
+    pub close: Option<(String, String)>,
 }
 
 /// The id of the header's hit area: pressing it starts a drag instead of reporting a click.
@@ -356,6 +360,7 @@ pub fn render_panel_hits(width: u32, state: &PanelState, fonts: &Fonts) -> (Rgba
             Row::Button { .. } => 24.0 * s + 5.0 * s,
             Row::Hint { value, .. } => wrap(&fonts.regular, 14.0 * s, value_w, value).len() as f32 * 21.0 * s + 5.0 * s,
             Row::Heading(_) => 21.0 * s + 4.0 * s,
+            Row::Section { .. } => 24.0 * s + 4.0 * s,
             Row::Progress { .. } => 22.0 * s + 5.0 * s,
         };
     }
@@ -366,6 +371,12 @@ pub fn render_panel_hits(width: u32, state: &PanelState, fonts: &Fonts) -> (Rgba
     let mut img = RgbaImage::from_pixel(width, hi, Rgba([0, 0, 0, 0]));
     let head = HEAD_H * s;
     card(&mut img, wf, hf, s, head, 12.0 * s, BODY);
+    // the close button first: hits are searched in order, and the header below it is a drag handle
+    let icon_cx = wf - 36.0 * s;
+    if let Some((id, tip)) = &state.close {
+        let box_w = 26.0 * s;
+        hits.push(Hit { id: id.clone(), tip: Some(tip.clone()), x: icon_cx - box_w / 2.0, y: 0.0, w: box_w, h: head });
+    }
     // the header bar is where the card is picked up and moved
     hits.push(Hit { id: DRAG_HANDLE.into(), tip: None, x: 0.0, y: 0.0, w: wf, h: head });
 
@@ -375,7 +386,11 @@ pub fn render_panel_hits(width: u32, state: &PanelState, fonts: &Fonts) -> (Rgba
     if !state.scene.is_empty() {
         let name = "ba-scanner";
         let nw = text_width(&fonts.regular, 10.5 * s, name);
-        draw_text(&mut img, &fonts.regular, 10.5 * s, wf - 20.0 * s - nw, (head - 10.5 * s * 1.2) / 2.0, NAVY_SOFT, 1.0, name);
+        let right = if state.close.is_some() { icon_cx - 16.0 * s } else { wf - 20.0 * s };
+        draw_text(&mut img, &fonts.regular, 10.5 * s, right - nw, (head - 10.5 * s * 1.2) / 2.0, NAVY_SOFT, 1.0, name);
+    }
+    if state.close.is_some() {
+        power_icon(&mut img, icon_cx, head / 2.0, 6.5 * s, s);
     }
 
     let mut y = head + 10.0 * s;
@@ -421,6 +436,19 @@ pub fn render_panel_hits(width: u32, state: &PanelState, fonts: &Fonts) -> (Rgba
                 draw_text(&mut img, &fonts.bold, 11.5 * s, pad, y, NAVY, 1.0, text);
                 y += 17.0 * s;
                 fill_rrect(&mut img, pad, y, wf - pad * 2.0, (1.0 * s).max(1.0), 0.0, |_, _| (BORDER, 1.0));
+                y += 4.0 * s;
+            }
+            Row::Section { id, title, open, summary } => {
+                let top = y;
+                triangle(&mut img, pad + 4.0 * s, y + 12.0 * s, 4.5 * s, *open, NAVY);
+                draw_text(&mut img, &fonts.bold, 12.5 * s, pad + 16.0 * s, y + 4.0 * s, NAVY, 1.0, title);
+                if !summary.is_empty() {
+                    let sw = text_width(&fonts.regular, 12.0 * s, summary);
+                    draw_text(&mut img, &fonts.regular, 12.0 * s, wf - pad - sw, y + 5.0 * s, MUTED, 1.0, summary);
+                }
+                y += 24.0 * s;
+                fill_rrect(&mut img, pad, y, wf - pad * 2.0, (1.0 * s).max(1.0), 0.0, |_, _| (BORDER, 1.0));
+                hits.push(Hit { id: id.clone(), tip: None, x: pad, y: top, w: wf - pad * 2.0, h: y - top });
                 y += 4.0 * s;
             }
             Row::Progress { label, done, total, text } => {
@@ -531,6 +559,31 @@ pub fn render_panel_hits(width: u32, state: &PanelState, fonts: &Fonts) -> (Rgba
     (img, hits)
 }
 
+/// A power symbol (ring with a gap on top and a bar through it) in white, centred at (cx, cy).
+fn power_icon(img: &mut RgbaImage, cx: f32, cy: f32, r: f32, s: f32) {
+    let t = (1.7 * s).max(1.2);
+    fill_rrect(img, cx - r, cy - r, 2.0 * r, 2.0 * r, r, |_, _| (WHITE, 1.0));
+    fill_rrect(img, cx - r + t, cy - r + t, 2.0 * (r - t), 2.0 * (r - t), r - t, |_, _| (NAVY, 1.0));
+    let gap = 2.4 * s;
+    fill_rrect(img, cx - gap, cy - r - 1.0, 2.0 * gap, r - 0.2 * s, 0.0, |_, _| (NAVY, 1.0));
+    fill_rrect(img, cx - t / 2.0, cy - r - 0.6 * s, t, r + 0.4 * s, t / 2.0, |_, _| (WHITE, 1.0));
+}
+
+/// A small solid triangle centred at (cx, cy): pointing down when `open`, right when folded.
+fn triangle(img: &mut RgbaImage, cx: f32, cy: f32, half: f32, open: bool, color: [u8; 3]) {
+    let n = (half * 2.0).round().max(2.0) as i32;
+    for i in 0..n {
+        let f = i as f32 / n as f32;
+        if open {
+            let span = 2.0 * half * (1.0 - f);
+            fill_rrect(img, cx - span / 2.0, cy - half + i as f32, span.max(1.0), 1.0, 0.0, |_, _| (color, 1.0));
+        } else {
+            let span = 2.0 * half * (1.0 - (2.0 * f - 1.0).abs());
+            fill_rrect(img, cx - half * 0.5, cy - half + i as f32, span.max(1.0), 1.0, 0.0, |_, _| (color, 1.0));
+        }
+    }
+}
+
 /// A small flat tooltip: `text` (lines split at '\n') in white on navy. `scale` is the card's
 /// scale (panel width over its design width), so the tooltip grows with the window.
 pub fn render_tooltip(scale: f32, text: &str, fonts: &Fonts) -> RgbaImage {
@@ -592,6 +645,35 @@ mod tests {
                 Row::Button { id: "ingame".into(), label: "인게임 표시".into(), value: "켜짐".into(), on: true },
                 Row::Button { id: "place".into(), label: "임무 카드".into(), value: "게임 밖 · 100%".into(), on: false },
             ],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn the_close_icon_comes_before_the_drag_handle_and_a_section_row_reports_its_id() {
+        let Some(f) = load_fonts() else { return };
+        let state = PanelState {
+            scene: "상태".into(),
+            rows: vec![Row::Section { id: "section:x".into(), title: "학생 정보".into(), open: false, summary: "3일 경과".into() }, Row::Note("본문".into())],
+            close: Some(("quit".into(), "애드온 종료".into())),
+            ..Default::default()
+        };
+        let (img, hits) = render_panel_hits(300, &state, &f);
+        let at = |id: &str| hits.iter().position(|h| h.id == id).unwrap_or_else(|| panic!("no hit {id}"));
+        assert!(at("quit") < at(DRAG_HANDLE), "the icon wins over the header it sits on");
+        let quit = &hits[at("quit")];
+        assert_eq!(quit.tip.as_deref(), Some("애드온 종료"));
+        assert!(quit.x > 300.0 * 0.7 && quit.x + quit.w < 300.0 - 8.0, "inside the header, left of its cut corner: {} {}", quit.x, quit.w);
+        let section = &hits[at("section:x")];
+        assert!(section.w > 200.0 && section.h > 15.0);
+        // the icon is white on the navy header
+        let (cx, cy) = ((quit.x + quit.w / 2.0) as u32, (quit.h / 2.0) as u32);
+        let white = (cx - 7..cx + 7).any(|x| (cy - 7..cy + 7).any(|y| img.get_pixel(x, y).0[..3] == [255, 255, 255]));
+        assert!(white, "a white icon in the header");
+        if let Some(dir) = std::env::var_os("BANNER_PREVIEW_DIR") {
+            img.save(std::path::Path::new(&dir).join("close-section.png")).unwrap();
+            let open = PanelState { rows: vec![Row::Section { id: "section:x".into(), title: "학생 정보".into(), open: true, summary: String::new() }, Row::Note("본문".into())], ..state };
+            render_panel(300, &open, &f).save(std::path::Path::new(&dir).join("close-section-open.png")).unwrap();
         }
     }
 
@@ -623,6 +705,7 @@ mod tests {
                 Row::Hint { label: "갱신".into(), value: "3일 2시간 경과".into(), tip: "2026-11-20 17:49".into() },
                 Row::Progress { label: "진행".into(), done: 50, total: Some(100), text: "50/100".into() },
             ],
+            ..Default::default()
         };
         let (img, hits) = render_panel_hits(300, &state, &f);
         let hint = hits.iter().find(|h| h.id == HINT_AREA).expect("a hit area for the hint row");
@@ -653,6 +736,7 @@ mod tests {
                 Row::Info { label: "지형".into(), value: "야외".into() },
                 Row::Button { id: "place:mission".into(), label: "임무 카드".into(), value: "게임 밖".into(), on: false },
             ],
+            ..Default::default()
         };
         let (img, hits) = render_panel_hits(300, &state, &f);
         assert_eq!(hits[0].id, DRAG_HANDLE, "the header is the drag handle");
