@@ -18,6 +18,10 @@ pub enum Scene {
     WorkHub,
     /// 임무: the list of one area's missions (Normal / Hard tabs).
     MissionList,
+    /// 현상수배 / 특별의뢰 / 학원교류회: choosing the place (고가도로, 거점 방어, 트리니티, ...).
+    DungeonSelect,
+    /// The stage list of one place ("스테이지 목록").
+    DungeonList,
     /// "임무 정보" popup of one mission.
     MissionInfo,
     /// "적 정보 / 상성 정보" popup of one mission.
@@ -39,6 +43,8 @@ impl Scene {
             Scene::Lobby => "메인 메뉴",
             Scene::WorkHub => "업무",
             Scene::MissionList => "임무 선택",
+            Scene::DungeonSelect => "의뢰 선택",
+            Scene::DungeonList => "스테이지 목록",
             Scene::MissionInfo => "임무 정보",
             Scene::EnemyInfo => "적 정보",
             Scene::MissionMap => "임무 지도",
@@ -66,8 +72,11 @@ fn header(boxes: &[TextBox]) -> String {
 
 /// A popup's title: centred near the top of the popup, around y 200..260.
 fn popup_title_is(boxes: &[TextBox], word: &str) -> bool {
-    boxes.iter().any(|b| norm(&b.text) == word && b.y0 > 190.0 && b.y1 < 270.0 && (b.x0 + b.x1) / 2.0 > 450.0 && (b.x0 + b.x1) / 2.0 < 830.0)
+    boxes.iter().any(|b| norm(&b.text) == word && b.y0 > 190.0 && b.y1 < 300.0 && (b.x0 + b.x1) / 2.0 > 450.0 && (b.x0 + b.x1) / 2.0 < 830.0)
 }
+
+/// Headers of the screens that hold place-based missions.
+const DUNGEON_HEADERS: [&str; 3] = ["현상수배", "특별의뢰", "학원교류회"];
 
 /// The main menu's bottom bar names at least four of its eight places.
 const LOBBY_LABELS: [&str; 8] = ["카페", "스케줄", "학생", "편성", "소설", "제조", "상점", "모집"];
@@ -94,55 +103,88 @@ pub fn classify(boxes: &[TextBox], pixel_scene: Option<Scene>) -> Scene {
         "임무" if has(boxes, "Normal") && has(boxes, "Hard") => Scene::MissionList,
         "편성" => Scene::Squad,
         "업무" => Scene::WorkHub,
+        h if DUNGEON_HEADERS.contains(&h) && has(boxes, "스테이지목록") => Scene::DungeonList,
+        h if DUNGEON_HEADERS.contains(&h) && has(boxes, "Select") => Scene::DungeonSelect,
         _ if is_lobby(boxes) => Scene::Lobby,
         _ => Scene::Unknown,
     }
 }
 
-/// A campaign mission as the game shows it: "19-3 | 설원 지구 제2 지역".
+/// A mission as the game shows it. Campaign missions carry an area and stage number
+/// ("19-3 | 설원 지구 제2 지역"). 현상수배, 특별의뢰 and 학원교류회 missions show only a
+/// stage number and a stage name ("03 | 고가도로 C"); the place they belong to
+/// (고가도로, 거점 방어, 트리니티, ...) was shown on the list screen before.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MissionRef {
-    /// Area and stage number; None when only the name was seen (the enemy popup).
+    /// Campaign area and stage number.
     pub number: Option<(u32, u32)>,
+    /// Stage number within a place (현상수배, 특별의뢰, 학원교류회).
+    pub stage_no: Option<u32>,
+    /// The place of such a mission, from the list screen, when it was seen.
+    pub place: Option<String>,
     pub name: String,
 }
 
 impl MissionRef {
-    /// "19-3 설원 지구 제2 지역", or just the name.
+    pub fn named(name: &str) -> MissionRef {
+        MissionRef { number: None, stage_no: None, place: None, name: name.to_string() }
+    }
+
+    /// "19-3 설원 지구 제2 지역", "고가도로 03 고가도로 C", or just the name.
     pub fn display(&self) -> String {
-        match self.number {
-            Some((a, s)) => format!("{a}-{s} {}", self.name),
-            None => self.name.clone(),
+        match (self.number, self.stage_no, &self.place) {
+            (Some((a, s)), _, _) => format!("{a}-{s} {}", self.name),
+            (None, Some(n), Some(place)) => format!("{place} {n:02} {}", self.name),
+            (None, Some(n), None) => format!("{n:02} {}", self.name),
+            _ => self.name.clone(),
         }
+    }
+
+    fn same_stage(&self, other: &MissionRef) -> bool {
+        self.number == other.number && self.stage_no == other.stage_no
     }
 }
 
 static NUMBERED: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\s*(\d{1,2})\s*[-–—]\s*(\d{1,2})\s*[|｜lI]?\s*(.+?)\s*$").unwrap());
+static STAGE_LINE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\s*(\d{1,2})\s*[|｜lI]?\s*(\D.+?)\s*$").unwrap());
 
-/// The mission named on the "임무 정보" popup (its title line, around y 330..400).
+/// The mission named on the "임무 정보" popup (its title line, around y 300..410).
 pub fn mission_from_info(boxes: &[TextBox]) -> Option<MissionRef> {
-    boxes.iter().filter(|b| b.y0 > 320.0 && b.y1 < 410.0 && b.x0 < 560.0).find_map(|b| {
-        let c = NUMBERED.captures(&b.text)?;
-        let name = c[3].trim().to_string();
-        let number = (c[1].parse().ok()?, c[2].parse().ok()?);
-        (name.chars().count() >= 2).then_some(MissionRef { number: Some(number), name })
+    boxes.iter().filter(|b| b.y0 > 300.0 && b.y1 < 410.0 && b.x0 < 560.0).find_map(|b| {
+        if let Some(c) = NUMBERED.captures(&b.text) {
+            let name = c[3].trim().to_string();
+            let number = (c[1].parse().ok()?, c[2].parse().ok()?);
+            return (name.chars().count() >= 2).then_some(MissionRef { number: Some(number), stage_no: None, place: None, name });
+        }
+        let c = STAGE_LINE.captures(&b.text)?;
+        let name = c[2].trim().to_string();
+        (name.chars().count() >= 2).then(|| MissionRef { number: None, stage_no: c[1].parse().ok(), place: None, name })
     })
 }
 
-/// The mission named on the enemy popup (its title, around y 200..260).
+/// The mission named on the enemy popup (its title, around y 200..300).
 pub fn mission_from_enemy_popup(boxes: &[TextBox]) -> Option<MissionRef> {
     boxes
         .iter()
-        .filter(|b| b.y0 > 190.0 && b.y1 < 270.0 && (b.x0 + b.x1) / 2.0 > 450.0 && (b.x0 + b.x1) / 2.0 < 830.0)
+        .filter(|b| b.y0 > 190.0 && b.y1 < 300.0 && (b.x0 + b.x1) / 2.0 > 450.0 && (b.x0 + b.x1) / 2.0 < 830.0)
         .map(|b| b.text.trim().to_string())
         .find(|t| t.chars().count() >= 2 && !t.contains('×'))
-        .map(|name| MissionRef { number: None, name })
+        .map(|name| MissionRef::named(&name))
+}
+
+/// The place named on a stage list's left card ("현상수배 - 고가도로", "거점 방어", "트리니티").
+pub fn place_from_list(boxes: &[TextBox]) -> Option<String> {
+    let mut card: Vec<&TextBox> = boxes.iter().filter(|b| b.x0 < 400.0 && b.y0 > 240.0 && b.y0 < 300.0).collect();
+    card.sort_by(|a, b| a.y0.total_cmp(&b.y0));
+    card.first().map(|b| b.text.trim().to_string()).filter(|t| t.chars().count() >= 2)
 }
 
 /// Remembers the mission across the screens that do not name it.
 #[derive(Debug, Default)]
 pub struct MissionTracker {
     mission: Option<MissionRef>,
+    /// The place read on the last stage list (for missions that do not name it).
+    place: Option<String>,
 }
 
 impl MissionTracker {
@@ -154,10 +196,13 @@ impl MissionTracker {
     pub fn update(&mut self, scene: Scene, boxes: &[TextBox]) -> Option<&MissionRef> {
         match scene {
             Scene::MissionInfo => {
-                if let Some(m) = mission_from_info(boxes) {
+                if let Some(mut m) = mission_from_info(boxes) {
+                    if m.stage_no.is_some() {
+                        m.place = self.place.clone();
+                    }
                     // An alert dialog over the popup can hide the end of the name: the same
                     // mission seen again with a shorter name keeps the full name already read.
-                    let cut_off_view = self.mission.as_ref().is_some_and(|cur| cur.number == m.number && cur.name.chars().count() > m.name.chars().count());
+                    let cut_off_view = self.mission.as_ref().is_some_and(|cur| cur.same_stage(&m) && cur.name.chars().count() > m.name.chars().count());
                     if !cut_off_view {
                         self.mission = Some(m);
                     }
@@ -172,8 +217,16 @@ impl MissionTracker {
                     }
                 }
             }
+            // the stage list names the place its stages belong to
+            Scene::DungeonList => {
+                self.mission = None;
+                self.place = place_from_list(boxes).or_else(|| self.place.take());
+            }
             // back at a place from which another mission is picked (or none): forget
-            Scene::MissionList | Scene::WorkHub | Scene::Lobby | Scene::StudentList | Scene::StudentProfile => self.mission = None,
+            Scene::DungeonSelect | Scene::MissionList | Scene::WorkHub | Scene::Lobby | Scene::StudentList | Scene::StudentProfile => {
+                self.mission = None;
+                self.place = None;
+            }
             Scene::MissionMap | Scene::Squad | Scene::Unknown => {}
         }
         self.mission.as_ref()
@@ -207,6 +260,14 @@ mod tests {
             ("enemy-info", Scene::EnemyInfo),
             ("mission-map", Scene::MissionMap),
             ("squad", Scene::Squad),
+            ("dungeon-select-bounty", Scene::DungeonSelect),
+            ("dungeon-select-week", Scene::DungeonSelect),
+            ("dungeon-select-school", Scene::DungeonSelect),
+            ("dungeon-list-bounty", Scene::DungeonList),
+            ("dungeon-list-week", Scene::DungeonList),
+            ("dungeon-list-school", Scene::DungeonList),
+            ("dungeon-info-bounty", Scene::MissionInfo),
+            ("dungeon-info-week", Scene::MissionInfo),
         ] {
             assert_eq!(classify(&boxes(file), None), want, "{file}");
         }
@@ -220,7 +281,7 @@ mod tests {
     #[test]
     fn the_mission_is_read_from_the_info_popup_and_the_enemy_popup() {
         let m = mission_from_info(&boxes("mission-info")).unwrap();
-        assert_eq!(m, MissionRef { number: Some((19, 3)), name: "설원 지구 제2 지역".into() });
+        assert_eq!(m, MissionRef { number: Some((19, 3)), stage_no: None, place: None, name: "설원 지구 제2 지역".into() });
         assert_eq!(m.display(), "19-3 설원 지구 제2 지역");
         let e = mission_from_enemy_popup(&boxes("enemy-info")).unwrap();
         assert_eq!(e.name, "설원 지구 제2 지역");
@@ -253,6 +314,24 @@ mod tests {
             b.text = "19-4|호쿠로쿠 중앙선".into();
         }
         assert_eq!(t.update(Scene::MissionInfo, &hidden).unwrap().number, Some((19, 4)));
+    }
+
+    #[test]
+    fn a_place_based_mission_takes_its_place_from_the_list_screen() {
+        for (list, info, place, stage, name) in [
+            ("dungeon-list-bounty", "dungeon-info-bounty", "현상수배-고가도로", 3, "고가도로 C"),
+            ("dungeon-list-week", "dungeon-info-week", "거점방어", 7, "폐허의 군수공장G"),
+        ] {
+            let mut t = MissionTracker::default();
+            t.update(Scene::DungeonSelect, &boxes("dungeon-select-bounty"));
+            t.update(Scene::DungeonList, &boxes(list));
+            let m = t.update(Scene::MissionInfo, &boxes(info)).unwrap();
+            assert_eq!((m.place.as_deref(), m.stage_no, m.number), (Some(place), Some(stage), None), "{info}");
+            assert_eq!(m.name.replace(' ', ""), name.replace(' ', ""));
+            // leaving for the place selection forgets both
+            assert!(t.update(Scene::DungeonSelect, &boxes("dungeon-select-bounty")).is_none());
+        }
+        assert_eq!(place_from_list(&boxes("dungeon-list-school")).as_deref(), Some("트리니티"));
     }
 
     #[test]

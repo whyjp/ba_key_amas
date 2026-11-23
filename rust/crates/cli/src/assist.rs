@@ -34,7 +34,15 @@ pub fn panel_for(scene: Scene, mission: Option<&MissionRef>, wiki: &Wiki) -> Opt
         return Some(p);
     };
     p.title = m.display();
-    match wiki.campaign_missions(m.number, &m.name) {
+    let found = match (m.stage_no, m.place.as_deref()) {
+        (Some(n), Some(place)) => wiki.dungeon_missions(place, n),
+        (Some(_), None) => {
+            p.rows.push(Row::Note("장소를 알 수 없습니다. 스테이지 목록 화면부터 열어 주세요".into()));
+            return Some(p);
+        }
+        _ => wiki.campaign_missions(m.number, &m.name),
+    };
+    match found {
         Ok(found) if !found.is_empty() => rows_for(&mut p, &found),
         Ok(_) => p.rows.push(Row::Note("위키DB에서 이 임무를 찾지 못했습니다".into())),
         Err(e) => p.rows.push(Row::Note(format!("위키DB 오류: {e}"))),
@@ -44,7 +52,9 @@ pub fn panel_for(scene: Scene, mission: Option<&MissionRef>, wiki: &Wiki) -> Opt
 
 fn rows_for(p: &mut PanelState, found: &[MissionBrief]) {
     let b = &found[0];
-    p.rows.push(Row::Info { label: "난이도".into(), value: if b.difficulty == 0 { "Normal" } else { "Hard" }.into() });
+    if b.area.is_some() {
+        p.rows.push(Row::Info { label: "난이도".into(), value: if b.difficulty == 0 { "Normal" } else { "Hard" }.into() });
+    }
     if let Some(t) = &b.terrain {
         p.rows.push(Row::Info { label: "지형".into(), value: t.ko.clone() });
     }
@@ -92,13 +102,17 @@ pub fn run(ocr: &dyn Ocr, hcu: &Hcu, mut region: [f64; 4], auto_region: bool, wi
         prev = Some(key);
         let new_view = handled.as_ref().map_or(true, |h| frame_distance(h, &key) > STILL);
         if still >= 1 && new_view {
-            let pixel = match screen_kind(&img) {
-                Screen::Profile => Some(Scene::StudentProfile),
-                Screen::Roster => Some(Scene::StudentList),
-                Screen::Other => None,
-            };
-            let boxes = if pixel.is_some() { Vec::new() } else { ocr.boxes(&img).unwrap_or_default() };
-            let scene = classify(&boxes, pixel);
+            // Text first: the pixel check for the student list/profile also fires on other
+            // busy screens (the 업무 hub), so it only answers when the text names nothing.
+            let boxes = ocr.boxes(&img).unwrap_or_default();
+            let mut scene = classify(&boxes, None);
+            if scene == Scene::Unknown {
+                scene = match screen_kind(&img) {
+                    Screen::Profile => Scene::StudentProfile,
+                    Screen::Roster => Scene::StudentList,
+                    Screen::Other => Scene::Unknown,
+                };
+            }
             let mission = tracker.update(scene, &boxes).cloned();
             match panel_for(scene, mission.as_ref(), &wiki) {
                 Some(p) => overlay.panel(p),
@@ -135,7 +149,7 @@ mod tests {
     }
 
     fn mission() -> MissionRef {
-        MissionRef { number: Some((19, 3)), name: "설원 지구 제2 지역".into() }
+        MissionRef { number: Some((19, 3)), stage_no: None, place: None, name: "설원 지구 제2 지역".into() }
     }
 
     #[test]
@@ -164,9 +178,29 @@ mod tests {
     }
 
     #[test]
+    fn a_dungeon_mission_shows_its_place_and_says_so_when_the_place_is_unknown() {
+        let conn = Connection::open_in_memory().unwrap();
+        baocr_wikidb::create(&conn).unwrap();
+        conn.execute_batch(
+            "INSERT INTO source VALUES (1,'t','u','2026-11-23',NULL,'n');
+             INSERT INTO label VALUES ('StageType','ChaserA','현상수배 - 고가도로'),('Terrain','Street','시가지');
+             INSERT INTO stage VALUES (30103,'Bounty','ChaserA',NULL,3,NULL,'현상수배 - 고가도로','Street',20,NULL,NULL,NULL,1);",
+        )
+        .unwrap();
+        let w = Wiki::from_connection(conn);
+        let m = MissionRef { number: None, stage_no: Some(3), place: Some("현상수배-고가도로".into()), name: "고가도로 C".into() };
+        let p = panel_for(Scene::Squad, Some(&m), &w).unwrap();
+        assert_eq!(p.title, "현상수배-고가도로 03 고가도로 C");
+        assert!(p.rows.contains(&Row::Info { label: "지형".into(), value: "시가지".into() }));
+        assert!(p.rows.contains(&Row::Info { label: "추천 Lv".into(), value: "20".into() }));
+        let no_place = MissionRef { place: None, ..m };
+        assert!(matches!(panel_for(Scene::Squad, Some(&no_place), &w).unwrap().rows.as_slice(), [Row::Note(_)]));
+    }
+
+    #[test]
     fn an_unknown_screen_hides_the_card_and_an_unknown_mission_says_so() {
         assert_eq!(panel_for(Scene::Unknown, None, &wiki()), None);
-        let missing = MissionRef { number: Some((1, 1)), name: "없는 임무".into() };
+        let missing = MissionRef { number: Some((1, 1)), stage_no: None, place: None, name: "없는 임무".into() };
         let p = panel_for(Scene::Squad, Some(&missing), &wiki()).unwrap();
         assert!(matches!(p.rows.as_slice(), [Row::Note(_)]));
     }

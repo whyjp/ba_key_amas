@@ -82,6 +82,31 @@ impl Wiki {
         Ok(out)
     }
 
+    /// Missions of 현상수배, 특별의뢰 and 학원교류회: a place as the game names it
+    /// ("현상수배-고가도로", "거점 방어", "트리니티") and a stage number in it.
+    pub fn dungeon_missions(&self, place: &str, stage_no: u32) -> Result<Vec<MissionBrief>> {
+        let want = norm(place);
+        if want.chars().count() < 2 {
+            return Ok(Vec::new());
+        }
+        let mut st = self.conn.prepare(
+            "SELECT s.id, l.ko, s.stage_no, s.terrain, s.level FROM stage s JOIN label l ON l.kind = 'StageType' AND l.code = s.type
+             WHERE s.category IN ('Bounty', 'WeekDungeon', 'SchoolDungeon') AND s.stage_no = ?1 ORDER BY s.id",
+        )?;
+        let rows = st.query_map(params![stage_no], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, Option<i64>>(2)?, r.get::<_, Option<String>>(3)?, r.get::<_, Option<i64>>(4)?))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (id, label, stage_no, terrain, level) = row?;
+            // the label carries the category in front ("학원교류회 - 트리니티"): the place is its end
+            if norm(&label).ends_with(&want) {
+                out.push(self.brief(id, label, None, stage_no, 0, terrain, level)?);
+            }
+        }
+        Ok(out)
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn brief(&self, id: i64, name: String, area: Option<i64>, stage_no: Option<i64>, difficulty: i64, terrain: Option<String>, level: Option<i64>) -> Result<MissionBrief> {
         let count_by = |column: &str, kind: &str| -> Result<Vec<Tally>> {
@@ -160,6 +185,27 @@ mod tests {
         let m = &w.campaign_missions(Some((19, 3)), "설원 지구 제2 지역").unwrap()[0];
         // 1 light + 2 heavy: explosion (200 + 2*100)/3 = 133 %, pierce (50 + 2*200)/3 = 150 %
         assert_eq!(m.best_attack.iter().map(|t| (t.ko.as_str(), t.n)).collect::<Vec<_>>(), vec![("관통", 150), ("폭발", 133)]);
+    }
+
+    #[test]
+    fn a_place_and_stage_number_find_a_dungeon_mission() {
+        let conn = Connection::open_in_memory().unwrap();
+        crate::create(&conn).unwrap();
+        conn.execute_batch(
+            "INSERT INTO source VALUES (1,'t','u','2026-11-23',NULL,'n');
+             INSERT INTO label VALUES ('StageType','ChaserA','현상수배 - 고가도로'),('StageType','ChaserC','현상수배 - 교실'),('StageType','Blood','거점 방어'),('StageType','SchoolA','학원교류회 - 트리니티'),('Terrain','Street','시가지');
+             INSERT INTO stage VALUES (30103,'Bounty','ChaserA',NULL,3,NULL,'현상수배 - 고가도로','Street',20,NULL,NULL,NULL,1),(30303,'Bounty','ChaserC',NULL,3,NULL,'현상수배 - 교실','Indoor',20,NULL,NULL,NULL,1),
+                                   (32107,'WeekDungeon','Blood',NULL,7,NULL,'거점 방어','Indoor',60,NULL,NULL,NULL,1),(60103,'SchoolDungeon','SchoolA',NULL,3,NULL,'학원교류회 - 트리니티','Outdoor',40,NULL,NULL,NULL,1);",
+        )
+        .unwrap();
+        let w = Wiki::from_connection(conn);
+        let one = |place: &str, n: u32| w.dungeon_missions(place, n).unwrap().iter().map(|m| m.stage_id).collect::<Vec<_>>();
+        assert_eq!(one("현상수배-고가도로", 3), vec![30103], "the list card says it the way the label does, spacing aside");
+        assert_eq!(one("거점방어", 7), vec![32107]);
+        assert_eq!(one("트리니티", 3), vec![60103], "a school alone is the end of its label");
+        assert_eq!(one("교실", 3), vec![30303]);
+        assert!(one("고가도로", 4).is_empty(), "no such stage number");
+        assert!(one("", 3).is_empty());
     }
 
     #[test]
