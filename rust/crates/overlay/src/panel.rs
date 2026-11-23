@@ -7,9 +7,9 @@ use image::{Rgba, RgbaImage};
 /// Design width; the panel is scaled to the game window.
 pub const PANEL_BASE_W: f32 = 300.0;
 /// Share of the game window's width the panel takes, within these bounds (screen pixels).
-const WIDTH_SHARE: f32 = 0.68;
+const WIDTH_SHARE: f32 = 0.58;
 const MIN_W: i32 = 230;
-const MAX_W: i32 = 420;
+const MAX_W: i32 = 360;
 
 /// Colour family of a badge; the colours follow the game's own attack and armor icons.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -793,7 +793,7 @@ mod tests {
 
     #[test]
     fn width_follows_the_window_within_bounds() {
-        assert_eq!(panel_width(458), 311);
+        assert_eq!(panel_width(458), 266);
         assert_eq!(panel_width(200), MIN_W);
         assert_eq!(panel_width(1920), MAX_W);
     }
