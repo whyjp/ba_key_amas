@@ -5,7 +5,7 @@ pub mod formation;
 pub mod schaledb;
 pub mod wiki;
 pub use formation::{adaptation_factor, evaluate, FormationScore, TypeTable, Verdict};
-pub use wiki::{MissionBrief, StudentBrief, Tally, Wiki};
+pub use wiki::{FurnitureBrief, FurnitureStudent, MissionBrief, StudentBrief, Tally, Wiki};
 
 use anyhow::{Context, Result};
 use rusqlite::Connection;

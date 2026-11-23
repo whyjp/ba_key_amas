@@ -2,7 +2,7 @@
 -- Reference data only, rebuilt from sources by the collectors. The user's own roster stays
 -- in the scan output (index.json) and joins to this DB by student.id.
 -- Local assist use only: the DB file is not distributed (see source.note).
--- Version 1. Bump meta.schema_version on every incompatible change.
+-- Version 2. Bump meta.schema_version on every incompatible change.
 
 PRAGMA foreign_keys = ON;
 
@@ -132,6 +132,33 @@ CREATE TABLE raid_season (
     end_at    INTEGER
 );
 
+-- Cafe furniture, decorations and interiors.
+CREATE TABLE furniture (
+    id                 INTEGER PRIMARY KEY,
+    name_ko            TEXT NOT NULL,       -- not unique: shown by name in game, so readers must handle same-name items
+    category           TEXT NOT NULL,       -- Interiors | Furnitures | Decorations | ...
+    sub_category       TEXT,
+    rarity             TEXT,
+    size_w             INTEGER,
+    size_h             INTEGER,
+    comfort            INTEGER,             -- comfort bonus
+    set_group_id       INTEGER,
+    released_global    INTEGER NOT NULL CHECK (released_global IN (0, 1)),
+    interaction_global INTEGER NOT NULL CHECK (interaction_global IN (0, 1)),   -- the source's own flag, kept to cross-check furniture_interaction
+    source_id          INTEGER NOT NULL REFERENCES source(id),
+    raw                TEXT NOT NULL CHECK (json_valid(raw))
+);
+CREATE INDEX furniture_name ON furniture (name_ko);
+
+-- Students who interact with a furniture item in the cafe (Global server only).
+CREATE TABLE furniture_interaction (
+    furniture_id INTEGER NOT NULL REFERENCES furniture(id),
+    student_id   INTEGER NOT NULL REFERENCES student(id),
+    extra        INTEGER NOT NULL,          -- the source's second number, stored as is. SchaleDB's page reads it as the interaction kind: 3 solo, 2 group, 1 solo or group, 0 group (solo or group when another student has 2)
+    PRIMARY KEY (furniture_id, student_id)
+);
+CREATE INDEX furniture_interaction_student ON furniture_interaction (student_id);
+
 -- What a stage's enemies are made of: how many enemies of each armor type it holds.
 CREATE VIEW v_stage_armor AS
 SELECT f.stage_id AS stage_id, e.armor_type AS armor_type, COUNT(*) AS enemies
@@ -156,4 +183,4 @@ JOIN student st ON st.released_global = 1
 JOIN type_effectiveness te ON te.bullet_type = st.bullet_type AND te.armor_type = a.armor_type
 GROUP BY s.id, st.id;
 
-INSERT INTO meta (key, value) VALUES ('schema_version', '1');
+INSERT INTO meta (key, value) VALUES ('schema_version', '2');

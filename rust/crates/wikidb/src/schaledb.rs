@@ -20,6 +20,7 @@ const SOURCE_NOTE: &str = "SchaleDB community data. Local assist use only; the d
 
 pub struct Dataset {
     pub students: Value,
+    pub furniture: Value,
     pub enemies: Value,
     pub stages: Value,
     pub raids: Value,
@@ -32,6 +33,15 @@ pub struct Counts {
     pub labels: usize,
     pub type_effectiveness: usize,
     pub students: usize,
+    pub furniture: usize,
+    /// Global interactions stored.
+    pub furniture_interactions: usize,
+    /// Interactions left out because the student is an alternate style (SchaleDB's own furniture
+    /// page leaves them out too: the base student is already listed).
+    pub interactions_skipped_style: usize,
+    /// Repeated (student, furniture) pairs in the source (same item listed with 0 and with 1):
+    /// the first listing is kept, as SchaleDB's page does.
+    pub interactions_duplicate: usize,
     pub enemies: usize,
     pub stages: usize,
     pub formations: usize,
@@ -52,6 +62,7 @@ pub fn fetch() -> Result<Dataset> {
         .ok_or_else(|| anyhow!("no config.min.json with TypeEffectiveness"))?;
     Ok(Dataset {
         students: file("students")?,
+        furniture: file("furniture")?,
         enemies: file("enemies")?,
         stages: file("stages")?,
         raids: file("raids")?,
@@ -99,6 +110,8 @@ pub fn load(conn: &mut Connection, d: &Dataset, fetched_at: &str) -> Result<Coun
     labels(&tx, d, &mut n)?;
     type_effectiveness(&tx, d, &mut n)?;
     students(&tx, d, &mut n)?;
+    furniture(&tx, d, &mut n)?;
+    furniture_interactions(&tx, d, &mut n)?;
     enemies(&tx, d, &mut n)?;
     stages(&tx, d, &mut n)?;
     raids(&tx, d, &mut n)?;
@@ -173,6 +186,61 @@ fn students(tx: &Transaction, d: &Dataset, n: &mut Counts) -> Result<()> {
             r.to_string(),
         ])?;
         n.students += 1;
+    }
+    Ok(())
+}
+
+/// Cafe furniture, every item (also the ones nobody interacts with, and the unreleased).
+fn furniture(tx: &Transaction, d: &Dataset, n: &mut Counts) -> Result<()> {
+    let mut st = tx.prepare(
+        "INSERT INTO furniture (id, name_ko, category, sub_category, rarity, size_w, size_h, comfort, set_group_id, released_global, interaction_global, source_id, raw)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,1,?12)",
+    )?;
+    let flag = |r: &Value, k: &str| r.get(k).and_then(|a| a.get(GLOBAL)).and_then(|x| x.as_bool()).unwrap_or(false);
+    for r in objects(&d.furniture, "furniture")? {
+        let id = int(r, "Id").ok_or_else(|| anyhow!("furniture without Id"))?;
+        let size = |i: usize| r.get("Size").and_then(|a| a.get(i)).and_then(|x| x.as_i64());
+        st.execute(params![
+            id,
+            text(r, "Name").with_context(|| format!("furniture {id} has no Name"))?,
+            text(r, "Category").unwrap_or_default(),
+            text(r, "SubCategory"),
+            text(r, "Rarity"),
+            size(0),
+            size(1),
+            int(r, "ComfortBonus"),
+            int(r, "SetGroupId"),
+            flag(r, "IsReleased"),
+            flag(r, "Interaction"),
+            r.to_string(),
+        ])?;
+        n.furniture += 1;
+    }
+    Ok(())
+}
+
+/// Student to furniture links of the Global server (index 1 of each student's per-server lists).
+/// A link to a furniture id or a student that does not exist is an error, not a silent gap.
+fn furniture_interactions(tx: &Transaction, d: &Dataset, n: &mut Counts) -> Result<()> {
+    let mut st = tx.prepare("INSERT INTO furniture_interaction (furniture_id, student_id, extra) VALUES (?1,?2,?3)")?;
+    for r in objects(&d.students, "students")? {
+        let id = int(r, "Id").ok_or_else(|| anyhow!("student without Id"))?;
+        let Some(list) = r.get("FurnitureInteraction").and_then(|a| a.get(GLOBAL)).and_then(|x| x.as_array()) else { continue };
+        let mut seen = std::collections::HashSet::new();
+        for pair in list {
+            let fid = pair.get(0).and_then(|x| x.as_i64()).ok_or_else(|| anyhow!("student {id}: furniture interaction without a furniture id"))?;
+            let extra = pair.get(1).and_then(|x| x.as_i64()).unwrap_or(0);
+            if int(r, "StyleId").unwrap_or(0) > 0 {
+                n.interactions_skipped_style += 1;
+                continue;
+            }
+            if !seen.insert(fid) {
+                n.interactions_duplicate += 1;
+                continue;
+            }
+            st.execute(params![fid, id, extra]).with_context(|| format!("student {id} interacts with furniture {fid}"))?;
+            n.furniture_interactions += 1;
+        }
     }
     Ok(())
 }
@@ -295,11 +363,23 @@ mod tests {
         Dataset {
             students: json!({
                 "1": {"Id": 1, "IsReleased": [true, true, true], "PathName": "a", "DevName": "a", "Name": "폭발학생", "SquadType": "Main",
-                      "BulletType": "Explosion", "ArmorType": "LightArmor", "StarGrade": 3, "StreetBattleAdaptation": 3, "OutdoorBattleAdaptation": 2, "IndoorBattleAdaptation": 1},
+                      "BulletType": "Explosion", "ArmorType": "LightArmor", "StarGrade": 3, "StreetBattleAdaptation": 3, "OutdoorBattleAdaptation": 2, "IndoorBattleAdaptation": 1,
+                      "FurnitureInteraction": [[[100, 0]], [[100, 3], [101, 0], [101, 1]], [[100, 0]]]},
                 "2": {"Id": 2, "IsReleased": [true, true, true], "PathName": "b", "DevName": "b", "Name": "관통학생", "SquadType": "Main",
-                      "BulletType": "Pierce", "ArmorType": "LightArmor", "StarGrade": 3, "StreetBattleAdaptation": 1, "OutdoorBattleAdaptation": 1, "IndoorBattleAdaptation": 1},
+                      "BulletType": "Pierce", "ArmorType": "LightArmor", "StarGrade": 3, "StreetBattleAdaptation": 1, "OutdoorBattleAdaptation": 1, "IndoorBattleAdaptation": 1,
+                      "FurnitureInteraction": [[], [[100, 1]], []]},
                 "3": {"Id": 3, "IsReleased": [true, false, true], "PathName": "c", "DevName": "c", "Name": "미출시", "SquadType": "Main",
-                      "BulletType": "Pierce", "ArmorType": "LightArmor", "StarGrade": 3}
+                      "BulletType": "Pierce", "ArmorType": "LightArmor", "StarGrade": 3,
+                      "FurnitureInteraction": [[[103, 0]], [], []]},
+                "4": {"Id": 4, "StyleId": 1, "IsReleased": [true, false, true], "PathName": "d", "DevName": "d", "Name": "폭발학생(스타일)", "SquadType": "Main",
+                      "BulletType": "Explosion", "ArmorType": "LightArmor", "StarGrade": 3, "FurnitureInteraction": [[], [[100, 0]], []]}
+            }),
+            furniture: json!({
+                "100": {"Id": 100, "Name": "스타 테이블", "Category": "Furnitures", "SubCategory": "Table", "Rarity": "SR", "Size": [4, 3], "ComfortBonus": 120, "SetGroupId": 7,
+                        "IsReleased": [true, true, true], "Interaction": [true, true, true]},
+                "101": {"Id": 101, "Name": "소파", "Category": "Furnitures", "SubCategory": "Sofa", "Size": [2, 2], "IsReleased": [true, true, false], "Interaction": [true, true, false]},
+                "102": {"Id": 102, "Name": "화분", "Category": "Decorations", "Size": [1, 1], "IsReleased": [true, true, true], "Interaction": [false, false, false]},
+                "103": {"Id": 103, "Name": "일본 한정 의자", "Category": "Furnitures", "Size": [1, 1], "IsReleased": [true, false, false], "Interaction": [true, false, false]}
             }),
             enemies: json!({"Enemies": {
                 "7000001": {"Id": 7000001, "Name": "불량배", "Rank": "Minion", "BulletType": "Normal", "ArmorType": "LightArmor"},
@@ -336,12 +416,42 @@ mod tests {
         let (conn, n) = db();
         assert_eq!(
             n,
-            Counts { labels: 3, type_effectiveness: 4, students: 3, enemies: 2, stages: 2, formations: 2, formation_enemies: 3, raids: 2, raid_seasons: 1 }
+            Counts { labels: 3, type_effectiveness: 4, students: 4, furniture: 4, furniture_interactions: 3, interactions_skipped_style: 1, interactions_duplicate: 1, enemies: 2, stages: 2, formations: 2, formation_enemies: 3, raids: 2, raid_seasons: 1 }
         );
         let name: String = conn.query_row("SELECT name_ko FROM stage WHERE id = 30101", [], |r| r.get(0)).unwrap();
         assert_eq!(name, "현상수배 - 고가도로", "a bounty is named by its type");
         let terrain: String = conn.query_row("SELECT terrain FROM raid WHERE kind = 'TimeAttack'", [], |r| r.get(0)).unwrap();
         assert_eq!(terrain, r#"["Outdoor"]"#, "a single terrain becomes a one-element list");
+    }
+
+    #[test]
+    fn furniture_and_global_interactions_are_loaded() {
+        let (conn, _) = db();
+        let (name, w, h, comfort, released, flag): (String, i64, i64, i64, i64, i64) = conn
+            .query_row("SELECT name_ko, size_w, size_h, comfort, released_global, interaction_global FROM furniture WHERE id = 100", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)))
+            .unwrap();
+        assert_eq!((name.as_str(), w, h, comfort, released, flag), ("스타 테이블", 4, 3, 120, 1, 1));
+        let rows: Vec<(i64, i64, i64)> = conn
+            .prepare("SELECT furniture_id, student_id, extra FROM furniture_interaction ORDER BY furniture_id, student_id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        // only index 1 (Global) counts: student 3's link exists on JP only, the alternate style (4) is skipped
+        assert_eq!(rows, vec![(100, 1, 3), (100, 2, 1), (101, 1, 0)]);
+        let fk: i64 = conn.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| r.get(0)).unwrap();
+        assert_eq!(fk, 0);
+    }
+
+    #[test]
+    fn an_interaction_with_unknown_furniture_is_an_error() {
+        let mut d = dataset();
+        d.students["2"]["FurnitureInteraction"] = json!([[], [[999, 0]], []]);
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::create(&conn).unwrap();
+        let e = load(&mut conn, &d, "t").unwrap_err();
+        assert!(format!("{e:#}").contains("furniture 999"), "{e:#}");
     }
 
     #[test]
@@ -378,7 +488,7 @@ mod tests {
         assert_eq!(a, b);
         let conn = Connection::open(&path).unwrap();
         let students: i64 = conn.query_row("SELECT COUNT(*) FROM student", [], |r| r.get(0)).unwrap();
-        assert_eq!(students, 3);
+        assert_eq!(students, 4);
         assert!(!dir.join("wiki.db.tmp").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }

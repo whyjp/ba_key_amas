@@ -59,6 +59,24 @@ impl StudentBrief {
     }
 }
 
+/// A student who interacts with a piece of furniture.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FurnitureStudent {
+    pub id: i64,
+    pub name: String,
+}
+
+/// A furniture item and the students who interact with it in the cafe.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FurnitureBrief {
+    pub id: i64,
+    pub name: String,
+    pub category: String,
+    pub sub_category: Option<String>,
+    /// Ordered by student id.
+    pub students: Vec<FurnitureStudent>,
+}
+
 pub struct Wiki {
     conn: Connection,
 }
@@ -174,6 +192,59 @@ impl Wiki {
             return Some(tied[0].clone());
         }
         best.filter(|_| !tie).map(|(_, s)| s.clone())
+    }
+
+    /// Every Global-released furniture item with at least one interacting (Global-released)
+    /// student, ordered by id; each item's students are ordered by student id.
+    pub fn furniture_with_students(&self) -> Result<Vec<FurnitureBrief>> {
+        let mut st = self.conn.prepare(
+            "SELECT f.id, f.name_ko, f.category, f.sub_category, s.id, s.name_ko
+             FROM furniture f
+             JOIN furniture_interaction fi ON fi.furniture_id = f.id
+             JOIN student s ON s.id = fi.student_id AND s.released_global = 1
+             WHERE f.released_global = 1 ORDER BY f.id, s.id",
+        )?;
+        let rows = st.query_map([], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, Option<String>>(3)?, FurnitureStudent { id: r.get(4)?, name: r.get(5)? }))
+        })?;
+        let mut out: Vec<FurnitureBrief> = Vec::new();
+        for row in rows {
+            let (id, name, category, sub_category, student) = row?;
+            match out.last_mut() {
+                Some(last) if last.id == id => last.students.push(student),
+                _ => out.push(FurnitureBrief { id, name, category, sub_category, students: vec![student] }),
+            }
+        }
+        Ok(out)
+    }
+
+    /// The furniture item a name read by OCR from the game screen stands for. Spaces and
+    /// punctuation are ignored; an exact name wins. One wrong or missing character is
+    /// tolerated only for names of 4+ characters. Several items sharing the name (or equally
+    /// close to it) give None, unless all of them have the same students: showing the wrong
+    /// students is worse than showing none.
+    pub fn match_furniture(items: &[FurnitureBrief], ocr: &str) -> Option<FurnitureBrief> {
+        let want: Vec<char> = norm(ocr).chars().collect();
+        if want.is_empty() {
+            return None;
+        }
+        let ids = |f: &FurnitureBrief| f.students.iter().map(|s| s.id).collect::<Vec<_>>();
+        let settle = |found: Vec<&FurnitureBrief>| -> Option<FurnitureBrief> {
+            let first = *found.first()?;
+            found.iter().all(|f| ids(f) == ids(first)).then(|| first.clone())
+        };
+        let exact: Vec<&FurnitureBrief> = items.iter().filter(|f| norm(&f.name).chars().eq(want.iter().copied())).collect();
+        if !exact.is_empty() {
+            return settle(exact);
+        }
+        let near: Vec<&FurnitureBrief> = items
+            .iter()
+            .filter(|f| {
+                let have: Vec<char> = norm(&f.name).chars().collect();
+                have.len().min(want.len()) >= 4 && distance(&want, &have) == 1
+            })
+            .collect();
+        settle(near)
     }
 
     fn label(&self, kind: &str, code: &str) -> String {
@@ -343,6 +414,64 @@ mod tests {
         assert_eq!(Wiki::match_student_as(&pair, "호시노(무장)", Some("Main")).map(|s| s.id), Some(20));
         let clones = vec![mk(30, "호시노(무장)"), mk(31, "호시노(무장)")];
         assert_eq!(Wiki::match_student(&clones, "호시노(무장)").map(|s| s.id), Some(30));
+    }
+
+    fn furniture_wiki() -> Wiki {
+        let conn = Connection::open_in_memory().unwrap();
+        crate::create(&conn).unwrap();
+        conn.execute_batch(
+            "INSERT INTO source VALUES (1,'t','u','2026-11-23',NULL,'n');
+             INSERT INTO student VALUES (1,'a','a','아루','','',3,'Main','','','Explosion','Normal',1,1,1,'',1,1,'{}'),(2,'b','b','무츠키','','',3,'Main','','','Pierce','Normal',1,1,1,'',1,1,'{}'),
+                                        (3,'c','c','미출시','','',3,'Main','','','Pierce','Normal',1,1,1,'',0,1,'{}');
+             INSERT INTO furniture (id,name_ko,category,sub_category,released_global,interaction_global,source_id,raw) VALUES
+                 (10,'고급 소파','Furnitures','Sofa',1,1,1,'{}'),(11,'원형 테이블','Furnitures','Table',1,1,1,'{}'),(12,'화분','Decorations',NULL,1,0,1,'{}'),
+                 (13,'일본 한정 의자','Furnitures','Chair',0,1,1,'{}'),(14,'원형 테이블','Furnitures','Table',1,1,1,'{}'),(15,'미출시 학생 의자','Furnitures','Chair',1,1,1,'{}');
+             INSERT INTO furniture_interaction VALUES (11,2,0),(11,1,0),(10,1,3),(13,1,0),(14,2,0),(15,3,0);",
+        )
+        .unwrap();
+        Wiki::from_connection(conn)
+    }
+
+    #[test]
+    fn furniture_comes_with_its_students_in_id_order() {
+        let list = furniture_wiki().furniture_with_students().unwrap();
+        let shape: Vec<(i64, &str, Vec<i64>)> = list.iter().map(|f| (f.id, f.name.as_str(), f.students.iter().map(|s| s.id).collect())).collect();
+        // 12 has no interaction, 13 is not released on Global, 15 only has an unreleased student
+        assert_eq!(shape, vec![(10, "고급 소파", vec![1]), (11, "원형 테이블", vec![1, 2]), (14, "원형 테이블", vec![2])]);
+        assert_eq!(list[1].students[1], FurnitureStudent { id: 2, name: "무츠키".into() });
+        assert_eq!((list[0].category.as_str(), list[0].sub_category.as_deref()), ("Furnitures", Some("Sofa")));
+    }
+
+    #[test]
+    fn ocr_furniture_names_are_matched_and_ambiguity_gives_none() {
+        let mk = |id: i64, name: &str, students: &[i64]| FurnitureBrief {
+            id,
+            name: name.into(),
+            category: "Furnitures".into(),
+            sub_category: None,
+            students: students.iter().map(|&s| FurnitureStudent { id: s, name: format!("s{s}") }).collect(),
+        };
+        let all = vec![mk(1, "고급 소파", &[1]), mk(2, "원형 테이블", &[1, 2]), mk(3, "원형 테이블", &[2]), mk(4, "벚꽃 화분", &[5]), mk(5, "별 의자", &[6]), mk(6, "별 의지", &[7])];
+        let id = |t: &str| Wiki::match_furniture(&all, t).map(|f| f.id);
+        assert_eq!(id("고급소파"), Some(1), "spacing is ignored");
+        assert_eq!(id("고급 소파!"), Some(1), "punctuation is ignored");
+        assert_eq!(id("고급 소화"), Some(1), "one wrong character in a 4+ letter name");
+        assert_eq!(id("고급 소"), None, "3 letters left: too short to trust");
+        assert_eq!(id("고급 소소파"), Some(1), "one extra character");
+        assert_eq!(id("원형 테이블"), None, "same name, different students");
+        assert_eq!(id("별 의자"), Some(5), "an exact name beats a one-character neighbour");
+        assert_eq!(id("별 의차"), None, "two short items: no error tolerated");
+        assert_eq!(id("벚꽃 화본"), Some(4));
+        assert_eq!(id("벚꽃 화"), None, "3 letters left");
+        assert_eq!(id("아무거나"), None);
+        assert_eq!(id(""), None);
+        // same name and same students: nothing to disagree about
+        let same = vec![mk(10, "책장", &[1]), mk(11, "책장", &[1])];
+        assert_eq!(Wiki::match_furniture(&same, "책장").map(|f| f.id), Some(10));
+        // two long names equally close with different students
+        let close = vec![mk(20, "큰 원목 책상", &[1]), mk(21, "큰 원목 책장", &[2])];
+        assert_eq!(Wiki::match_furniture(&close, "큰 원목 책사"), None);
+        assert_eq!(Wiki::match_furniture(&close, "큰 원목 책상").map(|f| f.id), Some(20));
     }
 
     #[test]
