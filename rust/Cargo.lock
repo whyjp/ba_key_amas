@@ -235,6 +235,7 @@ dependencies = [
  "baocr-overlay",
  "baocr-pipeline",
  "baocr-pixels",
+ "baocr-progress",
  "baocr-wikidb",
  "chrono",
  "clap",

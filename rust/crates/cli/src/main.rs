@@ -10,6 +10,7 @@
 mod assist;
 mod dump;
 mod profile;
+mod progress_scan;
 mod scan;
 use anyhow::{bail, Context, Result};
 use baocr_core::ocr_api::Ocr;
@@ -45,6 +46,9 @@ struct Args {
     /// --scan-arrows: skip the menu pass (상세 popup, 레벨 업, 신비 해방 tabs).
     #[arg(long)]
     fast: bool,
+    /// Read the account progress (schedule ranks, event story stamps) by walking the game's screens (HCU).
+    #[arg(long)]
+    scan_progress: bool,
     /// Passive background updater (screenshots only, no input).
     #[arg(long)]
     watch: bool,
@@ -165,7 +169,7 @@ fn real_main() -> Result<()> {
         println!("{}", report.render());
         return Ok(());
     }
-    let modes = [args.boxes.is_some(), args.image.is_some(), args.reextract.is_some(), args.scan_arrows, args.watch, args.grab.is_some(), args.learn.is_some(), args.assist];
+    let modes = [args.boxes.is_some(), args.image.is_some(), args.reextract.is_some(), args.scan_arrows, args.scan_progress, args.watch, args.grab.is_some(), args.learn.is_some(), args.assist];
     let chosen = modes.iter().filter(|m| **m).count();
     if chosen > 1 {
         bail!("choose one of --image, --reextract, --scan-arrows, --watch, --grab, --learn, --assist (none starts the add-on)");
@@ -228,6 +232,9 @@ fn real_main() -> Result<()> {
         }
         return run_watch(&args, hcu, region, opts);
     }
+    if args.scan_progress {
+        return run_progress(&args, &session, region);
+    }
     // the scan clicks at 4:3 frame coordinates: say so before anything is loaded or touched
     require_ratio43(region)?;
     run_scan(&args, &session, region, opts)
@@ -249,6 +256,31 @@ fn run_image(args: &Args, path: &PathBuf, opts: &Options) -> Result<()> {
     baocr_export::export_student(&s, &out)?;
     println!("{}", serde_json::to_string_pretty(&s)?);
     Ok(())
+}
+
+fn run_progress(args: &Args, session: &HcuSession, region: [f64; 4]) -> Result<()> {
+    let overlay = (!args.no_overlay).then(Overlay::start);
+    let report = |s: BannerState| {
+        if let Some(o) = &overlay {
+            o.set(s);
+        }
+    };
+    let ocr: Arc<dyn Ocr> = Arc::new(load_ocr(args)?);
+    let summary = progress_scan::scan_progress(ocr, &session.exclusive(), region, &progress_dir(), &report);
+    if overlay.is_some() {
+        std::thread::sleep(std::time::Duration::from_secs(3));
+    }
+    let s = summary?;
+    println!("progress scan: {} sections read, file {}", s.sections_read, s.file.display());
+    for w in &s.warnings {
+        println!("  warning: {w}");
+    }
+    Ok(())
+}
+
+/// Where the progress scan writes: %APPDATA%\baocr\progress.
+pub(crate) fn progress_dir() -> PathBuf {
+    std::env::var_os("APPDATA").map(|d| PathBuf::from(d).join("baocr").join("progress")).unwrap_or_else(|| PathBuf::from("progress"))
 }
 
 fn run_scan(args: &Args, session: &HcuSession, region: [f64; 4], opts: Options) -> Result<()> {

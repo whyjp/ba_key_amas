@@ -99,6 +99,14 @@ mod tests {
     }
 
     #[test]
+    fn the_4_3_list_reads_twelve_cards_and_only_the_valentine_event_is_open() {
+        let cells = read_grid(&png("menu-event-list-story-4x3"));
+        assert_eq!(cells.len(), 12);
+        let open: Vec<usize> = cells.iter().enumerate().filter(|(_, c)| !c.complete).map(|(i, _)| i).collect();
+        assert_eq!(open, vec![8], "해피 발렌타인 has no stamp");
+    }
+
+    #[test]
     fn a_frame_without_a_grid_reads_nothing() {
         let r = parse_past_grid(&png("w169-lobby"), 0);
         assert!(r.value.is_empty());

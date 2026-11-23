@@ -13,11 +13,14 @@ pub mod missions;
 pub mod momotalk;
 pub mod schedule;
 pub mod schema;
+pub mod scroll;
 pub mod stars;
 pub mod story;
 
 mod geom;
 mod vision;
+
+pub use vision::Rect;
 
 /// A parsed value plus the notes about what could not be read.
 #[derive(Debug, Clone, PartialEq)]
