@@ -245,6 +245,43 @@ impl Wiki {
         }))
     }
 
+    /// The brief with the boss's armor and attack type taken from what the screen shows instead of
+    /// from the database: the screen is what the player sees. `db_boss` is the lead enemy the brief
+    /// counted; it is replaced by the screen's armor codes (a boss with two armors counts for both)
+    /// and attack code, and the best attack types are worked out again from the new armors. Codes
+    /// that agree with the database change nothing; an empty `armors` or no `attack` leaves that
+    /// part as it was.
+    pub fn with_screen_types(&self, mut brief: MissionBrief, db_boss: Option<&RaidBoss>, armors: &[String], attack: Option<&str>) -> Result<MissionBrief> {
+        let swap = |tallies: &mut Vec<Tally>, kind: &str, out: Option<&str>, add: &[String]| {
+            let agrees = out.is_some_and(|o| add.iter().any(|a| a == o));
+            if add.is_empty() {
+                return;
+            }
+            if !agrees {
+                if let Some(i) = out.and_then(|o| tallies.iter().position(|t| t.code == o)) {
+                    tallies[i].n -= 1;
+                    if tallies[i].n <= 0 {
+                        tallies.remove(i);
+                    }
+                }
+            }
+            for code in add.iter().filter(|c| Some(c.as_str()) != out) {
+                match tallies.iter_mut().find(|t| &t.code == code) {
+                    // the boss agrees with the database: a second armor it shows is only counted when the encounter has none of it yet
+                    Some(_) if agrees => {}
+                    Some(t) => t.n += 1,
+                    None => tallies.push(Tally { ko: self.label(kind, code), code: code.clone(), n: 1 }),
+                }
+            }
+            tallies.sort_by(|a, b| b.n.cmp(&a.n).then_with(|| a.code.cmp(&b.code)));
+        };
+        swap(&mut brief.armor, "ArmorType", db_boss.and_then(|b| b.armor_type.as_deref()), armors);
+        let attacks: Vec<String> = attack.map(str::to_string).into_iter().collect();
+        swap(&mut brief.attack, "BulletType", db_boss.and_then(|b| b.bullet_type.as_deref()), &attacks);
+        brief.best_attack = self.best_attack_against(&brief.armor)?;
+        Ok(brief)
+    }
+
     /// Student attack types ranked by average damage multiplier against `armor` (n in percent).
     fn best_attack_against(&self, armor: &[Tally]) -> Result<Vec<Tally>> {
         let total: i64 = armor.iter().map(|a| a.n).sum();
@@ -379,6 +416,27 @@ mod tests {
         assert_eq!(students.armor.iter().map(|t| t.n).sum::<i64>(), 1, "the escorted transport is not an enemy");
         assert_eq!(w.raid_mission(RaidKind::TimeAttack, 1, 0, None).unwrap().unwrap().name, "사격 시험 · 야외 · 경장갑 (Lv.25)");
         assert!(w.raid_mission(RaidKind::Raid, 1, 3, None).unwrap().is_none(), "no such difficulty");
+    }
+
+    #[test]
+    fn what_the_screen_shows_replaces_the_lead_enemys_types_and_the_best_attacks_follow() {
+        let w = fixture();
+        let m = w.raid_mission(RaidKind::Raid, 1, 5, None).unwrap().unwrap();
+        let boss = w.raid_difficulties(RaidKind::Raid, 1).unwrap().into_iter().find(|d| d.idx == 5).and_then(|d| d.boss);
+        let codes = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        // the same as the database says: nothing changes
+        assert_eq!(w.with_screen_types(m.clone(), boss.as_ref(), &codes(&["HeavyArmor"]), Some("Pierce")).unwrap(), m);
+        // nothing on the screen: nothing changes
+        assert_eq!(w.with_screen_types(m.clone(), boss.as_ref(), &[], None).unwrap(), m);
+        // a boss with two armors counts for both and the heavy one it replaced is gone: 3 light, 1 unarmed
+        let dual = w.with_screen_types(m.clone(), boss.as_ref(), &codes(&["LightArmor", "Unarmed"]), Some("Explosion")).unwrap();
+        assert_eq!(dual.armor.iter().map(|t| (t.code.as_str(), t.n)).collect::<Vec<_>>(), vec![("LightArmor", 3), ("Unarmed", 1)]);
+        assert_eq!(dual.attack.iter().map(|t| (t.code.as_str(), t.n)).collect::<Vec<_>>(), vec![("Pierce", 2), ("Explosion", 1)]);
+        assert_eq!(dual.best_attack.first().map(|t| t.code.as_str()), Some("Explosion"), "recomputed against light armor");
+        // the boss keeps its heavy armor and the screen adds an armor the encounter has none of: one more; one it has: no change
+        let more = w.with_screen_types(m.clone(), boss.as_ref(), &codes(&["HeavyArmor", "Unarmed"]), None).unwrap();
+        assert_eq!(more.armor.iter().map(|t| (t.code.as_str(), t.n)).collect::<Vec<_>>(), vec![("LightArmor", 2), ("HeavyArmor", 1), ("Unarmed", 1)]);
+        assert_eq!(w.with_screen_types(m.clone(), boss.as_ref(), &codes(&["HeavyArmor", "LightArmor"]), None).unwrap().armor, m.armor, "both armors are already in the encounter");
     }
 
     #[test]

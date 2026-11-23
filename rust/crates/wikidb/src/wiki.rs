@@ -268,7 +268,8 @@ impl Wiki {
         settle(near)
     }
 
-    pub(crate) fn label(&self, kind: &str, code: &str) -> String {
+    /// The Korean name of a code (the code itself when the table lacks it).
+    pub fn label(&self, kind: &str, code: &str) -> String {
         self.conn.query_row("SELECT ko FROM label WHERE kind = ?1 AND code = ?2", params![kind, code], |r| r.get(0)).unwrap_or_else(|_| code.to_string())
     }
 
