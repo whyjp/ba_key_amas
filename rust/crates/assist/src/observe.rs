@@ -77,7 +77,7 @@ impl<'a> Observer<'a> {
         let mission = self.tracker.update(scene, boxes).cloned();
         // A squad belongs to the mission or edit session in progress: leaving for a screen that
         // has nothing to do with one forgets it, so the next mission never inherits it.
-        if !matches!(scene, Scene::Squad | Scene::QuickFormation | Scene::MissionMap | Scene::MissionInfo | Scene::EnemyInfo | Scene::Unknown) {
+        if !matches!(scene, Scene::Squad | Scene::QuickFormation | Scene::MissionMap | Scene::MissionInfo | Scene::EnemyInfo | Scene::RaidFormation(_) | Scene::Unknown) {
             self.squad.clear();
         }
         let mut obs = Observation::new(scene);

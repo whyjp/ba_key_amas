@@ -39,7 +39,57 @@ pub enum Scene {
     StudentProfile,
     /// The live combat screen, told apart by pixels (see `baocr_pixels::looks_like_battle`).
     Battle,
+    /// 총력전: the difficulty rows of the running season ("Battle Select").
+    RaidSelect,
+    /// 모의 총력전: the boss list with its difficulty rows.
+    MockRaidBosses,
+    /// The "방 정보" popup of one mock-raid difficulty.
+    RaidRoomInfo,
+    /// The squad formation of a raid-like mode. It shows no boss, no names of the students, only the party tabs.
+    RaidFormation(RaidMode),
+    /// 제약해제결전: boss and opening period.
+    UnrestrictedRaidSelect,
+    /// 제약해제결전: the bands of stages ("단계 01-24 ...").
+    UnrestrictedRaidStages,
+    /// 제약해제결전: one stage with the boss, HP, level, attack and armor.
+    UnrestrictedRaidStage,
+    /// 종합전술시험: the next test and its info.
+    TimeAttackSelect,
+    /// 종합전술시험: the popup "다음 시즌 정보".
+    TimeAttackNextSeason,
+    /// 대결전 while a season runs (no fixture yet: any 대결전 screen that is not the closed one).
+    EliminateSelect,
+    /// 대결전 between seasons: "키보토스는 평화로운 상태입니다".
+    EliminateClosed,
+    /// The warning before 제약해제결전 ("강력한 스포일러가 포함되어 있습니다") over the work hub.
+    SpoilerWarning,
     Unknown,
+}
+
+/// The raid-like modes that share one formation screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RaidMode {
+    /// 총력전.
+    TotalAssault,
+    /// 모의 총력전.
+    MockTotalAssault,
+    /// 제약해제결전.
+    UnrestrictedRaid,
+}
+
+/// Each mode's name as its screens' header shows it (spaces and marks removed).
+const RAID_HEADERS: [(&str, RaidMode); 3] = [("총력전", RaidMode::TotalAssault), ("모의총력전", RaidMode::MockTotalAssault), ("제약해제결전", RaidMode::UnrestrictedRaid)];
+const FORMATION_SUFFIX: &str = "편성";
+
+impl RaidMode {
+    /// The mode's name as the player knows it.
+    pub fn label(self) -> &'static str {
+        match self {
+            RaidMode::TotalAssault => "총력전",
+            RaidMode::MockTotalAssault => "모의 총력전",
+            RaidMode::UnrestrictedRaid => "제약해제결전",
+        }
+    }
 }
 
 impl Scene {
@@ -60,6 +110,20 @@ impl Scene {
             Scene::StudentList => "학생 목록",
             Scene::StudentProfile => "학생 정보",
             Scene::Battle => "전투 중",
+            Scene::RaidSelect => "총력전 선택",
+            Scene::MockRaidBosses => "모의 총력전 보스",
+            Scene::RaidRoomInfo => "방 정보",
+            Scene::RaidFormation(RaidMode::TotalAssault) => "총력전 편성",
+            Scene::RaidFormation(RaidMode::MockTotalAssault) => "모의 총력전 편성",
+            Scene::RaidFormation(RaidMode::UnrestrictedRaid) => "제약해제결전 편성",
+            Scene::UnrestrictedRaidSelect => "제약해제결전",
+            Scene::UnrestrictedRaidStages => "제약해제결전 단계",
+            Scene::UnrestrictedRaidStage => "제약해제결전 보스",
+            Scene::TimeAttackSelect => "종합전술시험",
+            Scene::TimeAttackNextSeason => "종합전술시험 다음 시즌",
+            Scene::EliminateSelect => "대결전",
+            Scene::EliminateClosed => "대결전 (휴식기)",
+            Scene::SpoilerWarning => "스포일러 경고",
             Scene::Unknown => "",
         }
     }
@@ -110,15 +174,45 @@ pub fn classify(boxes: &[TextBox], pixel_scene: Option<Scene>) -> Scene {
     if popup_title_is(boxes, "임무정보") {
         return Scene::MissionInfo;
     }
-    match header(boxes).as_str() {
+    if popup_title_is(boxes, "방정보") {
+        return Scene::RaidRoomInfo;
+    }
+    if popup_title_is(boxes, "다음시즌정보") {
+        return Scene::TimeAttackNextSeason;
+    }
+    let header = header(boxes);
+    if let Some(scene) = raid_scene(&header, boxes) {
+        return scene;
+    }
+    match header.as_str() {
         "임무" if has(boxes, "투입부대") || has(boxes, "임무개시") => Scene::MissionMap,
         "임무" if has(boxes, "Normal") && has(boxes, "Hard") => Scene::MissionList,
         "편성" => Scene::Squad,
+        "업무" if has(boxes, "스포일러") => Scene::SpoilerWarning,
         "업무" => Scene::WorkHub,
         h if DUNGEON_HEADERS.contains(&h) && has(boxes, "스테이지목록") => Scene::DungeonList,
         h if DUNGEON_HEADERS.contains(&h) && has(boxes, "Select") => Scene::DungeonSelect,
         _ if is_lobby(boxes) => Scene::Lobby,
         _ => Scene::Unknown,
+    }
+}
+
+/// The screens of the raid-like modes, told by their header and the words only they show.
+/// The mode comes from the header alone: a 모의 총력전 screen also shows "총력전" as a side button.
+fn raid_scene(header: &str, boxes: &[TextBox]) -> Option<Scene> {
+    if let Some((_, mode)) = RAID_HEADERS.iter().find(|(name, _)| header.strip_suffix(FORMATION_SUFFIX) == Some(*name)) {
+        return Some(Scene::RaidFormation(*mode));
+    }
+    match header {
+        "총력전" if has(boxes, "BattleSelect") => Some(Scene::RaidSelect),
+        "모의총력전" if has(boxes, "보스선택") => Some(Scene::MockRaidBosses),
+        "제약해제결전" if has(boxes, "단계선택") || has(boxes, "클리어부대") => Some(Scene::UnrestrictedRaidStage),
+        "제약해제결전" if has(boxes, "단계클리어시") => Some(Scene::UnrestrictedRaidStages),
+        "제약해제결전" if has(boxes, "플레이팁") || has(boxes, "최고기록") || has(boxes, "접속을환영합니다") => Some(Scene::UnrestrictedRaidSelect),
+        "종합전술시험" if has(boxes, "다음시험") || has(boxes, "정보") => Some(Scene::TimeAttackSelect),
+        "대결전" if has(boxes, "평화로운상태") => Some(Scene::EliminateClosed),
+        "대결전" => Some(Scene::EliminateSelect),
+        _ => None,
     }
 }
 
@@ -250,8 +344,26 @@ impl MissionTracker {
                 self.mission = None;
                 self.place = place_from_list(boxes).or_else(|| self.place.take());
             }
-            // back at a place from which another mission is picked (or none): forget
-            Scene::DungeonSelect | Scene::MissionList | Scene::WorkHub | Scene::Lobby | Scene::LobbyIdle | Scene::StudentList | Scene::StudentProfile => {
+            // back at a place from which another mission is picked (or none), or in a mode that has no campaign mission: forget
+            Scene::DungeonSelect
+            | Scene::MissionList
+            | Scene::WorkHub
+            | Scene::Lobby
+            | Scene::LobbyIdle
+            | Scene::StudentList
+            | Scene::StudentProfile
+            | Scene::RaidSelect
+            | Scene::MockRaidBosses
+            | Scene::RaidRoomInfo
+            | Scene::RaidFormation(_)
+            | Scene::UnrestrictedRaidSelect
+            | Scene::UnrestrictedRaidStages
+            | Scene::UnrestrictedRaidStage
+            | Scene::TimeAttackSelect
+            | Scene::TimeAttackNextSeason
+            | Scene::EliminateSelect
+            | Scene::EliminateClosed
+            | Scene::SpoilerWarning => {
                 self.mission = None;
                 self.place = None;
             }
@@ -300,6 +412,67 @@ mod tests {
         ] {
             assert_eq!(classify(&boxes(file), None), want, "{file}");
         }
+    }
+
+    #[test]
+    fn every_recorded_raid_screen_is_recognised() {
+        let mock_bosses: Vec<String> = (0..=14).map(|i| format!("raid-mock-m{i:02}")).collect();
+        let mut table: Vec<(&str, Scene)> = mock_bosses.iter().map(|f| (f.as_str(), Scene::MockRaidBosses)).collect();
+        table.extend([
+            ("work-hub-full", Scene::WorkHub),
+            ("spoiler-warning", Scene::SpoilerWarning),
+            ("raid-select", Scene::RaidSelect),
+            ("raid-mock-room-info", Scene::RaidRoomInfo),
+            ("raid-formation-empty", Scene::RaidFormation(RaidMode::MockTotalAssault)),
+            ("unrestricted-raid-formation", Scene::RaidFormation(RaidMode::UnrestrictedRaid)),
+            ("unrestricted-raid-select", Scene::UnrestrictedRaidSelect),
+            ("unrestricted-raid-stages", Scene::UnrestrictedRaidStages),
+            ("unrestricted-raid-stage01", Scene::UnrestrictedRaidStage),
+            ("timeattack-select", Scene::TimeAttackSelect),
+            ("timeattack-next-season", Scene::TimeAttackNextSeason),
+            ("eliminate-closed", Scene::EliminateClosed),
+        ]);
+        for (file, want) in table {
+            assert_eq!(classify(&boxes(file), None), want, "{file}");
+        }
+    }
+
+    #[test]
+    fn the_formation_mode_comes_from_the_header_and_not_from_words_elsewhere_on_the_screen() {
+        let with_header = |file: &str, header: &str| {
+            let mut b = boxes(file);
+            b.iter_mut().find(|b| b.y0 < 50.0 && b.x0 > 80.0 && b.x0 < 300.0).unwrap().text = header.into();
+            classify(&b, None)
+        };
+        // not recorded: the plain total assault's formation, inferred from the other two headers
+        assert_eq!(with_header("raid-formation-empty", "총력전 편성"), Scene::RaidFormation(RaidMode::TotalAssault));
+        assert_eq!(with_header("raid-formation-empty", "모의 총력전 편성 ?"), Scene::RaidFormation(RaidMode::MockTotalAssault));
+        assert_eq!(with_header("raid-formation-empty", "편성"), Scene::Squad);
+        // the mock list shows "총력전" as a side button and must not become the real total assault
+        assert!(boxes("raid-mock-m00").iter().any(|b| b.text == "총력전"));
+        assert_eq!(classify(&boxes("raid-mock-m00"), None), Scene::MockRaidBosses);
+        // a 대결전 screen that is not the closed one (no fixture: no season was running)
+        let mut open = boxes("eliminate-closed");
+        open.retain(|b| !b.text.contains("평화로운"));
+        assert_eq!(classify(&open, None), Scene::EliminateSelect);
+    }
+
+    #[test]
+    fn raid_screens_have_a_label_for_the_card_and_formations_name_their_mode() {
+        for scene in [Scene::RaidSelect, Scene::MockRaidBosses, Scene::RaidRoomInfo, Scene::UnrestrictedRaidSelect, Scene::UnrestrictedRaidStages, Scene::UnrestrictedRaidStage, Scene::TimeAttackSelect, Scene::TimeAttackNextSeason, Scene::EliminateSelect, Scene::EliminateClosed, Scene::SpoilerWarning] {
+            assert!(!scene.label().is_empty(), "{scene:?}");
+        }
+        assert_eq!(Scene::RaidFormation(RaidMode::MockTotalAssault).label(), "모의 총력전 편성");
+        assert_eq!(Scene::RaidFormation(RaidMode::UnrestrictedRaid).label(), "제약해제결전 편성");
+        assert_eq!(Scene::RaidFormation(RaidMode::TotalAssault).label(), "총력전 편성");
+    }
+
+    #[test]
+    fn the_campaign_mission_is_forgotten_in_a_raid_mode_and_not_brought_back() {
+        let mut t = MissionTracker::default();
+        t.update(Scene::MissionInfo, &boxes("mission-info"));
+        assert!(t.update(Scene::RaidFormation(RaidMode::MockTotalAssault), &boxes("raid-formation-empty")).is_none());
+        assert!(t.update(Scene::QuickFormation, &boxes("quick-formation")).is_none());
     }
 
     #[test]
