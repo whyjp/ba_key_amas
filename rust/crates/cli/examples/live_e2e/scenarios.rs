@@ -537,9 +537,9 @@ fn card_click(rig: &Rig, id: &str) -> Result<u128> {
     mouse::move_to(x, y);
     nap(450);
     let t = unix_ms();
-    mouse::down();
+    let held = mouse::down();
     nap(50);
-    mouse::up();
+    drop(held);
     Ok(t)
 }
 

@@ -50,8 +50,18 @@ pub mod mouse {
     pub fn move_to(x: i32, y: i32) {
         unsafe { SetCursorPos(x, y) };
     }
-    pub fn down() {
+    /// The left button is held while this value lives: dropping it (also when the harness
+    /// panics) releases the button, so a failed run cannot leave it logically down.
+    #[must_use = "dropping it releases the button"]
+    pub struct Held;
+    impl Drop for Held {
+        fn drop(&mut self) {
+            up();
+        }
+    }
+    pub fn down() -> Held {
         unsafe { mouse_event(LEFTDOWN, 0, 0, 0, 0) };
+        Held
     }
     pub fn up() {
         unsafe { mouse_event(LEFTUP, 0, 0, 0, 0) };
@@ -60,14 +70,13 @@ pub mod mouse {
     pub fn drag(from: (i32, i32), to: (i32, i32)) {
         move_to(from.0, from.1);
         super::nap(80);
-        down();
+        let _held = down();
         super::nap(80);
         for i in 1..=12 {
             move_to(from.0 + (to.0 - from.0) * i / 12, from.1 + (to.1 - from.1) * i / 12);
             super::nap(25);
         }
         super::nap(120);
-        up();
     }
 }
 
