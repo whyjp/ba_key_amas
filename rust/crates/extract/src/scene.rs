@@ -155,7 +155,12 @@ impl MissionTracker {
         match scene {
             Scene::MissionInfo => {
                 if let Some(m) = mission_from_info(boxes) {
-                    self.mission = Some(m);
+                    // An alert dialog over the popup can hide the end of the name: the same
+                    // mission seen again with a shorter name keeps the full name already read.
+                    let cut_off_view = self.mission.as_ref().is_some_and(|cur| cur.number == m.number && cur.name.chars().count() > m.name.chars().count());
+                    if !cut_off_view {
+                        self.mission = Some(m);
+                    }
                 }
             }
             // the enemy popup opens on top of the info popup: it can only add a name, never replace a numbered mission
@@ -232,6 +237,22 @@ mod tests {
         assert_eq!(t.update(Scene::Squad, &boxes("squad")).unwrap().name, "설원 지구 제2 지역");
         assert!(t.update(Scene::Unknown, &[]).is_some(), "an unrecognised frame (a transition) keeps the memory");
         assert!(t.update(Scene::MissionList, &boxes("mission-list")).is_none());
+    }
+
+    #[test]
+    fn a_name_cut_off_by_an_alert_dialog_does_not_replace_the_full_name() {
+        let mut t = MissionTracker::default();
+        t.update(Scene::MissionInfo, &boxes("mission-info"));
+        let mut hidden = boxes("mission-info");
+        for b in hidden.iter_mut().filter(|b| b.text.starts_with("19-3")) {
+            b.text = "19-3|설원 지구".into();
+        }
+        assert_eq!(t.update(Scene::MissionInfo, &hidden).unwrap().name, "설원 지구 제2 지역");
+        // another mission replaces it
+        for b in hidden.iter_mut().filter(|b| b.text.starts_with("19-3")) {
+            b.text = "19-4|호쿠로쿠 중앙선".into();
+        }
+        assert_eq!(t.update(Scene::MissionInfo, &hidden).unwrap().number, Some((19, 4)));
     }
 
     #[test]

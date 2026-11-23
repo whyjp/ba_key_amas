@@ -70,7 +70,11 @@ impl Wiki {
         for row in rows {
             let (id, stage_name, area, stage_no, difficulty, terrain, level) = row?;
             let stage_name = stage_name.unwrap_or_default();
-            if norm(&stage_name) != want {
+            // OCR can cut the end of a name off (a dialog over the popup): with the stage number
+            // known, a name that is the start of the stored one is accepted too
+            let have = norm(&stage_name);
+            let agrees = have == want || (number.is_some() && want.chars().count() >= 2 && have.starts_with(&want));
+            if !agrees {
                 continue;
             }
             out.push(self.brief(id, stage_name, area, stage_no, difficulty, terrain, level)?);
@@ -163,6 +167,8 @@ mod tests {
         let w = wiki();
         assert_eq!(w.campaign_missions(None, "설원 지구 제2 지역").unwrap().len(), 2);
         assert!(w.campaign_missions(Some((19, 3)), "다른 이름").unwrap().is_empty());
+        assert_eq!(w.campaign_missions(Some((19, 3)), "설원 지구").unwrap().len(), 2, "a cut-off name is fine when the number is known");
+        assert!(w.campaign_missions(None, "설원 지구").unwrap().is_empty(), "but not when the name is all there is");
         assert!(w.campaign_missions(Some((18, 3)), "설원 지구 제2 지역").unwrap().is_empty());
     }
 }

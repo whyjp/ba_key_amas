@@ -6,6 +6,7 @@
 //!   --scan-arrows        scan student profiles with the right arrow (drives the game via HCU)
 //!   --watch              passive updater: screenshots only, stores changed values
 //!   --grab <png>         save the current game region (no input)
+mod assist;
 use anyhow::{bail, Context, Result};
 use baocr_core::model::RosterReport;
 use baocr_core::ocr_api::{Ocr, ScanSink};
@@ -54,6 +55,12 @@ struct Args {
     /// Print the text boxes OCR reads on this saved 1280x960 frame (no game access).
     #[arg(long)]
     boxes: Option<PathBuf>,
+    /// Passive guide: recognise the game screen and show it, and for a picked mission its terrain and enemy types, on a card beside the game window. Screenshots only, no input.
+    #[arg(long)]
+    assist: bool,
+    /// --assist: the wiki database (build it with the `wikidb` tool).
+    #[arg(long, default_value = "../wikidb/wiki.db")]
+    wiki: PathBuf,
     /// Learn screens: while you play, save every new stable screen (PNG + the text read on it) into this folder. Screenshots only, no input.
     #[arg(long)]
     learn: Option<PathBuf>,
@@ -85,9 +92,9 @@ fn load_ocr(args: &Args) -> Result<PpOcr> {
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    let modes = [args.boxes.is_some(), args.image.is_some(), args.reextract.is_some(), args.scan_arrows, args.watch, args.grab.is_some(), args.learn.is_some()];
+    let modes = [args.boxes.is_some(), args.image.is_some(), args.reextract.is_some(), args.scan_arrows, args.watch, args.grab.is_some(), args.learn.is_some(), args.assist];
     if modes.iter().filter(|m| **m).count() != 1 {
-        bail!("choose exactly one of --image, --reextract, --scan-arrows, --watch, --grab, --learn");
+        bail!("choose exactly one of --image, --reextract, --scan-arrows, --watch, --grab, --learn, --assist");
     }
     if args.from_first && !args.scan_arrows {
         bail!("--from-first requires --scan-arrows");
@@ -129,6 +136,10 @@ fn main() -> Result<()> {
         hcu.activate()?;
         game_capture(&hcu, region)?.save(path)?;
         return Ok(());
+    }
+    if args.assist {
+        let ocr = load_ocr(&args)?;
+        return assist::run(&ocr, &hcu, region, args.region == "auto", &args.wiki, args.interval.min(700));
     }
     if let Some(dir) = &args.learn {
         return run_learn(&args, &hcu, region, dir);
