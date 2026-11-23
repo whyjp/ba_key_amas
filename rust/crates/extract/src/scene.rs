@@ -35,6 +35,8 @@ pub enum Scene {
     /// Student list and student profile, told apart by pixels, not text.
     StudentList,
     StudentProfile,
+    /// The live combat screen, told apart by pixels (see `baocr_pixels::looks_like_battle`).
+    Battle,
     Unknown,
 }
 
@@ -54,6 +56,7 @@ impl Scene {
             Scene::QuickFormation => "빠른 편성",
             Scene::StudentList => "학생 목록",
             Scene::StudentProfile => "학생 정보",
+            Scene::Battle => "전투 중",
             Scene::Unknown => "",
         }
     }
@@ -249,7 +252,7 @@ impl MissionTracker {
                 self.mission = None;
                 self.place = None;
             }
-            Scene::MissionMap | Scene::Squad | Scene::QuickFormation | Scene::Unknown => {}
+            Scene::MissionMap | Scene::Squad | Scene::QuickFormation | Scene::Battle | Scene::Unknown => {}
         }
         self.mission.as_ref()
     }

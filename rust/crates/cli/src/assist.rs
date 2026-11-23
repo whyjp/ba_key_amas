@@ -6,31 +6,68 @@
 //! It can be started before the game, after it, or while it restarts: the window is looked
 //! for again whenever it is not known, and forgotten when it stops answering.
 use anyhow::{bail, Result};
+use crate::profile::Profile;
 use crate::scan::{self, ScanRequest};
-use baocr_assist::{read_library, Assistant, Command, Observer, Settings};
+use baocr_assist::observe::BattleGate;
+use baocr_assist::{read_library, Assistant, Command, Observation, Observer, Settings, Surface};
 use baocr_core::ocr_api::Ocr;
 use baocr_extract::scene::Scene;
 use baocr_extract::Options;
 use baocr_hcu::{check_aspect, detect_region, game_capture, parse_frame_region, screen_kind, Hcu, HcuSession, Screen};
 use baocr_overlay::{set_escape_target, BannerState, Overlay};
-use baocr_pixels::{frame_distance, frame_key};
+use baocr_pixels::{frame_distance, frame_key, looks_like_battle};
 use baocr_wikidb::Wiki;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::cell::RefCell;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 /// Frames this alike are the same view; two such frames in a row mean the screen has settled.
 const STILL: f64 = 1.5;
 /// Re-detect the game window this often (loops), so moving or resizing it is followed.
 const REGION_EVERY: u32 = 25;
-/// Pause between loops: short, so a click on a button is answered quickly.
-const LOOP_PAUSE: Duration = Duration::from_millis(150);
+/// Pause between loops while a view is changing or not read yet: short, to read it soon.
+const SETTLING_PAUSE: Duration = Duration::from_millis(60);
+/// Pause once the view is read and still the same: nothing to do but notice a change.
+const IDLE_PAUSE: Duration = Duration::from_millis(300);
+/// Loops the view must have stayed the same before the slow pause applies.
+const IDLE_AFTER: u32 = 3;
+/// Pause in a battle: the add-on is quiet and only watches for the battle to end.
+const BATTLE_PAUSE: Duration = Duration::from_millis(400);
+/// Clicks on the card are answered this often however long the pause is.
+const CLICK_SLICE: Duration = Duration::from_millis(30);
 /// Pause while there is no game to look at.
 const WAIT_PAUSE: Duration = Duration::from_millis(1000);
 /// Capture failures in a row before the window is given up and looked for again.
 const MAX_CAPTURE_FAILURES: u32 = 3;
+
+/// How long to wait before the next look at the game.
+fn pause_for(in_battle: bool, moving: bool, read: bool, still: u32) -> Duration {
+    if in_battle {
+        BATTLE_PAUSE
+    } else if !moving && read && still >= IDLE_AFTER {
+        IDLE_PAUSE
+    } else {
+        SETTLING_PAUSE
+    }
+}
+
+/// Wait `total`, answering clicks on the card meanwhile; a request for the main loop ends the wait.
+fn wait<S: Surface>(assistant: &mut Assistant<'_, S>, total: Duration) {
+    let end = Instant::now() + total;
+    loop {
+        let left = end.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return;
+        }
+        std::thread::sleep(left.min(CLICK_SLICE));
+        assistant.poll();
+        if assistant.has_commands() {
+            return;
+        }
+    }
+}
 
 /// The game's client area in HCU frame pixels, if the game is there and shaped as expected.
 fn find_region(hcu: &Hcu, spec: &str) -> Result<[f64; 4]> {
@@ -59,10 +96,15 @@ pub fn run(ocr: Arc<dyn Ocr>, session: &HcuSession, region_spec: &str, wiki_path
 
     let (mut region, mut prev, mut handled, mut still, mut loops, mut failures) = (None::<[f64; 4]>, None, None, 0u32, 0u32, 0u32);
     let mut said_waiting = false;
+    let mut prof = Profile::from_env();
+    let mut gate = BattleGate::default();
     while !stop.load(Ordering::Relaxed) {
         loops += 1;
-        assistant.poll();
-        assistant.tick(SystemTime::now());
+        prof.report();
+        prof.time("poll", || {
+            assistant.poll();
+            assistant.tick(SystemTime::now());
+        });
         for command in assistant.take_commands() {
             match command {
                 Command::Quit => {
@@ -117,6 +159,7 @@ pub fn run(ocr: Arc<dyn Ocr>, session: &HcuSession, region_spec: &str, wiki_path
                     }
                     // nothing known about a window that is gone: forget its views, show no icons
                     (prev, handled, still) = (None, None, 0);
+                    gate.reset();
                     assistant.set_game_present(false);
                     assistant.forget();
                     std::thread::sleep(WAIT_PAUSE);
@@ -125,7 +168,7 @@ pub fn run(ocr: Arc<dyn Ocr>, session: &HcuSession, region_spec: &str, wiki_path
             }
         }
         let Some(r) = region else { continue };
-        let img = match game_capture(hcu, r) {
+        let img = match prof.time("capture", || game_capture(hcu, r)) {
             Ok(i) => {
                 failures = 0;
                 i
@@ -141,28 +184,59 @@ pub fn run(ocr: Arc<dyn Ocr>, session: &HcuSession, region_spec: &str, wiki_path
                 continue;
             }
         };
-        let key = frame_key(&img);
-        let moving = prev.as_ref().map_or(true, |p| frame_distance(p, &key) >= STILL);
+        // the combat screen is told by a few pixels, before anything else is done with the frame
+        let battle_flip = prof.time("battle", || gate.feed(looks_like_battle(&img)));
+        if let Some(entered) = battle_flip {
+            (prev, handled, still) = (None, None, 0);
+            // out of a battle nothing of the screen before it is true: the next settled frame is read afresh
+            assistant.show(Observation::new(if entered { Scene::Battle } else { Scene::Unknown }));
+            println!("screen: {}", if entered { "battle (the add-on stays quiet)" } else { "battle over" });
+        }
+        if gate.in_battle() {
+            wait(&mut assistant, BATTLE_PAUSE);
+            continue;
+        }
+        let (key, moving) = prof.time("key", || {
+            let key = frame_key(&img);
+            let moving = prev.as_ref().map_or(true, |p| frame_distance(p, &key) >= STILL);
+            (key, moving)
+        });
         still = if moving { 0 } else { still + 1 };
         prev = Some(key);
         if moving {
             // icons placed for the old view would sit on the wrong things until the new one is read
-            assistant.transition();
+            prof.time("transition", || assistant.transition());
         }
         let new_view = handled.as_ref().map_or(true, |h| frame_distance(h, &key) > STILL);
         if still >= 1 && new_view {
-            let boxes = ocr.boxes(&img).unwrap_or_default();
+            let boxes = prof.time("ocr", || ocr.boxes(&img).unwrap_or_default());
             // the student list and profile are told apart by pixels, only when the text names no screen
-            let fallback = match screen_kind(&img) {
+            let fallback = prof.time("kind", || match screen_kind(&img) {
                 Screen::Profile => Scene::StudentProfile,
                 Screen::Roster => Scene::StudentList,
                 Screen::Other => Scene::Unknown,
-            };
-            let scene = assistant.on_frame(&img, &boxes, fallback);
+            });
+            let scene = prof.time("observe+present", || assistant.on_frame(&img, &boxes, fallback));
             println!("screen: {scene:?}");
             handled = Some(key);
         }
-        std::thread::sleep(LOOP_PAUSE);
+        let read = handled.as_ref().is_some_and(|h| frame_distance(h, &key) <= STILL);
+        wait(&mut assistant, pause_for(false, moving, read, still));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_pause_follows_what_there_is_to_do() {
+        assert_eq!(pause_for(true, true, false, 0), BATTLE_PAUSE, "a battle is watched slowly whatever moves");
+        assert_eq!(pause_for(false, true, false, 0), SETTLING_PAUSE, "a changing view is looked at soon again");
+        assert_eq!(pause_for(false, false, false, 5), SETTLING_PAUSE, "a view not read yet is not left waiting");
+        assert_eq!(pause_for(false, false, true, 1), SETTLING_PAUSE, "just settled: look again soon");
+        assert_eq!(pause_for(false, false, true, IDLE_AFTER), IDLE_PAUSE);
+        assert_eq!(pause_for(false, true, true, 9), SETTLING_PAUSE, "any movement ends the slow pause");
+    }
 }

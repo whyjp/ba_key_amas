@@ -15,8 +15,8 @@ use crate::surface::Surface;
 use crate::widget::{is_mission_screen, Context, Kind, Lookup, Output, Widget, WidgetId};
 use crate::widgets;
 use baocr_core::ocr_api::TextBox;
-use baocr_extract::scene::Scene;
-use baocr_overlay::{scan_rows, BannerState, Dock, PanelState, Row};
+use baocr_extract::scene::{MissionRef, Scene};
+use baocr_overlay::{scan_rows, BannerState, Dock, Mark, PanelState, Row};
 use baocr_wikidb::{StudentBrief, TypeTable, Wiki};
 use image::RgbImage;
 use std::cell::RefCell;
@@ -40,6 +40,26 @@ pub enum Command {
     Quit,
 }
 
+/// What was last handed to the surface, so that an identical output is not handed over again.
+#[derive(Default)]
+struct Sent {
+    main: Option<PanelState>,
+    ingame: Option<Option<PanelState>>,
+    marks: Option<Vec<Mark>>,
+}
+
+/// Keeps `slot` at `new`; true when that is a change the surface has to be told about.
+fn changed<T: PartialEq>(slot: &mut Option<T>, new: &T) -> bool
+where
+    T: Clone,
+{
+    if slot.as_ref() == Some(new) {
+        return false;
+    }
+    *slot = Some(new.clone());
+    true
+}
+
 pub struct Assistant<'a, S: Surface> {
     observer: Observer<'a>,
     wiki: &'a Wiki,
@@ -60,6 +80,9 @@ pub struct Assistant<'a, S: Surface> {
     /// The player's mouse and keyboard are blocked while the scan runs.
     input_locked: bool,
     commands: Vec<Command>,
+    sent: RefCell<Sent>,
+    /// The wiki's answer for the last mission asked about (the same mission is asked about on every redraw).
+    looked_up: RefCell<Option<(MissionRef, Lookup)>>,
 }
 
 fn lookup(wiki: &Wiki, obs: &Observation) -> Lookup {
@@ -97,6 +120,8 @@ impl<'a, S: Surface> Assistant<'a, S> {
             scan_state: RefCell::new(BannerState::counting(0)),
             input_locked: false,
             commands: Vec::new(),
+            sent: RefCell::default(),
+            looked_up: RefCell::new(None),
         }
     }
 
@@ -126,6 +151,11 @@ impl<'a, S: Surface> Assistant<'a, S> {
         if self.library.age_text(now) != self.age_shown {
             self.present();
         }
+    }
+
+    /// Whether the player asked for something the main loop has to carry out.
+    pub fn has_commands(&self) -> bool {
+        !self.commands.is_empty()
     }
 
     /// Requests made through the card since the last call.
@@ -178,7 +208,25 @@ impl<'a, S: Surface> Assistant<'a, S> {
     /// The screen is changing (a scroll, a popup closing): icons placed for the old view would sit
     /// on the wrong things until the new one is read, so take them down.
     pub fn transition(&self) {
-        self.surface.marks(Vec::new());
+        self.send_marks(Vec::new());
+    }
+
+    fn send_main(&self, card: PanelState) {
+        if changed(&mut self.sent.borrow_mut().main, &card) {
+            self.surface.main_card(card);
+        }
+    }
+
+    fn send_ingame(&self, card: Option<PanelState>) {
+        if changed(&mut self.sent.borrow_mut().ingame, &card) {
+            self.surface.ingame_card(card);
+        }
+    }
+
+    fn send_marks(&self, marks: Vec<Mark>) {
+        if changed(&mut self.sent.borrow_mut().marks, &marks) {
+            self.surface.marks(marks);
+        }
     }
 
     /// Show what an observation calls for.
@@ -260,17 +308,49 @@ impl<'a, S: Surface> Assistant<'a, S> {
         rows
     }
 
+    /// In a battle the add-on keeps out of the way: no in-game card, no icons, only the status and
+    /// the two things the player may still need (the in-game switch, closing).
+    fn present_battle(&self) {
+        let on_off = |on: bool| if on { "켜짐" } else { "꺼짐" }.to_string();
+        let rows = vec![
+            Row::Info { label: "게임".into(), value: if self.game_present { "연결됨" } else { "대기 중" }.into() },
+            Row::Heading("표시".into()),
+            Row::Button { id: BUTTON_INGAME.into(), label: "인게임 표시".into(), value: on_off(self.settings.ingame_visible), on: self.settings.ingame_visible },
+            Row::Heading("애드온".into()),
+            Row::Button { id: BUTTON_QUIT.into(), label: "애드온 종료".into(), value: "종료".into(), on: false },
+        ];
+        self.send_main(PanelState { scene: Scene::Battle.label().to_string(), title: String::new(), rows });
+        self.send_ingame(None);
+        self.send_marks(Vec::new());
+    }
+
+    fn lookup_cached(&self, obs: &Observation) -> Lookup {
+        let Some(m) = obs.mission.as_ref().filter(|_| is_mission_screen(obs.scene)) else { return Lookup::None };
+        if let Some((cached, found)) = self.looked_up.borrow().as_ref() {
+            if cached == m {
+                return found.clone();
+            }
+        }
+        let found = lookup(self.wiki, obs);
+        *self.looked_up.borrow_mut() = Some((m.clone(), found.clone()));
+        found
+    }
+
     fn present(&self) {
         if self.scanning {
             // the card is the scan: how far it is, and that the player's input is locked
             let (title, rows) = scan_rows(&self.scan_state.borrow(), self.input_locked);
-            self.surface.main_card(PanelState { scene: "학생 스캔".into(), title, rows });
-            self.surface.ingame_card(None);
-            self.surface.marks(Vec::new());
+            self.send_main(PanelState { scene: "학생 스캔".into(), title, rows });
+            self.send_ingame(None);
+            self.send_marks(Vec::new());
+            return;
+        }
+        if self.last.scene == Scene::Battle {
+            self.present_battle();
             return;
         }
         let obs = &self.last;
-        let cx = Context { obs, lookup: lookup(self.wiki, obs), students: self.students, types: self.types };
+        let cx = Context { obs, lookup: self.lookup_cached(obs), students: self.students, types: self.types };
         let (mut outside, mut ingame): (Vec<Row>, Vec<Row>) = (Vec::new(), Vec::new());
         let (mut outside_title, mut ingame_title) = (String::new(), String::new());
         let mut marks = Vec::new();
@@ -309,9 +389,9 @@ impl<'a, S: Surface> Assistant<'a, S> {
             eprintln!("assist: scene={:?} squad={:?} cards={:?} marks={} kind={:?}", obs.scene, obs.squad, obs.cards.iter().map(|c| c.text.as_str()).collect::<Vec<_>>(), marks.len(), obs.grid_kind);
         }
         let scene = if self.game_present { obs.scene.label().to_string() } else { "게임 대기 중".to_string() };
-        self.surface.main_card(PanelState { scene, title: outside_title, rows });
-        self.surface.ingame_card((!ingame.is_empty()).then(|| PanelState { scene: String::new(), title: ingame_title, rows: ingame }));
-        self.surface.marks(marks);
+        self.send_main(PanelState { scene, title: outside_title, rows });
+        self.send_ingame((!ingame.is_empty()).then(|| PanelState { scene: String::new(), title: ingame_title, rows: ingame }));
+        self.send_marks(marks);
         // (`age_shown` is only read by `tick`, which takes `&mut self`; it is set there when shown)
     }
 }
@@ -637,6 +717,73 @@ mod tests {
         let shown = r.fake.0.borrow();
         assert_eq!(shown.locks, vec![true, false], "released once, not twice");
         assert!(rows_of(shown.main.as_ref().unwrap()).contains("scan:start"), "the main card is back with the new state of the list");
+    }
+
+    #[test]
+    fn an_unchanged_output_is_not_sent_to_the_surface_again() {
+        #[derive(Default)]
+        struct Counting(RefCell<[u32; 3]>);
+        impl Surface for &Counting {
+            fn main_card(&self, _: PanelState) {
+                self.0.borrow_mut()[0] += 1;
+            }
+            fn ingame_card(&self, _: Option<PanelState>) {
+                self.0.borrow_mut()[1] += 1;
+            }
+            fn marks(&self, _: Vec<Mark>) {
+                self.0.borrow_mut()[2] += 1;
+            }
+            fn take_events(&self) -> Vec<String> {
+                Vec::new()
+            }
+            fn set_dock(&self, _: Dock) {}
+            fn lock_input(&self, _: bool) -> bool {
+                false
+            }
+        }
+        let (r, ocr) = (rig(), NoOcr);
+        let counting = Counting::default();
+        let mut a = Assistant::new(Observer::new(&ocr, &r.students), &r.wiki, &r.students, &r.types, Settings::default(), None, &counting);
+        for _ in 0..5 {
+            a.show(squad_obs(Scene::Squad));
+            a.transition();
+            a.show(squad_obs(Scene::Squad));
+        }
+        assert_eq!(*counting.0.borrow(), [1, 1, 1], "the first output only: the icons were empty all along");
+        a.show(squad_obs(Scene::QuickFormation));
+        assert_eq!(counting.0.borrow()[0], 2, "a different card is sent");
+    }
+
+    #[test]
+    fn in_a_battle_only_the_status_the_switch_and_closing_are_left() {
+        let (r, ocr) = (rig(), NoOcr);
+        let mut a = assistant(&r, &ocr);
+        a.set_game_present(true);
+        click(&r, "place:formation");
+        a.show(squad_obs(Scene::QuickFormation));
+        a.poll();
+        assert!(r.fake.0.borrow().ingame.is_some() && !r.fake.0.borrow().marks.is_empty());
+        a.show(Observation::new(Scene::Battle));
+        {
+            let shown = r.fake.0.borrow();
+            let main = shown.main.as_ref().unwrap();
+            assert_eq!(main.scene, "전투 중");
+            let text = rows_of(main);
+            assert!(text.contains("quit") && text.contains("ingame") && text.contains("연결됨"), "{text}");
+            assert!(!text.contains("scan:start") && !text.contains("place:"), "nothing that reads or drives the game: {text}");
+            assert!(shown.ingame.is_none() && shown.marks.is_empty(), "no stale cards or icons");
+        }
+        click(&r, "quit");
+        a.poll();
+        assert_eq!(a.take_commands(), vec![Command::Quit], "closing works in a battle");
+        click(&r, "ingame");
+        a.poll();
+        assert!(!a.settings().ingame_visible, "and so does the switch");
+        // leaving the battle: the next screen starts clean, nothing of the old one comes back
+        a.show(Observation::new(Scene::Unknown));
+        let shown = r.fake.0.borrow();
+        assert!(rows_of(shown.main.as_ref().unwrap()).contains("scan:start"));
+        assert!(shown.ingame.is_none() && shown.marks.is_empty());
     }
 
     #[test]

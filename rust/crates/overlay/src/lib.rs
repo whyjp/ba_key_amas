@@ -4,6 +4,7 @@
 //! window, so it cannot take focus or swallow the scanner's clicks. It is also
 //! excluded from screen capture (when the OS supports it) so it never appears in
 //! the frames being read. On non-Windows targets it is a no-op.
+mod cache;
 mod dock;
 mod input_block;
 mod marks;
