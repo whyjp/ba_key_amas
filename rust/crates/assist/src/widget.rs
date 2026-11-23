@@ -18,11 +18,10 @@ pub enum WidgetId {
     Formation,
     PortraitIcons,
     SlotStats,
-    FurnitureStudents,
 }
 
 impl WidgetId {
-    pub const ALL: [WidgetId; 5] = [WidgetId::MissionInfo, WidgetId::Formation, WidgetId::PortraitIcons, WidgetId::SlotStats, WidgetId::FurnitureStudents];
+    pub const ALL: [WidgetId; 4] = [WidgetId::MissionInfo, WidgetId::Formation, WidgetId::PortraitIcons, WidgetId::SlotStats];
 
     /// The id as it appears in button events ("place:formation").
     pub fn key(self) -> &'static str {
@@ -31,7 +30,6 @@ impl WidgetId {
             WidgetId::Formation => "formation",
             WidgetId::PortraitIcons => "portrait_icons",
             WidgetId::SlotStats => "slot_stats",
-            WidgetId::FurnitureStudents => "furniture_students",
         }
     }
 

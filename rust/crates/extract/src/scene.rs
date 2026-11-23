@@ -28,9 +28,6 @@ pub enum Scene {
     EnemyInfo,
     /// The hex map shown after 임무 시작 (header "임무", no mission name).
     MissionMap,
-    /// The cafe's furniture selection view. Recognised once its text anchors have been learned
-    /// from the game (no rule in `classify` yet).
-    CafeFurniture,
     /// 편성: squad formation.
     Squad,
     /// The 빠른 편성 popup: the grid of students to put into the squad.
@@ -53,7 +50,6 @@ impl Scene {
             Scene::MissionInfo => "임무 정보",
             Scene::EnemyInfo => "적 정보",
             Scene::MissionMap => "임무 지도",
-            Scene::CafeFurniture => "가구 배치",
             Scene::Squad => "편성",
             Scene::QuickFormation => "빠른 편성",
             Scene::StudentList => "학생 목록",
@@ -249,7 +245,7 @@ impl MissionTracker {
                 self.place = place_from_list(boxes).or_else(|| self.place.take());
             }
             // back at a place from which another mission is picked (or none): forget
-            Scene::DungeonSelect | Scene::MissionList | Scene::WorkHub | Scene::Lobby | Scene::CafeFurniture | Scene::StudentList | Scene::StudentProfile => {
+            Scene::DungeonSelect | Scene::MissionList | Scene::WorkHub | Scene::Lobby | Scene::StudentList | Scene::StudentProfile => {
                 self.mission = None;
                 self.place = None;
             }

@@ -193,48 +193,9 @@ impl Widget for SlotStats {
     }
 }
 
-/// Most students named on one furniture card; with more, the rest become a "+N" tag.
-const MAX_NAME_TAGS: usize = 3;
-/// Space between a card's inside edge and its tags (frame pixels).
-const TAG_INSET: i32 = 4;
-
-/// Name tags for one furniture card: every student when there are few, otherwise the first
-/// ones and how many more there are, so the tags never grow past what a card can hold.
-pub fn furniture_tags(students: &[String]) -> Vec<(String, bool)> {
-    if students.len() <= MAX_NAME_TAGS {
-        return students.iter().map(|n| (n.clone(), false)).collect();
-    }
-    let shown = MAX_NAME_TAGS - 1;
-    let mut tags: Vec<(String, bool)> = students.iter().take(shown).map(|n| (n.clone(), false)).collect();
-    tags.push((format!("+{}", students.len() - shown), true));
-    tags
-}
-
-/// The students that interact with each furniture item, as name tags on its card.
-pub struct FurnitureStudents;
-
-impl Widget for FurnitureStudents {
-    fn id(&self) -> WidgetId {
-        WidgetId::FurnitureStudents
-    }
-    fn title(&self) -> &'static str {
-        "가구 학생 표시"
-    }
-    fn kind(&self) -> Kind {
-        Kind::Marks
-    }
-    fn render(&self, cx: &Context) -> Option<Output> {
-        if cx.obs.scene != Scene::CafeFurniture {
-            return None;
-        }
-        let marks = cx.obs.furniture.iter().filter(|f| !f.students.is_empty()).map(|f| Mark::tag_column(f.x + TAG_INSET, f.y + TAG_INSET, (f.w - 2 * TAG_INSET).max(0), furniture_tags(&f.students))).collect();
-        Some(Output::Marks(marks))
-    }
-}
-
 /// All widgets, in the order their cards stack.
 pub fn all() -> Vec<Box<dyn Widget>> {
-    vec![Box::new(MissionInfo), Box::new(Formation), Box::new(PortraitIcons), Box::new(SlotStats), Box::new(FurnitureStudents)]
+    vec![Box::new(MissionInfo), Box::new(Formation), Box::new(PortraitIcons), Box::new(SlotStats)]
 }
 
 #[cfg(test)]
@@ -283,35 +244,6 @@ mod tests {
         let marks = slot_marks(&team, Some("Outdoor"));
         assert_eq!(marks.iter().map(|m| (m.cx, m.top())).collect::<Vec<_>>(), vec![(111, 700), (205, 700), (490, 700)]);
         assert!(slot_marks(&[], None).is_empty());
-    }
-
-    #[test]
-    fn a_furniture_card_names_all_its_few_students_and_counts_the_rest() {
-        let names = |n: usize| (0..n).map(|i| format!("학생{i}")).collect::<Vec<_>>();
-        assert_eq!(furniture_tags(&names(1)), vec![("학생0".to_string(), false)]);
-        assert_eq!(furniture_tags(&names(3)).len(), 3, "three still fit");
-        assert!(furniture_tags(&names(3)).iter().all(|(_, muted)| !muted));
-        let many = furniture_tags(&names(6));
-        assert_eq!(many, vec![("학생0".to_string(), false), ("학생1".to_string(), false), ("+4".to_string(), true)], "two names and how many more");
-        assert!(furniture_tags(&[]).is_empty());
-    }
-
-    #[test]
-    fn furniture_tags_go_inside_each_card_and_only_on_the_furniture_view() {
-        use crate::observe::{FurnitureCard, Observation};
-        use baocr_wikidb::TypeTable;
-        let card = |x: i32, y: i32, n: usize| FurnitureCard { x, y, w: 150, students: (0..n).map(|i| format!("학생{i}")).collect() };
-        let mut obs = Observation::new(Scene::CafeFurniture);
-        obs.furniture = vec![card(100, 200, 1), card(300, 200, 4), card(500, 200, 0)];
-        let types = TypeTable::default();
-        let cx = Context { obs: &obs, lookup: Lookup::None, students: &[], types: &types };
-        let Some(Output::Marks(marks)) = FurnitureStudents.render(&cx) else { panic!("marks") };
-        assert_eq!(marks.len(), 2, "a card with no students gets nothing");
-        assert_eq!((marks[0].cx, marks[0].top(), marks[0].max_w, marks[0].left), (104, 204, 142, true), "inside the card, no wider than it");
-        assert_eq!(marks[1].icons.len(), 3, "two names and a count");
-        obs.scene = Scene::Squad;
-        let cx = Context { obs: &obs, lookup: Lookup::None, students: &[], types: &types };
-        assert_eq!(FurnitureStudents.render(&cx), None, "other screens show nothing");
     }
 
     #[test]
