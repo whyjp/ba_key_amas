@@ -130,7 +130,7 @@ impl Scene {
 }
 
 /// OCR text without spaces and the stray marks it adds ("임무?" for a header with a help icon).
-fn norm(s: &str) -> String {
+pub(crate) fn norm(s: &str) -> String {
     s.chars().filter(|c| !c.is_whitespace() && !"?？·•|｜".contains(*c)).collect()
 }
 

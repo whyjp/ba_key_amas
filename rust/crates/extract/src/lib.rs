@@ -9,6 +9,7 @@ use anyhow::Result;
 mod deep;
 mod cards;
 pub use cards::{read_card_names, CardName};
+pub mod raid;
 pub mod scene;
 pub use deep::{apply_cell, match_label};
 use baocr_core::model::*;
