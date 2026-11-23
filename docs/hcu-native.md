@@ -69,3 +69,7 @@ Passive code cannot send input: `Hcu` has screenshot, zoom, window list and fram
   used to be: the guard still checks the window under the point is the game, but not that it is the same place in it.
 - A game running elevated while the add-on is not drops `SendInput` silently. `--doctor` detects it.
 - `input_selftest` (examples) is the manual check against a harmless window; it is not run by `cargo test`.
+
+## Activating the game window
+
+`activate` asks Windows for the foreground with a plain `SetForegroundWindow` and waits up to 750 ms. It sends no key (an earlier version tapped Alt) and attaches no input queue, because those tricks take the focus from whatever the player is doing. If Windows refuses, the call fails with a message asking the player to click the game window once, and a scan does not start. Already being the foreground window is a success without any call.

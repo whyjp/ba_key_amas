@@ -536,8 +536,6 @@ mod win {
         fn WindowFromPoint(p: Point) -> isize;
         fn GetAncestor(hwnd: isize, flags: u32) -> isize;
         fn MonitorFromPoint(p: Point, flags: u32) -> isize;
-        fn AttachThreadInput(from: u32, to: u32, attach: i32) -> i32;
-        fn keybd_event(vk: u8, scan: u8, flags: u32, extra: usize);
     }
     #[link(name = "gdi32")]
     extern "system" {
@@ -548,10 +546,6 @@ mod win {
         fn GetDIBits(dc: isize, bmp: isize, start: u32, lines: u32, bits: *mut c_void, info: *mut BitmapInfoHeader, usage: u32) -> i32;
         fn DeleteObject(obj: isize) -> i32;
         fn DeleteDC(dc: isize) -> i32;
-    }
-    #[link(name = "kernel32")]
-    extern "system" {
-        fn GetCurrentThreadId() -> u32;
     }
     #[link(name = "dwmapi")]
     extern "system" {
@@ -566,8 +560,6 @@ mod win {
     const ABSOLUTE: u32 = 0x8000;
     const VIRTUAL_DESK: u32 = 0x4000;
     const SW_RESTORE: i32 = 9;
-    const VK_MENU: u8 = 0x12;
-    const KEYEVENTF_KEYUP: u32 = 2;
     const GWL_EXSTYLE: i32 = -20;
     const WS_EX_TRANSPARENT: u32 = 0x20;
     const WS_EX_LAYERED: u32 = 0x0008_0000;
@@ -760,17 +752,13 @@ mod win {
                 if IsIconic(hwnd) != 0 {
                     ShowWindow(hwnd, SW_RESTORE);
                 }
-                // Windows only lets the foreground owner hand the focus over: attach to its input
-                // queue (and tap Alt) for the moment of the switch.
-                let fg = GetForegroundWindow();
-                let (fg_thread, me) = (GetWindowThreadProcessId(fg, std::ptr::null_mut()), GetCurrentThreadId());
-                let attached = fg_thread != 0 && fg_thread != me && AttachThreadInput(me, fg_thread, 1) != 0;
-                keybd_event(VK_MENU, 0, 0, 0);
-                keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);
-                SetForegroundWindow(hwnd);
-                if attached {
-                    AttachThreadInput(me, fg_thread, 0);
+                // A plain request, no input tricks (no key taps, no input-queue attachment): Windows
+                // may refuse it while the player works in another window. Then the scan does not
+                // start, and the player is asked to click the game window.
+                if GetForegroundWindow() == hwnd {
+                    return Ok(());
                 }
+                SetForegroundWindow(hwnd);
                 for _ in 0..30 {
                     if GetForegroundWindow() == hwnd {
                         return Ok(());
@@ -778,7 +766,7 @@ mod win {
                     std::thread::sleep(Duration::from_millis(25));
                 }
             }
-            bail!("window {window_ref} did not become the active window")
+            bail!("window {window_ref} did not become the active window: click the game window once, then start again")
         }
     }
 }
