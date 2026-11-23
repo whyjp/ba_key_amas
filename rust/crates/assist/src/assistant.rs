@@ -19,7 +19,7 @@ use baocr_extract::scene::{MissionRef, Scene};
 use baocr_overlay::{scan_rows, BannerState, Dock, Mark, PanelState, Row};
 use baocr_wikidb::{StudentBrief, TypeTable, Wiki};
 use image::RgbImage;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::time::SystemTime;
 
@@ -83,6 +83,8 @@ pub struct Assistant<'a, S: Surface> {
     input_locked: bool,
     commands: Vec<Command>,
     sent: RefCell<Sent>,
+    /// The screen is changing and the last reading no longer describes it: no icons until the next reading.
+    view_moving: Cell<bool>,
     /// The wiki's answer for the last mission asked about (the same mission is asked about on every redraw).
     looked_up: RefCell<Option<(MissionRef, Lookup)>>,
 }
@@ -124,6 +126,7 @@ impl<'a, S: Surface> Assistant<'a, S> {
             commands: Vec::new(),
             sent: RefCell::default(),
             looked_up: RefCell::new(None),
+            view_moving: Cell::new(false),
         }
     }
 
@@ -210,6 +213,9 @@ impl<'a, S: Surface> Assistant<'a, S> {
     /// The screen is changing (a scroll, a popup closing): icons placed for the old view would sit
     /// on the wrong things until the new one is read, so take them down.
     pub fn transition(&self) {
+        // Remembered, not only sent: any later `present` (a click on the card, the list's age moving
+        // on a minute) draws from the last reading, and would put the old view's icons back.
+        self.view_moving.set(true);
         self.send_marks(Vec::new());
     }
 
@@ -236,6 +242,7 @@ impl<'a, S: Surface> Assistant<'a, S> {
     /// Show what an observation calls for.
     pub fn show(&mut self, obs: Observation) {
         self.last = obs;
+        self.view_moving.set(false);
         self.present();
     }
 
@@ -399,7 +406,7 @@ impl<'a, S: Surface> Assistant<'a, S> {
         let scene = if self.game_present { obs.scene.label().to_string() } else { "게임 대기 중".to_string() };
         self.send_main(PanelState { scene, title: outside_title, rows, ..Default::default() });
         self.send_ingame((!ingame.is_empty()).then(|| PanelState { scene: String::new(), title: ingame_title, rows: ingame, ..Default::default() }));
-        self.send_marks(marks);
+        self.send_marks(if self.view_moving.get() { Vec::new() } else { marks });
         // (`age_shown` is only read by `tick`, which takes `&mut self`; it is set there when shown)
     }
 }
@@ -829,6 +836,38 @@ mod tests {
         click(&r, "quit");
         a.poll();
         assert_eq!(a.take_commands(), vec![Command::Quit]);
+    }
+
+    #[test]
+    fn icons_of_a_view_that_is_gone_do_not_come_back_before_the_next_view_is_read() {
+        let (r, ocr) = (rig(), NoOcr);
+        let mut a = assistant(&r, &ocr);
+        let mut obs = squad_obs(Scene::QuickFormation);
+        obs.cards = vec![CardName { text: "관통학생".into(), x: 629.0, y0: 428.0 }];
+        a.show(obs.clone());
+        assert!(!r.fake.0.borrow().marks.is_empty(), "icons while the popup is read");
+        // the popup closes: the screen moves and the icons come down
+        a.transition();
+        assert!(r.fake.0.borrow().marks.is_empty());
+        // anything that redraws the card from the last reading (a click, the list's age moving on)
+        // must not bring them back
+        click(&r, "ingame");
+        click(&r, "ingame");
+        a.poll();
+        a.tick(SystemTime::now() + Duration::from_secs(3600));
+        assert!(r.fake.0.borrow().marks.is_empty(), "stale icons were put back");
+        // the new view is read: the popup is gone, still no icons
+        a.show(squad_obs(Scene::Squad));
+        assert!(r.fake.0.borrow().marks.is_empty());
+        // opening the popup again brings them back
+        a.show(obs);
+        assert!(!r.fake.0.borrow().marks.is_empty());
+        // a battle clears them whatever came before
+        a.show(Observation::new(Scene::Battle));
+        assert!(r.fake.0.borrow().marks.is_empty() && r.fake.0.borrow().ingame.is_none());
+        a.transition();
+        a.tick(SystemTime::now() + Duration::from_secs(7200));
+        assert!(r.fake.0.borrow().marks.is_empty());
     }
 
     #[test]
