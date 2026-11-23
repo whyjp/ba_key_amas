@@ -80,6 +80,5 @@ gh api "repos/microsoft/Hybrid-Computer-Use/contents/<원본 경로>?ref=8ce82b3
 
 ## 도우미 프로그램과 `vendor/`
 
-이전 방식인 `computer-use.exe`(Go와 .NET)는 `vendor/hcu`에 있고 `BAOCR_HCU=process`로만 쓴다.
-106명 스캔을 새 입력 경로로 돌려 이전 결과와 같음을 확인하면 `vendor/hcu`와 이 폴백을 지운다.
+이전 방식인 `computer-use.exe`(Go와 .NET)와 `BAOCR_HCU=process` 폴백은 지웠다. 106명 스캔을 같은 게임 상태에서 두 번 돌려 읽은 값이 모두 같음을 확인했고(2026-11-24), 원본 파일의 보관 사본은 `third_party/hcu-reference/`에 있다.
 `vendor/ocr`(Tesseract 런타임)와 `vendor/micromamba`는 Go 시대 도구라 코드가 참조하지 않아 이미 지웠다.

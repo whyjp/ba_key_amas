@@ -1,8 +1,6 @@
 use anyhow::{anyhow, bail, Result};
 use image::RgbImage;
 use serde::{Deserialize, Deserializer};
-use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::Duration;
 
 /// Exact window title of the game. A bare "Blue Archive" substring is ambiguous
@@ -72,33 +70,6 @@ pub trait Runner: Send + Sync {
     }
 }
 
-/// Runs the real `computer-use` binary.
-pub struct ProcessRunner {
-    pub binary: PathBuf,
-}
-
-impl Runner for ProcessRunner {
-    fn run(&self, args: &[String]) -> Result<String> {
-        let mut cmd = Command::new(&self.binary);
-        cmd.args(args);
-        // the add-on has no console of its own: without this every call would flash a console window
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-        }
-        let out = cmd.output().map_err(|e| anyhow!("run {}: {e}", self.binary.display()))?;
-        let mut text = String::from_utf8_lossy(&out.stdout).into_owned();
-        text.push_str(&String::from_utf8_lossy(&out.stderr));
-        // A failing exit with a JSON record is reported through the record (ok/code/hint),
-        // like Go, which parses the output before looking at the exit status.
-        if !out.status.success() && !text.trim_start().starts_with('{') {
-            bail!("{} {:?}: {} ({})", self.binary.display(), args, out.status, text.trim());
-        }
-        Ok(text)
-    }
-}
-
 /// One input action, in HCU frame pixels.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Act {
@@ -136,10 +107,6 @@ impl std::ops::Deref for HcuSession {
 }
 
 impl HcuSession {
-    pub fn new(binary: impl Into<PathBuf>) -> Self {
-        Self::with_runner(Box::new(ProcessRunner { binary: binary.into() }))
-    }
-
     pub fn with_runner(runner: Box<dyn Runner>) -> Self {
         Self { hcu: Hcu { runner, no_sleep: false, stats: Default::default(), frame: Default::default(), retrying: Default::default(), cancel: Default::default() } }
     }
@@ -156,30 +123,10 @@ impl HcuSession {
         Self::with_runner(Box::new(runner))
     }
 
-    /// The in-process desktop on Windows; the `computer-use` helper (`$HCU_BIN`, `vendor/hcu`, PATH)
-    /// when `BAOCR_HCU=process` is set or on other systems.
+    /// The desktop the add-on controls: in-process, no helper program.
+    #[cfg(windows)]
     pub fn default_backend() -> Self {
-        #[cfg(windows)]
-        if std::env::var("BAOCR_HCU").map_or(true, |v| v != "process") {
-            return Self::native();
-        }
-        Self::from_env()
-    }
-
-    /// Binary from `$HCU_BIN`, else `vendor/hcu/computer-use[.exe]` beside the
-    /// executable (or under the working directory), else on PATH.
-    pub fn from_env() -> Self {
-        let name = if cfg!(windows) { "computer-use.exe" } else { "computer-use" };
-        let exe_dir = std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_path_buf)).unwrap_or_default();
-        let rel = Path::new("vendor").join("hcu").join(name);
-        let mut bin = find_bin(&exe_dir, "HCU_BIN", &rel, name);
-        if !bin.exists() && bin.components().count() > 1 {
-            let cwd = std::env::current_dir().unwrap_or_default().join(&rel);
-            if cwd.exists() {
-                bin = cwd;
-            }
-        }
-        Self::new(bin)
+        Self::native()
     }
 
     /// Skip the sleeps in settle/wait loops (unit tests with a fake runner).
@@ -402,28 +349,6 @@ pub fn window_active(apps: &str, title: &str) -> bool {
 /// The `wN` ref of the window whose title equals `title` exactly.
 pub fn window_ref(apps: &str, title: &str) -> Option<String> {
     exact_title_line(apps, title).map(|(r, _)| r.to_string())
-}
-
-/// Go `findBin`: env override, else `dir/rel` if it exists, else PATH, else `dir/rel`.
-pub fn find_bin(dir: &Path, env: &str, rel: &Path, unix: &str) -> PathBuf {
-    if let Ok(v) = std::env::var(env) {
-        if !v.is_empty() {
-            return PathBuf::from(v);
-        }
-    }
-    let p = dir.join(rel);
-    if p.exists() {
-        return p;
-    }
-    if let Some(path) = std::env::var_os("PATH") {
-        for d in std::env::split_paths(&path) {
-            let c = d.join(unix);
-            if c.is_file() {
-                return c;
-            }
-        }
-    }
-    p
 }
 
 #[cfg(test)]

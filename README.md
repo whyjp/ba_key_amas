@@ -56,7 +56,7 @@ Blue Archive(글로벌 서버, 한국어 UI, 4:3 창 모드)용 Windows 애드�
 | `cargo run -p baocr-namedict` | 패치 뒤에 이름 사전을 갱신한다 |
 
 환경 변수는 다음과 같다. `BAOCR_MODELS`(모델 폴더), `BAOCR_OCR_DEVICE=cpu`(GPU를 쓰지 않음),
-`BAOCR_HCU=process`(예전 헬퍼 프로그램 사용), `BAOCR_PROFILE=1`(단계별 시간), `BAOCR_INPUT_LOG=0`(입력 로그 끔),
+`BAOCR_PROFILE=1`(단계별 시간), `BAOCR_INPUT_LOG=0`(입력 로그 끔),
 `BAOCR_HCU_SETTLE_MS`(입력 뒤 대기 시간), `BAOCR_STATE_DUMP=<file>`(라이브 테스트를 위해 애드온의 상태를 기록),
 `BAOCR_OVERLAY_CAPTURABLE=1`(스크린샷에 오버레이를 포함).
 
@@ -100,4 +100,4 @@ ESC와 입력 잠금, 트레이 메뉴, DirectML이 게임 프레임 속도에 �
 
 처음 구현은 Go와 Tesseract였다. Rust 포트는 저장한 프레임 106장 전부와 라이브 전체 스캔에서 Go 구현과 같은
 결과를 내고 나서 그것을 대체했다. 헬퍼 프로세스 방식의 데스크톱 제어는 프로세스 내 Win32 호출로 바뀌었다
-([ADR 0003](docs/adr/0003-native-desktop-control.md)). 라이브 스캔 비교를 통과할 때까지 `vendor/hcu`는 남겨 둔다.
+([ADR 0003](docs/adr/0003-native-desktop-control.md)).

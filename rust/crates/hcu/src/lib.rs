@@ -30,7 +30,7 @@ pub use guard::{Refusal, SendError, WinInfo};
 pub use native::{delivered_size, to_absolute, to_native, zoom_geometry, Desktop, NativeRunner, Settle};
 #[cfg(windows)]
 pub use native::WinDesktop;
-pub use hcu::{find_bin, window_active, window_ref, Exclusive, Hcu, HcuSession, ProcessRunner, Record, Runner, GAME_TITLE};
+pub use hcu::{window_active, window_ref, Exclusive, Hcu, HcuSession, Record, Runner, GAME_TITLE};
 pub use roster::{count_roster, ensure_profile, go_to_roster, merge_new_cards, open_first_student, prepare_scan, screen_kind, scroll_to_top, Screen};
 pub use scan::{scan_arrows, wait_stable_next, ScanOutcome};
 pub use window::{auto_region, detect_region, to_frame_region};

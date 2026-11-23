@@ -1,7 +1,7 @@
 # 프로세스 내 데스크톱 제어 (`crates/hcu`)
 
 애드온은 더 이상 Microsoft의 `computer-use` 헬퍼를 띄우지 않는다. `native.rs`가 같은 요청에 같은 JSON 레코드로 답하므로
-`Runner` 트레이트 위쪽은 바뀌지 않았다. 라이브 동등성 스캔이 승인될 때까지는 비교용으로 `BAOCR_HCU=process`로 헬퍼 백엔드를 쓸 수 있다.
+`Runner` 트레이트 위쪽은 바뀌지 않았다. 헬퍼 백엔드는 라이브 스캔 동등성을 확인한 뒤 지웠다.
 
 참조: Microsoft Hybrid Computer Use(MIT), 리비전 `8ce82b310b014ab1133b28febc2eca81527e43e6`
 (2026-11-18). 저작권 표시는 `THIRD_PARTY_NOTICES.md`에 있다. C# 코드는 명세로만 읽었고 구현에 복사한 것은 없다.

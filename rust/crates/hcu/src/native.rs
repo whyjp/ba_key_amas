@@ -4,8 +4,7 @@
 //!
 //! It answers the same requests the `computer-use` CLI did (`gui screenshot`, `gui zoom`, `gui click`,
 //! `gui --json` with scroll/click actions, `apps`, `activate`) with the same JSON records, so
-//! everything above [`Runner`] is unchanged, and the old process backend can still be used to
-//! compare the two (`BAOCR_HCU=process`).
+//! everything above [`Runner`] is unchanged. The old helper-process backend is gone.
 //!
 //! Behaviour follows the reference implementation (`NativeDesktop*.cs`, `WindowsDesktopImageGeometry.cs`):
 //! the screenshot is the whole virtual desktop delivered at no more than 1366x768; zoom regions and
