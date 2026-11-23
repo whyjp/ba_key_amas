@@ -13,7 +13,7 @@ use crate::tab::{pick, render_snap_hint, render_tab, tab_size, Press};
 use crate::render::{load_fonts, Fonts, Ltrb};
 use crate::marks::{render_marks, Mark};
 use crate::wake::Wake;
-use crate::{Card, Shown};
+use crate::{Card, Shown, ViewInfo, ViewShape};
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -594,6 +594,9 @@ fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, wake: Arc<Wake
                 fold.reset();
                 slide = 0.0;
                 shown_view = View::Nothing;
+                if let Ok(mut g) = state.lock() {
+                    g.view = ViewInfo::default();
+                }
                 tick = tick.wrapping_add(1);
                 prof::add(prof::Part::Busy, tick_start.elapsed());
                 wake.wait(Duration::from_millis(90));
@@ -625,6 +628,7 @@ fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, wake: Arc<Wake
                 }
             }
             let mut card_rect: Option<((i32, i32), (i32, i32))> = None;
+            let mut view_now = ViewInfo::default();
             ingame_shift = 0;
             let mut card_scale = out_w as f32 / PANEL_BASE_W;
             let mut hint: Option<(Ltrb, (i32, i32))> = None;
@@ -713,10 +717,33 @@ fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, wake: Arc<Wake
                     if shown_view == View::Card {
                         card_rect = Some((at, open_size));
                     }
+                    let layer = match shape {
+                        Shape::Card => open_size,
+                        Shape::Tab => tab_dim,
+                        Shape::Strip => (rc.2 - rc.0, rc.3 - rc.1),
+                    };
+                    if shown_view != View::Nothing {
+                        view_now = ViewInfo {
+                            shape: match shown_view {
+                                View::Card => ViewShape::Card,
+                                View::Tab => ViewShape::Tab,
+                                _ => ViewShape::Strip,
+                            },
+                            slide_milli: (slide * 1000.0) as u32,
+                            rect: [at.0, at.1, at.0 + layer.0, at.1 + layer.1],
+                            dock: Dock::default(),
+                            hits: if shown_view == View::Card { card_hits.iter().map(|h| (h.id.clone(), [at.0 + h.x as i32, at.1 + h.y as i32, at.0 + (h.x + h.w) as i32, at.1 + (h.y + h.h) as i32])).collect() } else { Vec::new() },
+                        };
+                    }
                 }
                 _ => {
                     card.hide();
                     shown_view = View::Nothing;
+                }
+            }
+            if let Ok(mut g) = state.lock() {
+                if g.view != view_now {
+                    g.view = view_now;
                 }
             }
             // while the card is carried: the place it would snap to; else a tooltip while the

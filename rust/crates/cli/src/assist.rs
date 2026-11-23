@@ -6,6 +6,7 @@
 //! It can be started before the game, after it, or while it restarts: the window is looked
 //! for again whenever it is not known, and forgotten when it stops answering.
 use anyhow::{bail, Result};
+use crate::dump::DumpSurface;
 use crate::profile::Profile;
 use crate::scan::{self, ScanRequest};
 use baocr_assist::observe::BattleGate;
@@ -78,13 +79,22 @@ fn find_region(hcu: &Hcu, spec: &str) -> Result<[f64; 4]> {
 }
 
 pub fn run(ocr: Arc<dyn Ocr>, session: &HcuSession, region_spec: &str, wiki_path: &Path, out: &Path, workers: usize) -> Result<()> {
+    let overlay = Overlay::start_hidden();
+    // BAOCR_STATE_DUMP=<file>: write what the surface shows as JSON, for the live end-to-end harness
+    match std::env::var_os("BAOCR_STATE_DUMP").filter(|p| !p.is_empty()) {
+        Some(path) => run_on(DumpSurface::new(overlay, path.into()), ocr, session, region_spec, wiki_path, out, workers),
+        None => run_on(overlay, ocr, session, region_spec, wiki_path, out, workers),
+    }
+}
+
+fn run_on<S: Surface>(surface: S, ocr: Arc<dyn Ocr>, session: &HcuSession, region_spec: &str, wiki_path: &Path, out: &Path, workers: usize) -> Result<()> {
     if !wiki_path.exists() {
         bail!("wiki database not found at {}: build it with `cargo run -p baocr-wikidb --release`", wiki_path.display());
     }
     let wiki = Wiki::open(wiki_path)?;
     let (students, types) = (wiki.students()?, wiki.type_table()?);
     let settings_path = Settings::default_path();
-    let mut assistant = Assistant::new(Observer::new(&*ocr, &students), &wiki, &students, &types, Settings::load(&settings_path), Some(settings_path.clone()), Overlay::start_hidden());
+    let mut assistant = Assistant::new(Observer::new(&*ocr, &students), &wiki, &students, &types, Settings::load(&settings_path), Some(settings_path.clone()), surface);
     assistant.set_library(read_library(out));
     let stop = Arc::new(AtomicBool::new(false));
     let flag = stop.clone();

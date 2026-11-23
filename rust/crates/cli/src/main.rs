@@ -8,6 +8,7 @@
 //!   --watch              passive updater: screenshots only, stores changed values
 //!   --grab <png>         save the current game region (no input)
 mod assist;
+mod dump;
 mod profile;
 mod scan;
 use anyhow::{bail, Context, Result};

@@ -1,6 +1,6 @@
 //! The output port: where the assistant's cards and icons go. The assistant only knows
 //! this trait; the Windows overlay implements it, and tests use a recording fake.
-use baocr_overlay::{Dock, Mark, Overlay, PanelState};
+use baocr_overlay::{Dock, Mark, Overlay, PanelState, ViewInfo};
 
 pub trait Surface {
     /// The add-on's main card, beside the game window (with the settings buttons).
@@ -16,6 +16,10 @@ pub trait Surface {
     /// Keep the player's mouse and keyboard off the game (only the scan's own input gets through;
     /// ESC raises the stop flag). Returns whether the block is in force.
     fn lock_input(&self, on: bool) -> bool;
+    /// What the card layer shows right now (folded or open, where); None when the surface cannot tell.
+    fn view(&self) -> Option<ViewInfo> {
+        None
+    }
 }
 
 impl Surface for Overlay {
@@ -36,5 +40,8 @@ impl Surface for Overlay {
     }
     fn lock_input(&self, on: bool) -> bool {
         self.block_input(on)
+    }
+    fn view(&self) -> Option<ViewInfo> {
+        Some(Overlay::view(self))
     }
 }
