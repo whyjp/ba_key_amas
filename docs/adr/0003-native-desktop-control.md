@@ -1,33 +1,32 @@
-# 0003 Desktop control in process through Win32, not the HCU helper
+# 0003 데스크톱 제어는 HCU 보조 프로그램 대신 Win32로 프로세스 안에서 처리한다
 
-Status: Accepted. Details: [hcu-native.md](../hcu-native.md).
+상태: 확정. 자세한 내용은 [hcu-native.md](../hcu-native.md)에 있다.
 
-## Context
-The first Rust version drove the game through Microsoft's Hybrid Computer Use helper (`computer-use.exe`
-plus a .NET provider). Every call started a process, which cost about 1.35 s per input and 0.4 to 1.5 s per capture. The helper
-also flashed a console window in a windowless exe and needed two extra executables (about 255 MB with models).
+## 배경
+첫 Rust 버전은 Microsoft의 Hybrid Computer Use 보조 프로그램(`computer-use.exe`와 .NET 제공자)으로 게임을 제어했다.
+호출마다 프로세스를 띄워서 입력 하나에 약 1.35초, 캡처 하나에 0.4~1.5초가 들었다. 이 프로그램은 창이 없는 exe에서 콘솔
+창을 번쩍 띄웠고 실행 파일도 둘이 더 필요했다(모델 포함 약 255 MB).
 
-## Decision
-`hcu` implements the few operations the project uses (capture, zoom, click, scroll, window list, activate)
-directly on Win32 and answers the same request protocol through the `Runner` trait, so callers did not
-change. Coordinates and zoom geometry follow the MIT reference. The helper stays selectable with
-`BAOCR_HCU=process` until a live scan parity run removes it.
+## 결정
+`hcu`가 프로젝트에서 쓰는 몇 가지 동작(캡처, 확대, 클릭, 스크롤, 창 목록, 활성화)을 Win32로 직접 구현한다. 요청
+프로토콜은 `Runner` 트레이트로 그대로 받으므로 호출하는 쪽은 바뀌지 않는다. 좌표와 확대 기하는 MIT 참조 구현을 따른다.
+라이브 스캔 동등성 실행으로 제거하기 전까지 보조 프로그램은 `BAOCR_HCU=process`로 고를 수 있다.
 
-## Alternatives
-- A Rust client for the HCU daemon still ships the Go core and the .NET provider, so the single-exe goal
-  fails, and the daemon targets general agents (UIA, semantic actions) while the game has no UIA tree.
-- Embedding the helper with `include_bytes!` gives one file but the same process cost.
-- Go as a C shared library or .NET NativeAOT would put two runtimes inside the process for a few Win32 calls.
-- A C++ library. No C++ source exists upstream, and Rust reaches Win32 equally well.
+## 대안
+- HCU 데몬용 Rust 클라이언트는 Go 코어와 .NET 제공자를 계속 배포해야 하므로 exe 하나라는 목표를 못 이룬다. 또 데몬은
+  일반 에이전트(UIA, 의미 기반 동작)를 겨냥하는데 게임에는 UIA 트리가 없다.
+- `include_bytes!`로 보조 프로그램을 내장하면 파일은 하나지만 프로세스 비용은 같다.
+- Go를 C 공유 라이브러리로 쓰거나 .NET NativeAOT를 쓰면 Win32 호출 몇 개 때문에 런타임 두 개가 프로세스에 들어온다.
+- C++ 라이브러리. 업스트림에 C++ 소스가 없고 Rust도 Win32를 똑같이 잘 다룬다.
 
-## Consequences
-- Capture about 0.1 s measured, against 0.4 to 1.5 s with the helper.
-- We now own the guards the helper had (layout staleness, partial input), described in ADR 0004.
-- Only the used subset is ported; AX, text input, key chords, the daemon and MCP are deliberately absent.
+## 결과
+- 캡처는 측정상 약 0.1초로, 보조 프로그램의 0.4~1.5초보다 빠르다.
+- 보조 프로그램이 갖고 있던 안전장치(레이아웃 노후화, 부분 입력)를 이제 직접 맡는다. 결정 기록 0004에 적었다.
+- 쓰는 부분만 포팅했다. AX, 텍스트 입력, 키 조합, 데몬, MCP는 일부러 뺐다.
 
-## Evidence
-`cli/examples/backend_diff.rs`: frame size and detected region identical, static area mean difference
-1.6 of 765. `docs/hcu-native.md` records the upstream commit used as reference.
+## 근거
+`cli/examples/backend_diff.rs`: 프레임 크기와 검출 영역이 같고 정적 영역의 평균 차이는 765 중 1.6이다. `docs/hcu-native.md`에
+참조로 쓴 업스트림 커밋을 기록했다.
 
-## Revisit when
-The scan needs key or text input, or the game starts rejecting `SendInput`.
+## 다시 볼 조건
+스캔에 키 입력이나 텍스트 입력이 필요해질 때, 또는 게임이 `SendInput`을 거부하기 시작할 때.

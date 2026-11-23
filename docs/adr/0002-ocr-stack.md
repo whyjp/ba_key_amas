@@ -1,54 +1,50 @@
-# 0002 PP-OCR on ONNX Runtime in process, DirectML optional, closed-set reading for names
+# 0002 PP-OCR을 ONNX Runtime으로 프로세스 안에서 돌리고 DirectML은 선택, 이름은 닫힌 집합 읽기
 
-Status: Accepted
+상태: 확정
 
-## Context
-The first extractor (Go) used Tesseract as a process per call, 100 to 300 ms each and about 20 calls per
-profile. That was fine for scanning and too slow for a live overlay. The question was the model, not the language.
+## 배경
+첫 추출기(Go)는 Tesseract를 호출마다 프로세스로 띄웠다. 호출 하나에 100~300 ms가 들었고 프로필 하나에 약 20번 호출했다.
+스캔에는 괜찮았지만 실시간 오버레이에는 너무 느렸다. 문제는 언어가 아니라 모델이었다.
 
-## Decision
-- Engine: PP-OCR models as ONNX (`PP-OCRv6_det_small` detection, `korean_PP-OCRv5_rec_mobile`
-  recognition, its CTC dictionary), run in process by `oar-ocr` on top of `ort` (ONNX Runtime). No Python,
-  no helper process.
-- Student names are not read as free text. A second session of the same recogniser produces CTC
-  probabilities. `decide` (`extract/src/cards.rs`) picks the name from the closed set of known names by likelihood,
-  combined with an ink-width model of the letter count, and cross-checks it with a free read.
-  Syllables the model lacks (for example 슌) are spelled with the nearest known syllable by likelihood.
-- Acceleration: an optional DirectML build (`--features directml`, `DirectML.dll` beside the exe) runs the
-  detector and recogniser on the GPU, with a probe that falls back to CPU. Recognition batch is fixed at 4.
-  `BAOCR_OCR_DEVICE=cpu` forces the CPU. The portable package is built with the feature
-  (`scripts/package-portable.ps1`).
-- The closed-set session (`probs`, `choose`) still runs on the CPU.
+## 결정
+- 엔진: PP-OCR 모델을 ONNX로 쓴다(검출 `PP-OCRv6_det_small`, 인식 `korean_PP-OCRv5_rec_mobile`과 그 CTC 사전).
+  `ort`(ONNX Runtime) 위의 `oar-ocr`이 프로세스 안에서 실행한다. Python도 보조 프로세스도 없다.
+- 학생 이름은 자유 텍스트로 읽지 않는다. 같은 인식기의 두 번째 세션이 CTC 확률을 내고, `decide`
+  (`extract/src/cards.rs`)가 알려진 이름의 닫힌 집합에서 가능도로 이름을 고른다. 이때 글자 수에 대한 잉크 폭 모델을
+  함께 쓰고 자유 읽기 결과와 교차 검증한다. 모델에 없는 음절(예: 슌)은 가능도가 가장 높은 가까운 음절로 적는다.
+- 가속: 선택 사항인 DirectML 빌드(`--features directml`, exe 옆에 `DirectML.dll`)가 검출기와 인식기를 GPU에서 돌린다.
+  프로브가 실패하면 CPU로 돌아간다. 인식 배치는 4로 고정한다. `BAOCR_OCR_DEVICE=cpu`로 CPU를 강제할 수 있다.
+  포터블 패키지는 이 기능을 켠 채로 빌드한다(`scripts/package-portable.ps1`).
+- 닫힌 집합 세션(`probs`, `choose`)은 여전히 CPU에서 돈다.
 
-## Alternatives (measured)
-Measured on 11 labelled screens and 68 fields with `tools/ocr-bench`:
+## 대안 (측정)
+`tools/ocr-bench`로 라벨이 붙은 화면 11장, 필드 68개를 쟀다.
 
-| Setup | Correct |
+| 구성 | 정답 |
 |---|---|
-| Tesseract, heavily tuned on these screens | 66/68 |
-| PP-OCRv5 Korean, detection plus recognition, untuned | 64/68 |
-| PP-OCRv5 Korean, recognition only on tight crops | 53/68 |
-| PP-OCRv5 Korean, recognition only on padded crops | 51/68 |
+| Tesseract, 이 화면들에 맞춰 많이 튜닝 | 66/68 |
+| PP-OCRv5 Korean, 검출과 인식, 튜닝 없음 | 64/68 |
+| PP-OCRv5 Korean, 꼭 맞춘 크롭에서 인식만 | 53/68 |
+| PP-OCRv5 Korean, 여백을 둔 크롭에서 인식만 | 51/68 |
 
-Frame-level detection reads all numeric fields (37/37) and misses small overlaid text (names, bond heart),
-hence the closed-set reads for those. In the Rust port: names 106/106 and 11/11, bond 106/106, level 105/105,
-about 0.9 s per profile frame.
+프레임 단위 검출은 숫자 필드를 모두 읽는다(37/37). 작게 겹쳐 그려진 글자(이름, 인연 하트)는 놓친다. 그래서 그 필드는 닫힌
+집합 읽기를 쓴다. Rust 포팅에서는 이름 106/106과 11/11, 인연 106/106, 레벨 105/105이고 프로필 프레임 하나에 약 0.9초가
+걸린다.
 
-Later tuning options (live fixtures, `docs/speed-research.md`) did not win. Changing the ORT thread count, graph
-optimisation or memory pattern did not help, because the defaults are already optimal (one thread is 2.4 times
-slower). Detector `limit_side_len` 640 is 25 percent faster but changes the text on 14 of 15 frames, so it was
-rejected. A recognition batch other than 4 changes the text, and a single BitBlt capture changes the frame. Both
-were rejected.
+이후 튜닝 후보(라이브 픽스처, `docs/speed-research.md`)는 이기지 못했다. ORT 스레드 수, 그래프 최적화, 메모리 패턴을
+바꿔도 도움이 되지 않았다. 기본값이 이미 최적이기 때문이다(스레드 하나는 2.4배 느리다). 검출기 `limit_side_len` 640은 25%
+빠르지만 15프레임 중 14프레임에서 텍스트가 달라져 기각했다. 인식 배치가 4가 아니면 텍스트가 달라진다. BitBlt 캡처 한 번으로
+바꾸면 프레임이 달라진다. 두 가지 모두 기각했다.
 
-## Consequences
-- DirectML: 15 fixture frames 4750 ms to about 1710 ms (2.7 times), quick formation 547 to 187 ms, text
-  identical to CPU on 15 of 15 frames. First call about 0.44 s. Frame-rate impact on the game is unmeasured.
-- Open speed options, in order: read only the grid band on the quick formation popup, skip the detector on
-  fixed layouts, DirectML for the closed-set session.
-- Models are not in git (`models/README.md` gives sources, hashes and licences).
+## 결과
+- DirectML: 픽스처 15프레임이 4750 ms에서 약 1710 ms로 줄었다(2.7배). 빠른 편성은 547 ms에서 187 ms로 줄었다. 텍스트는
+  15프레임 모두 CPU와 같다. 첫 호출은 약 0.44초 걸린다. 게임 프레임 속도에 주는 영향은 측정하지 않았다.
+- 남은 속도 개선 후보는 순서대로 빠른 편성 팝업에서 격자 영역만 읽기, 고정 레이아웃에서 검출기 생략, 닫힌 집합 세션에
+  DirectML 적용이다.
+- 모델은 git에 두지 않는다(출처, 해시, 라이선스는 `models/README.md`에 있다).
 
-## Evidence
+## 근거
 `docs/speed-research.md`, `ocr/src/lib.rs`, `extract/src/cards.rs`, `tools/ocr-bench`.
 
-## Revisit when
-A newer PP-OCR release changes accuracy on the fixtures, or the game changes its font.
+## 다시 볼 조건
+새 PP-OCR 릴리스가 픽스처의 정확도를 바꾸거나 게임이 글꼴을 바꿀 때.

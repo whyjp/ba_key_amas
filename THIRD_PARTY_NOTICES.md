@@ -1,15 +1,15 @@
-# Third-party notices
+# 서드파티 고지
 
 ## Microsoft Hybrid Computer Use
 
-The in-process desktop control in `rust/crates/hcu/src/native.rs` re-implements, in Rust against Win32, the
-behaviour of the Windows provider of Hybrid Computer Use (screenshot delivery size, zoom geometry, the
-frame-point to native-pixel mapping, absolute pointer coordinates, the layout check of a frame, the settle
-loop). No source file is copied; the C# files were read as the specification.
+`rust/crates/hcu/src/native.rs`의 프로세스 내 데스크톱 제어는 Hybrid Computer Use의 Windows 제공자 동작을
+Win32 기반 Rust로 다시 구현한 것이다. 다시 구현한 동작은 스크린샷 전달 크기, 줌 기하, 프레임 좌표를 원본 픽셀로
+옮기는 매핑, 절대 포인터 좌표, 프레임 레이아웃 검사, 안정화 루프다. 소스 파일은 복사하지 않았고 C# 파일은
+명세로만 읽었다. 읽기용으로 보관한 원본 사본은 `third_party/hcu-reference/`에 있고 빌드에 들어가지 않는다.
 
-- Project: https://github.com/microsoft/Hybrid-Computer-Use
-- Reference revision: `8ce82b310b014ab1133b28febc2eca81527e43e6` (2026-11-18)
-- License: MIT
+- 프로젝트: https://github.com/microsoft/Hybrid-Computer-Use
+- 기준 리비전: `8ce82b310b014ab1133b28febc2eca81527e43e6` (2026-11-18)
+- 라이선스: MIT
 
 ```
 MIT License

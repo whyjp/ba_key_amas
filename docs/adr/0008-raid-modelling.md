@@ -1,36 +1,35 @@
-# 0008 Raids as difficulty rows with seasons, recognised by screen
+# 0008 레이드는 시즌이 있는 난이도 행으로 모델링하고 화면으로 인식한다
 
-Status: Accepted. Details: [raid-data.md](../raid-data.md).
+상태: 확정. 자세한 내용은 [raid-data.md](../raid-data.md)에 있다.
 
-## Context
-Total assault and similar raids were collected as one row each, with one attack and one armor type taken from
-the Normal difficulty. The raw data has per-difficulty enemy lists, and attack types change from the Insane
-difficulty (Binah Normal to Pierce, Hieronymus Normal to Explosion). The game shows several raid screens, and
-the formation screen shows neither boss nor difficulty.
+## 배경
+총력전과 비슷한 레이드는 레이드마다 한 행으로 수집했고, 공격 타입과 방어 타입도 Normal 난이도의 것 하나만 가져왔다. 원본
+데이터에는 난이도별 적 목록이 있고, 공격 타입은 Insane 난이도부터 바뀐다(비나 Normal은 관통, 히에로니무스 Normal은
+폭발). 게임에는 레이드 화면이 여러 가지이고, 편성 화면은 보스도 난이도도 보여 주지 않는다.
 
-## Decision
-- Database: `raid_difficulty` and `raid_difficulty_enemy` per raid kind, id and difficulty index (Normal,
-  Hard, VeryHard, Hardcore, Extreme, Insane, Torment, Lunatic), seasons of both modes, a display name for
-  time attacks, schema versioned with a clear error for an older file.
-- Lookup: by name (returns all candidates, never the first), difficulties, the season active at `now`
-  or the nearest, and a conversion to the same brief that missions use.
-- Screens: `extract` recognises each raid screen from header and anchor words (select, mock boss list, room info,
-  three formation modes, unrestricted raid pages, time attack, eliminate open or closed). A raid tracker
-  remembers boss, difficulty and mode for the formation screen.
-- A raid has up to four parties; the verdict is for the party being edited and says so.
+## 결정
+- 데이터베이스: 레이드 종류, id, 난이도 인덱스(Normal, Hard, VeryHard, Hardcore, Extreme, Insane, Torment, Lunatic)별로
+  `raid_difficulty`와 `raid_difficulty_enemy`를 둔다. 두 모드의 시즌, 종합전술시험의 표시 이름도 담는다. 스키마에 버전을
+  붙이고 오래된 파일에는 명확한 오류를 낸다.
+- 조회: 이름으로 찾고(후보를 모두 돌려주며 첫 번째만 고르지 않는다), 난이도를 찾고, `now`에 진행 중이거나 가장 가까운
+  시즌을 찾고, 임무가 쓰는 것과 같은 브리프로 변환한다.
+- 화면: `extract`가 헤더와 앵커 단어로 레이드 화면을 하나씩 인식한다(선택, 모의총력전 보스 목록, 방 정보, 편성 모드 셋,
+  제약해제결전 페이지, 종합전술시험, 열린 대결전과 닫힌 대결전). 레이드 추적기가 편성 화면을 위해 보스, 난이도, 모드를
+  기억한다.
+- 레이드의 부대는 최대 넷이다. 판정은 편집 중인 부대에 대한 것이며 카드에 그렇게 표시한다.
 
-## Alternatives
-- One row per raid is wrong from Insane and for multi-part bosses.
-- Multi-party optimisation was not built because no rules data exists.
+## 대안
+- 레이드마다 행 하나는 Insane부터와 부위가 여럿인 보스에서 틀린다.
+- 여러 부대를 함께 최적화하는 기능은 규칙 데이터가 없어서 만들지 않았다.
 
-## Consequences
-- 15 of 15 mock bosses resolve to DB armor consistent with the screen after the weighting model (ADR 0006).
-- The terrain tab on the mock list is a colour, not text, so the card shows it as a choice and does not resolve it.
-- Unlearned: scrolled Insane and higher rows, the real eliminate screen (closed until its season), the quick
-  formation popup over a raid formation.
+## 결과
+- 모의총력전 보스 15개 중 15개가 가중 모델(결정 기록 0006) 적용 뒤 화면과 맞는 DB 방어 타입으로 연결된다.
+- 모의총력전 목록의 지형 탭은 글자가 아니라 색이다. 카드는 이를 선택지로 보여 주며 확정하지 않는다.
+- 학습하지 못한 것: 스크롤한 Insane 이상의 행, 실제 대결전 화면(시즌이 열릴 때까지 닫혀 있음), 레이드 편성 위에 뜬
+  빠른 편성 팝업.
 
-## Evidence
+## 근거
 `fixtures/screens/raid-*`, `extract/src/raid.rs`, `assist/src/raid_lookup.rs`, `docs/raid-data.md`.
 
-## Revisit when
-Eliminate raids open, or the game changes the raid UI.
+## 다시 볼 조건
+대결전이 열릴 때, 또는 게임이 레이드 UI를 바꿀 때.

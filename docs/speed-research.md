@@ -1,194 +1,193 @@
-# Speed research: screen recognition and reaction time
+# 화면 인식과 반응 시간 조사
 
-Machine: Ryzen 7 5700X (8 cores), RTX 3080 Ti, desktop 3640x2160, the game's client 1289x967 native (4:3).
-Other agents were building and running on the same machine, so every timing below is a median of 3 to 10
-runs and can move by 10 to 25 percent between sessions (the same quick-formation OCR read 534, 557, 562 and
-667 ms in four sessions). Differences smaller than that are noise. Nothing here sent input to the game; the
-only desktop contact is read-only `BitBlt` captures.
+측정 환경은 Ryzen 7 5700X(8코어), RTX 3080 Ti, 데스크톱 3640x2160이고 게임 클라이언트는 1289x967 네이티브(4:3)이다.
+같은 머신에서 다른 에이전트들이 빌드와 실행을 하고 있었으므로 아래 시간은 모두 3~10회 실행의 중앙값이며
+세션마다 10~25퍼센트 달라질 수 있다(같은 빠른 편성 OCR이 네 세션에서 534, 557, 562, 667 ms로 읽혔다).
+그보다 작은 차이는 잡음이다. 게임에 입력을 보낸 적은 없고 데스크톱에 닿은 것은 읽기 전용 `BitBlt` 캡처뿐이다.
 
-## Tools (all rerunnable, none touches the game except read-only captures)
+## 도구 (모두 다시 실행할 수 있고 읽기 전용 캡처 외에는 게임을 건드리지 않는다)
 
-| tool | what it answers |
+| 도구 | 답하는 질문 |
 |---|---|
-| `cargo run --release -p baocr-ocr --example speed_lab [--features directml] [variant ...]` | ONNX Runtime and pipeline options and DirectML: time and text equality against the committed `fixtures/screens/*.boxes.txt` (15 frames) and against the library defaults |
-| `cargo run --release -p baocr --example speed_timeline` (`SLEEP=1`, `LIVE=1`, `WATCH=secs`) | per-stage costs offline, sleep granularity, live capture split (layout / BitBlt / resize), single-grab prototype, cheaper frame key, passive watching of the player's own play |
-| `cargo run --release -p baocr --example speed_quick` | 편성 > 빠른 편성: card reading with OCR cut to the grid or to the label bands, recogniser vs CTC split, label-ink cache, popup-open test from pixels |
-| `cargo run --release -p baocr --example speed_model` (env `CAPTURE KEY OCR OBSERVE GRID_OCR BAND_OCR DML_OCR CLICK_LAG`) | a model of the loop in `cli/src/assist.rs`: reaction time per policy for a click or a scroll stop, Monte Carlo over the loop's phase |
-| `cargo test -p baocr-ocr --release [--features directml] --test fixtures` | the engine reads the fixtures within the committed bound on CPU and on DirectML |
+| `cargo run --release -p baocr-ocr --example speed_lab [--features directml] [variant ...]` | ONNX Runtime과 파이프라인 옵션, DirectML. 커밋된 `fixtures/screens/*.boxes.txt`(15프레임)와 라이브러리 기본값 대비 시간과 텍스트 일치 여부 |
+| `cargo run --release -p baocr --example speed_timeline` (`SLEEP=1`, `LIVE=1`, `WATCH=secs`) | 오프라인 단계별 비용, sleep 단위, 라이브 캡처 분해(layout / BitBlt / resize), 단일 캡처 프로토타입, 더 싼 프레임 키, 플레이어 자신의 플레이를 수동 관찰 |
+| `cargo run --release -p baocr --example speed_quick` | 편성 > 빠른 편성. OCR을 격자나 라벨 띠로 줄였을 때의 카드 읽기, 인식기와 CTC 분리, 라벨 잉크 캐시, 픽셀로 보는 팝업 열림 검사 |
+| `cargo run --release -p baocr --example speed_model` (환경 변수 `CAPTURE KEY OCR OBSERVE GRID_OCR BAND_OCR DML_OCR CLICK_LAG`) | `cli/src/assist.rs` 루프의 모델. 클릭이나 스크롤 정지에 대한 정책별 반응 시간을 루프 위상에 대한 몬테카를로로 계산 |
+| `cargo test -p baocr-ocr --release [--features directml] --test fixtures` | 엔진이 CPU와 DirectML에서 픽스처를 커밋된 오차 범위 안에서 읽는지 확인 |
 
-## 1. Where the time goes (quick formation, before the changes marked done in section 7)
+## 1. 시간이 어디에 쓰이는가
 
-Reaction = from the screen reaching its final state to the card being on screen. Stage costs, measured:
+7번 항목에서 완료로 표시한 변경 이전의 빠른 편성 기준이다. 반응 시간은 화면이 최종 상태가 된 때부터 카드가 화면에 뜰 때까지이다.
+단계별 비용은 다음과 같다.
 
-| stage | cost | note |
+| 단계 | 비용 | 비고 |
 |---|---|---|
-| wait for the loop to look (idle pause 300 ms + the loop's own work) | 0 to 410 ms, mean about 205 | the loop only looks every capture + key + 300 ms while idle |
-| capture (`game_capture`) | 84 to 125 ms | two zooms. One `BitBlt` costs 15 to 17 ms whatever its size (a 64x48 grab costs 16.6 ms, the full client 15.4 to 16.5), so about 33 ms is the floor of two grabs; the rest is two CatmullRom resizes per half (to the HCU zoom size, then to 1280x480), conversion and stitching. `layout()` is 0.1 ms: not a cost |
-| `frame_key` + distance | 6.4 to 9.0 ms | a CatmullRom resize of 1.2 MP to 32x32 |
-| settle wait: pause + a second matching capture | 62 ms + capture + key, about 175 ms | `still >= 1` needs two equal frames |
-| `ocr.boxes` (det + rec), quick-formation | 475 to 667 ms | see 2 |
-| `read_card_names` | 85 to 115 ms | recogniser 75 to 83 ms (about 6.5 ms per label), CTC scoring over 281 names 13 to 22 percent |
-| classify + `present` | under 1 ms | not a cost |
-| overlay thread's next poll | 0 to 90 ms, mean 45 | now removed, see section 5 |
-| draw (`UpdateLayeredWindow`) | a few ms | the render is cached |
+| 루프가 화면을 볼 때까지 대기 (유휴 대기 300 ms + 루프 자체 작업) | 0~410 ms, 평균 약 205 | 유휴 상태의 루프는 캡처 + 키 + 300 ms마다 한 번만 본다 |
+| 캡처 (`game_capture`) | 84~125 ms | 줌 두 번. `BitBlt` 한 번은 크기와 무관하게 15~17 ms이다(64x48 캡처 16.6 ms, 클라이언트 전체 15.4~16.5 ms). 따라서 캡처 두 번의 하한은 약 33 ms이고 나머지는 절반마다 두 번 하는 CatmullRom 리사이즈(HCU 줌 크기로, 다시 1280x480으로)와 변환, 이어 붙이기이다. `layout()`은 0.1 ms라 비용이 아니다 |
+| `frame_key` + 거리 계산 | 6.4~9.0 ms | 1.2 MP를 32x32로 줄이는 CatmullRom 리사이즈 |
+| 안정화 대기: 대기 + 두 번째 일치 캡처 | 62 ms + 캡처 + 키, 약 175 ms | `still >= 1`은 같은 프레임 두 장을 요구한다 |
+| `ocr.boxes` (검출 + 인식), 빠른 편성 | 475~667 ms | 2번 항목 참고 |
+| `read_card_names` | 85~115 ms | 인식기 75~83 ms(라벨당 약 6.5 ms), 281개 이름에 대한 CTC 점수 계산이 13~22퍼센트 |
+| 분류 + `present` | 1 ms 미만 | 비용이 아니다 |
+| 오버레이 스레드의 다음 폴링 | 0~90 ms, 평균 45 | 지금은 제거했다. 5번 항목 참고 |
+| 그리기 (`UpdateLayeredWindow`) | 몇 ms | 렌더 결과를 캐시한다 |
 
-`thread::sleep` is exact on this machine (30 ms lasts 30.3 ms, 60 ms lasts 60.3 ms): the 30 ms wait slices cost nothing extra.
+이 머신에서 `thread::sleep`은 정확하다(30 ms는 30.3 ms, 60 ms는 60.3 ms). 30 ms 대기 조각이 추가 비용을 만들지 않는다.
 
-Modelled reaction (`speed_model`, quick-formation costs: capture 110, key 7, OCR 534, cards 87, mean ms, 4000 runs each):
+모델 반응 시간(`speed_model`, 빠른 편성 비용으로 캡처 110, 키 7, OCR 534, 카드 87, 평균 ms, 정책마다 4000회):
 
-| policy | click, instant cut | click, 250 ms slide-in | scroll stop (inertia 100 ms) |
+| 정책 | 클릭, 즉시 전환 | 클릭, 250 ms 슬라이드 인 | 스크롤 정지 (관성 100 ms) |
 |---|---|---|---|
-| today | 1125 | 1009 | 996 |
-| overlay wake | 1079 | 963 | 950 |
-| settle pause 20 ms | 1095 | 967 | 958 |
-| fast frame key | 1106 | 994 | 982 |
-| idle pause 150 ms | 1050 | 1011 | 1000 |
+| 현재 | 1125 | 1009 | 996 |
+| 오버레이 깨우기 | 1079 | 963 | 950 |
+| 안정화 대기 20 ms | 1095 | 967 | 958 |
+| 빠른 프레임 키 | 1106 | 994 | 982 |
+| 유휴 대기 150 ms | 1050 | 1011 | 1000 |
 | DirectML (OCR 190 ms) | 781 | 665 | 652 |
-| DirectML + wake + settle 20 + fast key | 686 | 561 | 552 |
-| band-rec free text, when the scene is known (OCR 77 ms) | 668 | 552 | 539 |
-| wake + band-rec + input hints | 471 | 420 | 384 |
-| wake + band-rec + speculative OCR + hints + settle 20 + fast key | 295 | 324 | 339 |
+| DirectML + 깨우기 + 안정화 20 + 빠른 키 | 686 | 561 | 552 |
+| 띠 단위 인식으로 자유 텍스트 읽기, 화면 종류를 알 때 (OCR 77 ms) | 668 | 552 | 539 |
+| 깨우기 + 띠 단위 인식 + 입력 힌트 | 471 | 420 | 384 |
+| 깨우기 + 띠 단위 인식 + 선행 OCR + 힌트 + 안정화 20 + 빠른 키 | 295 | 324 | 339 |
 
-The model is optimistic for speculative OCR, because it assumes the background OCR costs the loop nothing. It is also
-optimistic for hints, because it assumes the guessed look times match the game's real animation. The 600 ms and the
-250 ms inertia rows of `speed_model` show one wrong guess, where hints make things worse than the today row, up to 1.6 s. The click-lag, the
-animation length and the scroll inertia are inputs, not measurements, so they need a live test.
+이 모델은 선행(speculative) OCR에 낙관적이다. 백그라운드 OCR이 루프에 비용을 주지 않는다고 가정하기 때문이다. 힌트에도
+낙관적이다. 추측한 확인 시점이 게임의 실제 애니메이션과 맞는다고 가정한다. `speed_model`의 600 ms 행과 250 ms 관성 행은
+추측이 한 번 틀린 경우를 보여 주며, 이때 힌트는 현재 행보다 나빠져 최대 1.6초가 걸린다. 클릭 지연, 애니메이션 길이, 스크롤 관성은
+측정값이 아니라 입력값이므로 라이브 테스트가 필요하다.
 
-## 2. OCR cost
+## 2. OCR 비용
 
-All variants of `speed_lab`, 15 fixture frames, sum of per-frame median ms; "identical" = frames whose text boxes equal the
-library-default output (committed fixtures: the default itself reads 13 of 15 frames as committed, with 2 boxes drifted).
+`speed_lab`의 모든 변형을 15개 픽스처 프레임에서 돌린 결과이며 프레임별 중앙값(ms)의 합이다. "동일"은 텍스트 박스가
+라이브러리 기본 출력과 같은 프레임을 뜻한다(커밋된 픽스처 기준으로 기본값 자체는 15프레임 중 13프레임을 커밋된 대로 읽고 박스 2개가 어긋난다).
 
-| idea | sum ms (baseline 4750 to 5000) | quick-formation | identical frames | verdict |
+| 아이디어 | 합계 ms (기준 4750~5000) | 빠른 편성 | 동일 프레임 | 판정 |
 |---|---|---|---|---|
-| explicit empty ORT config | 4824 | 553 | 15/15 | same as default |
-| intra threads 1 / 2 / 4 / 6 / 8 / 12 / 16 | 11694 / 7267 / 5251 / 5133 / 5149 / 4865 / 4849 | 1381 / 863 / 582 / 542 / 612 / 541 / 574 | 15/15 | the default (all cores) is already at the optimum; fewer threads is slower |
-| graph optimisation off / L2 / L3 | 6569 / 6458 / 4775 | 756 / 789 / 565 | 15/15 | default equals L3 |
-| memory pattern on / off | 4727 / 4763 | 554 / 561 | 15/15 | noise |
-| parallel execution, inter 2 | 4821 | 561 | 15/15 | noise |
-| rec batch 1 / 2 / 8 / 16 / 32 / 64 | 6751 / 6377 / 5593 / 8226 / 11652 / 12546 | 794 / 658 / 615 / 984 / 1423 / 1823 | 14 / 14 / 12 / 8 / 8 / 8 of 15 | slower and not equal: padding in a batch changes what a line reads as. The CPU default of 4 is the best and now fixed in code |
-| det limit_side_len 800 / 736 / 640 / 512 | 4379 / 4261 / 3861 / 3496 | 491 / 428 / 364 / 325 | 1/15 each | faster (640: 25 percent less) but the text of nearly every frame changes: disqualified without a per-screen accuracy study |
-| det at full resolution (1280) | 5949 | 578 | 1/15 | slower and different |
-| DirectML, rec batch 64 (the GPU default) | 1447 | 152 | 8/15 | fast but reads 10 boxes differently |
-| **DirectML, rec batch 4** | **1710 to 1735** | **185 to 190** | **15/15** | **2.7x faster, same text as the CPU on all 15 frames** |
-| DirectML, rec batch 1 / 8 | 3002 / 1506 | 350 / 157 | 14 / 12 of 15 | worse than 4 |
+| 명시적 빈 ORT 설정 | 4824 | 553 | 15/15 | 기본값과 같음 |
+| intra 스레드 1 / 2 / 4 / 6 / 8 / 12 / 16 | 11694 / 7267 / 5251 / 5133 / 5149 / 4865 / 4849 | 1381 / 863 / 582 / 542 / 612 / 541 / 574 | 15/15 | 기본값(전체 코어)이 이미 최적이다. 스레드를 줄이면 느려진다 |
+| 그래프 최적화 끔 / L2 / L3 | 6569 / 6458 / 4775 | 756 / 789 / 565 | 15/15 | 기본값이 L3와 같음 |
+| 메모리 패턴 켬 / 끔 | 4727 / 4763 | 554 / 561 | 15/15 | 잡음 |
+| 병렬 실행, inter 2 | 4821 | 561 | 15/15 | 잡음 |
+| 인식 배치 1 / 2 / 8 / 16 / 32 / 64 | 6751 / 6377 / 5593 / 8226 / 11652 / 12546 | 794 / 658 / 615 / 984 / 1423 / 1823 | 15개 중 14 / 14 / 12 / 8 / 8 / 8 | 느리고 결과도 다르다. 배치 안의 패딩이 줄의 읽힘을 바꾼다. CPU 기본값 4가 최선이며 지금은 코드에 고정했다 |
+| 검출 limit_side_len 800 / 736 / 640 / 512 | 4379 / 4261 / 3861 / 3496 | 491 / 428 / 364 / 325 | 각각 1/15 | 빠르지만(640은 25퍼센트 감소) 거의 모든 프레임의 텍스트가 바뀐다. 화면별 정확도 연구 없이는 탈락 |
+| 전체 해상도 검출 (1280) | 5949 | 578 | 1/15 | 느리고 결과도 다르다 |
+| DirectML, 인식 배치 64 (GPU 기본값) | 1447 | 152 | 8/15 | 빠르지만 박스 10개를 다르게 읽는다 |
+| **DirectML, 인식 배치 4** | **1710~1735** | **185~190** | **15/15** | **2.7배 빠르고 15프레임 모두 CPU와 같은 텍스트** |
+| DirectML, 인식 배치 1 / 8 | 3002 / 1506 | 350 / 157 | 15개 중 14 / 12 | 4보다 나쁨 |
 
-DirectML cold run: the first call costs 444 ms once (kernel setup); later first-time frames cost the same as warm ones
-(sum of cold runs 2123 ms against 1710 warm), so new screen shapes do not recompile. Session creation 400 to 560 ms
-against 170 ms. The runtime copies `DirectML.dll` beside the exe (it must ship with it).
-Per frame, lobby-idle falls from 87 to 104 ms to 19 to 21 ms, and quick-formation from 547 ms to 185 to 190 ms.
+DirectML 콜드 런은 첫 호출이 한 번 444 ms(커널 준비)이고 이후 처음 보는 프레임은 워밍업된 프레임과 비용이 같다
+(콜드 런 합계 2123 ms, 워밍업 후 1710 ms). 따라서 새 화면 모양에서 다시 컴파일하지 않는다. 세션 생성은 170 ms 대신
+400~560 ms이다. 런타임은 `DirectML.dll`을 exe 옆에 복사하므로 함께 배포해야 한다.
+프레임당 로비 유휴는 87~104 ms에서 19~21 ms로, 빠른 편성은 547 ms에서 185~190 ms로 줄어든다.
 
-Not a win, measured:
-- Three OCR strips (header, popup-title band, bottom bar) to classify the scene instead of the whole frame: 100 to 350 ms,
-  not clearly cheaper than 100 to 560 ms of the full frame (per-call overhead), same scene on all frames that classify.
-- Parallel `choose` over cards: 96 to 70 ms in one session, 249 to 113 ms in another. The recogniser session is behind a mutex,
-  so only the CTC share (13 to 22 percent) parallelises. The gain is small.
+이득이 없었던 것(측정함):
+- 프레임 전체 대신 OCR 띠 세 개(머리글, 팝업 제목 띠, 하단 바)로 화면 종류를 분류: 100~350 ms. 전체 프레임의 100~560 ms보다
+  뚜렷하게 싸지 않고(호출당 오버헤드) 분류되는 프레임에서는 화면 종류가 같았다.
+- 카드에 대한 병렬 `choose`: 한 세션에서 96 -> 70 ms, 다른 세션에서 249 -> 113 ms. 인식기 세션이 뮤텍스 뒤에 있어서
+  CTC 몫(13~22퍼센트)만 병렬화된다. 이득이 작다.
 
-Detector versus recogniser cost: sparse screens are detector dominated (lobby-idle 101 ms falls to 25 ms at limit 512), dense ones
-split roughly 60/40 (quick-formation 562 -> 325). Running only the recogniser on known boxes of template screens would
-therefore save up to 60 to 70 percent on them. It is not prototyped. It needs a template matcher and a safety check per screen,
-and DirectML already takes the detector to a few tens of milliseconds.
+검출기와 인식기 비용을 비교하면 글자가 적은 화면은 검출기가 지배한다(로비 유휴 101 ms가 limit 512에서 25 ms로 줄어든다).
+빽빽한 화면은 대략 60/40으로 나뉜다(빠른 편성 562 -> 325). 따라서 템플릿 화면의 알려진 박스에서 인식기만 돌리면 그런 화면에서
+60~70퍼센트까지 줄일 수 있다. 프로토타입은 만들지 않았다. 템플릿 매처와 화면별 안전 검사가 필요하고 DirectML이 이미 검출기를
+수십 ms로 낮춘다.
 
-## 3. 편성 > 빠른 편성, the three cases the user named
+## 3. 편성 > 빠른 편성, 사용자가 꼽은 세 경우
 
-Everything for quick formation is in `speed_quick` (fixtures `quick-formation*`, 4 frames, 12 cards each).
+빠른 편성에 관한 모든 것은 `speed_quick`에 있다(픽스처 `quick-formation*`, 4프레임, 프레임마다 카드 12장).
 
-1. Scroll stops. At baseline, the settle wait is about 175 ms, full-frame OCR 475 to 565 ms and `read_card_names` 85 to 115 ms.
-   * OCR only the grid and its tabs (crop x 560, y 300, 720x360): 231 to 358 ms instead of 476 to 565 ms; the cards read are
-     identical on 4 of 4 frames (`read_card_names` 82 to 95 ms).
-   * Free text per label band only (one recogniser call on each 92 px wide label band, 75 to 78 ms for 12 labels, no detector):
-     cards identical on 4 of 4 frames. Together with the card reading about 165 ms instead of about 620 ms (full OCR plus cards),
-     measured offline. Reading cards with no free text at all differs on 1 of 4 frames (a card is missed), so the band read is
-     what keeps it safe.
-   * Both only apply when the scene is already known to be 빠른 편성 and the popup is still there (`quick_tab_is_striker` is
-     `Some`); the first frame of a new screen still needs the whole frame.
-   * Reusing names across scroll steps: the label ink of the same card at another position differs by a Jaccard distance of
-     0.04 to 0.13 (same capture noise) while different cards are 0.36 or more apart (18 same-name pairs and 6 unmatched cards
-     in the two fixture pairs). A cache keyed on the ink with a 0.2 threshold would skip about half the cards after a short
-     scroll (6 of 12 here), about 40 ms. An exact hash does not work (0 hits even for two captures of the same view).
-2. The popup closes (back on 편성). `quick_tab_is_striker` and `quick_card_labels` are pixel tests of 0.00 to 0.01 ms and 0.06 to 0.18 ms:
-   `Some` on 4 of 4 popup frames and `None` on all 21 other fixture frames. That is a free "the popup is gone" signal, so
-   the icons can come down in the first looked-at frame, and the scene can be read from the first still frame. There is no
-   편성-screen PNG fixture (only `squad.boxes.txt`), so recognition of the closed state was not timed or reproduced;
-   why it failed once is not known from this data. With DirectML a full read of a formation-like screen is 20 to 200 ms.
-3. Leaving for a battle or the base formation. The `transition()` fix takes the icons down on the first changed frame,
-   which the loop sees after 0 to 410 ms (idle wait) plus 125 ms (capture plus key). Input hints cut the first part to about
-   the click time + the first-look delay.
+1. 스크롤이 멈출 때. 기준선에서 안정화 대기는 약 175 ms, 전체 프레임 OCR은 475~565 ms, `read_card_names`는 85~115 ms이다.
+   * 격자와 탭만 OCR(크롭 x 560, y 300, 720x360): 476~565 ms 대신 231~358 ms. 읽은 카드는 4프레임 모두 동일하다
+     (`read_card_names` 82~95 ms).
+   * 라벨 띠마다 자유 텍스트만 읽기(폭 92 px 라벨 띠마다 인식기를 한 번 호출, 라벨 12개에 75~78 ms, 검출기 없음):
+     카드는 4프레임 모두 동일하다. 카드 읽기까지 합치면 약 165 ms이고 전체 OCR + 카드의 약 620 ms보다 줄어든다(오프라인 측정).
+     자유 텍스트 없이 카드만 읽으면 4프레임 중 1프레임이 달라진다(카드 하나를 놓친다). 띠 읽기가 안전을 지켜 주는 부분이다.
+   * 두 방법 모두 화면 종류가 이미 빠른 편성으로 알려져 있고 팝업이 아직 떠 있을 때만(`quick_tab_is_striker`가
+     `Some`) 쓸 수 있다. 새 화면의 첫 프레임은 여전히 프레임 전체가 필요하다.
+   * 스크롤 단계 사이에서 이름 재사용: 같은 카드의 라벨 잉크는 위치가 달라도 Jaccard 거리가 0.04~0.13이고(같은 캡처 잡음)
+     다른 카드끼리는 0.36 이상 떨어진다(픽스처 쌍 두 개에서 같은 이름 쌍 18개, 짝 없는 카드 6개). 임계값 0.2로 잉크를
+     키로 삼은 캐시는 짧은 스크롤 뒤에 카드의 약 절반(여기서는 12장 중 6장)을 건너뛰어 약 40 ms를 줄인다. 정확한 해시는
+     쓸 수 없다(같은 화면을 두 번 캡처해도 적중 0).
+2. 팝업이 닫힐 때(편성으로 복귀). `quick_tab_is_striker`와 `quick_card_labels`는 픽셀 검사이고 각각 0.00~0.01 ms,
+   0.06~0.18 ms이다. 팝업 프레임 4개 모두 `Some`이고 나머지 픽스처 프레임 21개 모두 `None`이다. 비용 없이 "팝업이 사라졌다"는
+   신호를 얻으므로 처음 본 프레임에서 아이콘을 내릴 수 있고 첫 안정 프레임에서 화면을 읽을 수 있다. 편성 화면 PNG 픽스처는
+   없다(`squad.boxes.txt`뿐). 그래서 닫힌 상태의 인식은 시간도 재지 못했고 재현하지도 못했으며, 한 번 실패한 이유는 이 데이터로
+   알 수 없다. DirectML을 쓰면 편성과 비슷한 화면 전체를 읽는 데 20~200 ms가 걸린다.
+3. 전투나 기본 편성으로 나갈 때. `transition()` 수정은 바뀐 첫 프레임에서 아이콘을 내리며, 루프는 이 프레임을 0~410 ms(유휴 대기)
+   + 125 ms(캡처와 키) 뒤에 본다. 입력 힌트를 쓰면 앞의 대기를 클릭 시각 + 첫 확인 지연 정도로 줄일 수 있다.
 
-## 4. Settle and poll policy
+## 4. 안정화와 폴링 정책
 
-* Frame keys of two captures of the same view (quick-formation vs its `-live-a` recapture) are 1.46 apart against `STILL = 1.5`. The
-  threshold is tight, so an exact-hash revisit cache is not possible, and any key change must keep the distances. The block-mean key
-  (`fast_frame_key`) gives 1.38 for that pair, 5.19 against 5.28, 75.85 against 76.09: within 0.3 on every pair tried, same side of 1.5
-  on all 15 pairs in the unit test.
-* Pause lengths: settling 20 ms (60 ms when measured), idle 300 ms, battle 400 ms. A shorter idle pause cuts the wait for the first look (model: 150 ms
-  saves about 75 ms for an instant cut, nothing for animated ones) and costs capture CPU all the time (about a quarter of a core now:
-  125 ms every 410). Better: short idle only inside 빠른 편성, where the reaction matters. Not done (needs the scene in the loop's state).
-* Speculative OCR on the first changed frame, confirmed by the next matching frame: model saves up to 180 ms for an instant cut,
-  nothing for scrolls (every frame moves, jobs are wasted), and loads every core while the next capture runs. Worth trying
-  only with DirectML (the GPU does the work). Not built.
-* Capture: a single `BitBlt` of the client plus one CatmullRom resize measured 49 to 74 ms against 84 to 125 ms for `game_capture`,
-  but the frame differs (mean abs difference 1.4 levels, key distance 0.2) and OCR read 27 boxes against 28 and 28 against 29 on
-  the live frame. The ROI calibrations were made on `game_capture` frames, so this is not safe as is. A safer cut in `hcu/capture.rs`
-  (a merged module, so a proposal): run the two half captures fully in parallel (two `BitBlt`s are 33 ms of the total), same numerics.
+* 같은 화면을 두 번 캡처한 프레임 키(빠른 편성과 그 `-live-a` 재캡처)는 `STILL = 1.5`에 대해 1.46 차이이다.
+  임계값이 빠듯하므로 정확한 해시로 재방문 캐시를 만들 수 없고 키를 바꿀 때도 거리를 유지해야 한다. 블록 평균 키
+  (`fast_frame_key`)는 그 쌍에서 1.38, 5.19 대 5.28, 75.85 대 76.09를 준다. 시험한 모든 쌍에서 0.3 이내이고 단위 테스트의 15쌍
+  모두 1.5의 같은 쪽에 있다.
+* 대기 길이: 안정화 20 ms(측정 시 60 ms), 유휴 300 ms, 전투 400 ms. 유휴 대기를 줄이면 첫 확인까지의 대기가 짧아지고(모델상 150 ms면
+  즉시 전환에서 약 75 ms 절약, 애니메이션 전환에서는 절약 없음) 캡처 CPU를 상시 쓴다(지금은 코어 하나의 약 4분의 1: 410 ms마다 125 ms).
+  더 나은 안은 반응이 중요한 빠른 편성 안에서만 유휴 대기를 짧게 하는 것이다. 아직 하지 않았다(루프 상태에 화면 종류가 필요하다).
+* 바뀐 첫 프레임에서 선행 OCR을 돌리고 다음 일치 프레임으로 확정하기: 모델상 즉시 전환에서 최대 180 ms를 줄이고, 스크롤에서는
+  줄이는 것이 없으며(프레임이 매번 움직여서 작업이 버려진다) 다음 캡처가 도는 동안 모든 코어에 부하를 준다. DirectML에서만
+  해볼 만하다(GPU가 일한다). 만들지 않았다.
+* 캡처: 클라이언트 `BitBlt` 한 번과 CatmullRom 리사이즈 한 번은 `game_capture`의 84~125 ms 대신 49~74 ms로 측정되었다.
+  그러나 프레임이 다르고(평균 절대 차이 1.4 레벨, 키 거리 0.2) 라이브 프레임에서 OCR이 박스를 28개 대신 27개, 29개 대신 28개
+  읽었다. ROI 보정은 `game_capture` 프레임으로 만들었으므로 이대로는 안전하지 않다. 더 안전한 절감 방법은 `hcu/capture.rs`
+  (병합된 모듈이라 제안이다)에서 절반 캡처 두 번을 완전히 병렬로 돌리는 것이다(`BitBlt` 두 번이 전체의 33 ms이고 수치는 같다).
 
-## 5. Overlay response
+## 5. 오버레이 반응
 
-The overlay thread polled every 90 ms (16 ms while dragging): a state change waited 0 to 90 ms, mean 45. It now waits on a
-condition variable that every state setter signals, and still wakes at the same intervals for window messages and clicks.
-Unit tests cover the primitive (`overlay/src/wake.rs`); the saved 45 ms mean is arithmetic, not a pixel measurement
-(pixels cannot be observed from the process). The card was already cached (`render_panel_hits` memo), so the draw is a few ms.
+오버레이 스레드는 90 ms마다 폴링했다(드래그 중에는 16 ms). 그래서 상태 변경이 0~90 ms, 평균 45 ms를 기다렸다. 지금은 모든
+상태 설정 함수가 신호를 보내는 조건 변수를 기다리고, 창 메시지와 클릭을 위해서는 같은 간격으로 여전히 깨어난다.
+기본 동작은 단위 테스트로 확인한다(`overlay/src/wake.rs`). 평균 45 ms 절감은 산술값이며 픽셀 측정이 아니다(프로세스 안에서는
+픽셀을 관찰할 수 없다). 카드는 이미 캐시되어 있었으므로(`render_panel_hits` 메모) 그리기는 몇 ms이다.
 
-## 6. Input hints (experimental, off by default)
+## 6. 입력 힌트 (실험적, 기본 꺼짐)
 
-`overlay/src/hints.rs`. A passive `WH_MOUSE_LL` hook thread (`InputHints`) timestamps only left-button and wheel events that are
-inside the game's client rectangle. The callback tests with atomics, takes no lock and allocates nothing. It drops events outside the
-rectangle at once, ignores injected events, never looks at mouse moves, keys or anything else, and logs nothing. `try_send` on a bounded queue
-never blocks. The hook always calls `CallNextHookEx`, so nothing is intercepted or forwarded. The pure part, `HintScheduler`, turns events into
-requests. A click asks for a look after 80 ms and a trusted single-frame look after 450 ms (no second matching frame needed). A wheel burst
-or a held-button drag asks for a trusted look 160 ms after the last turn. A click inside a configured hot zone (for example the close
-button of 빠른 편성) asks for an immediate pre-empt that takes the old icons down. There are 8 unit tests; the real hook was not run.
+`overlay/src/hints.rs`. 수동 `WH_MOUSE_LL` 훅 스레드(`InputHints`)가 게임 클라이언트 사각형 안의 왼쪽 버튼과 휠 이벤트에만 시각을
+기록한다. 콜백은 원자 변수로 판단하고 락을 잡지 않으며 할당도 하지 않는다. 사각형 밖 이벤트는 바로 버리고 주입된 이벤트는
+무시하며 마우스 이동, 키, 그 밖의 것은 보지 않고 아무것도 기록하지 않는다. 크기가 한정된 큐에 대한 `try_send`는 막히지 않는다.
+훅은 항상 `CallNextHookEx`를 호출하므로 가로채거나 전달하는 것이 없다. 순수 부분인 `HintScheduler`가 이벤트를 요청으로
+바꾼다. 클릭은 80 ms 뒤 확인과 450 ms 뒤 신뢰 단일 프레임 확인(두 번째 일치 프레임이 필요 없음)을 요청한다. 휠 연타나 버튼을
+누른 채 드래그하면 마지막 회전 160 ms 뒤에 신뢰 확인을 요청한다. 설정된 핫존 안의 클릭(예: 빠른 편성의 닫기 버튼)은 옛 아이콘을
+내리는 즉시 선점을 요청한다. 단위 테스트는 8개이고 실제 훅은 실행하지 않았다.
 
-Estimated gain (`speed_model`, same cost inputs): about 150 to 200 ms for clicks, 100 to 130 ms for scroll stops, on top of the other changes,
-when the guessed delays fit the game. What needs a live test, and cannot be answered without input: the game's reaction lag after a click, the
-length of its animations (an animation longer than 450 ms makes the trusted look read a half-drawn screen; the model shows +600 ms for that
-case), the scroll inertia (a quiet time shorter than the inertia reads a moving list), whether a held drag also scrolls the grid, and the
-hook's own cost under a high-polling-rate mouse. Recommendation: experiment, gated by a settings flag, after DirectML and band reading are in.
-Hot zones need button positions for the screens that matter (none are known in this repository yet).
+예상 이득(`speed_model`, 같은 비용 입력)은 다른 변경에 더해 클릭에서 약 150~200 ms, 스크롤 정지에서 100~130 ms이며 추측한
+지연이 게임과 맞을 때의 값이다. 입력 없이는 답할 수 없어서 라이브 테스트가 필요한 것은 다음과 같다. 클릭 뒤 게임의 반응 지연,
+애니메이션 길이(450 ms보다 긴 애니메이션이면 신뢰 확인이 그리다 만 화면을 읽는다. 모델은 이 경우 +600 ms를 보여 준다), 스크롤
+관성(조용한 시간이 관성보다 짧으면 움직이는 목록을 읽는다), 버튼을 누른 채 드래그해도 격자가 스크롤되는지, 폴링 레이트가 높은
+마우스에서 훅 자체의 비용. 권장안은 DirectML과 띠 읽기를 넣은 뒤 설정 플래그 뒤에서 실험하는 것이다.
+핫존에는 중요한 화면의 버튼 위치가 필요하다(이 저장소에는 아직 알려진 것이 없다).
 
-## 7. Ranked table
+## 7. 우선순위 표
 
-| # | idea | expected | measured | risk | effort | recommendation |
+| # | 아이디어 | 예상 | 측정 | 위험 | 작업량 | 권고 |
 |---|---|---|---|---|---|---|
-| 1 | OCR on the GPU (DirectML, rec batch 4) | 2 to 3x | 4750 -> 1710 ms over the fixtures, quick-formation 547 -> 187 ms, text identical on 15/15 | the game shares the GPU (a few tens of ms of load per read); `DirectML.dll` to ship; GPU-less machines fall back to CPU by probe (`BAOCR_OCR_DEVICE=cpu` forces it); not soaked for memory over hours | done: feature `directml` in `baocr-ocr` and `baocr` | shipped in the portable package (`scripts/package-portable.ps1`); the live check of the game's frame rate while reading is still open |
-| 2 | quick-formation free text from the label bands only, when the popup is known to be up | reaction -300 to -450 ms for scrolls | 620 ms -> 165 ms offline, cards identical on 4/4 frames | four fixture frames only; wrong band read could miss a card (the full-frame read is the fallback on any doubt) | about 60 lines in the observer/loop (the assistant files belong to another agent: proposal) | **do next**, validate on more live scrolls |
-| 3 | overlay woken on change | -45 ms mean | arithmetic (poll period 90 ms), unit-tested wake | none | done | shipped |
-| 4 | block-mean frame key in the loop | -7 to -9 ms per look | 6.4 -> 0.6 ms, distances within 0.3 | threshold sides equal on 15 fixture pairs; tight 1.5 threshold means a live check | done | shipped |
-| 5 | settling pause 60 -> 20 ms | about -30 to -40 ms | modelled only | more captures during animations (capture is already about 100 ms, so +25 percent) | done (one constant) | shipped, revert if CPU matters |
-| 6 | input hints (click, wheel, hot zones) | -100 to -200 ms | modelled | wrong guesses read half-drawn screens; a global hook | scheduler and hook thread done, loop not wired | **experiment** behind a setting |
-| 7 | speculative OCR on the first changed frame | up to -180 ms for instant cuts | modelled | CPU contention, wasted jobs while scrolling | medium | experiment, only with DirectML |
-| 8 | idle pause shorter inside 빠른 편성 | about -75 ms | modelled | steady capture CPU there | small | maybe |
-| 9 | label-ink cache across scroll steps | about -40 ms | 18/18 same-name pairs under 0.2, 6/6 others over 0.36 | threshold from 4 frames | small | after 2 |
-| 10 | parallel half captures in `hcu/capture.rs` | -30 to -40 ms | not measured; two BitBlts are 33 ms of 84 to 125 | merged module | small | propose |
-| 11 | single BitBlt + one resize | -35 to -50 ms | 49 to 74 vs 84 to 125 ms | frame numerics change, 1 OCR box differs | small | drop unless the ROIs are recalibrated |
-| 12 | ORT thread, optimisation, memory options | none | all within noise or slower | none | none | drop, defaults are optimal |
-| 13 | rec batch or det limit tuning | 25 to 35 percent | batch changes text; limit 640 changes 14/15 frames | accuracy | none | drop |
-| 14 | rec only on known boxes of template screens | up to 60 to 70 percent on those screens | not prototyped | needs per-screen safety | large | skip while DirectML is on |
-| 15 | whole-frame hash cache for revisits | skips OCR on back navigation | not tested live; same-view recaptures are already 1.46 apart | live numbers and timers change the frame | medium | skip |
+| 1 | GPU에서 OCR (DirectML, 인식 배치 4) | 2~3배 | 픽스처 합계 4750 -> 1710 ms, 빠른 편성 547 -> 187 ms, 15/15 텍스트 동일 | 게임과 GPU를 공유(읽을 때마다 수십 ms 부하). `DirectML.dll` 배포 필요. GPU 없는 머신은 프로브로 CPU로 돌아감(`BAOCR_OCR_DEVICE=cpu`로 강제). 몇 시간 동안의 메모리는 검증하지 않음 | 완료: `baocr-ocr`과 `baocr`의 `directml` 기능 | 포터블 패키지에 포함(`scripts/package-portable.ps1`). 읽는 동안 게임 프레임 레이트의 라이브 확인은 아직 열려 있음 |
+| 2 | 팝업이 떠 있다고 알 때 빠른 편성 자유 텍스트를 라벨 띠만으로 읽기 | 스크롤 반응 -300~-450 ms | 오프라인 620 ms -> 165 ms, 4/4 프레임에서 카드 동일 | 픽스처 프레임이 네 개뿐. 띠를 잘못 읽으면 카드를 놓칠 수 있음(의심스러우면 전체 프레임 읽기가 대비책) | 관찰자/루프에 약 60줄(어시스트 파일은 다른 담당자 소관이라 제안) | **다음에 한다**, 라이브 스크롤을 더 모아 검증 |
+| 3 | 변경 시 오버레이 깨우기 | 평균 -45 ms | 산술값(폴링 주기 90 ms), 깨우기는 단위 테스트 | 없음 | 완료 | 적용됨 |
+| 4 | 루프의 블록 평균 프레임 키 | 확인당 -7~-9 ms | 6.4 -> 0.6 ms, 거리 0.3 이내 | 픽스처 쌍 15개에서 임계값 쪽이 같음. 임계값 1.5가 빠듯하므로 라이브 확인 필요 | 완료 | 적용됨 |
+| 5 | 안정화 대기 60 -> 20 ms | 약 -30~-40 ms | 모델링만 | 애니메이션 중 캡처가 늘어남(캡처가 이미 약 100 ms라 +25퍼센트) | 완료 (상수 하나) | 적용됨, CPU가 문제면 되돌림 |
+| 6 | 입력 힌트 (클릭, 휠, 핫존) | -100~-200 ms | 모델링 | 추측이 틀리면 그리다 만 화면을 읽음. 전역 훅 | 스케줄러와 훅 스레드 완료, 루프에는 연결 안 됨 | 설정 뒤에서 **실험** |
+| 7 | 바뀐 첫 프레임에서 선행 OCR | 즉시 전환에서 최대 -180 ms | 모델링 | CPU 경합, 스크롤 중 버려지는 작업 | 중간 | 실험, DirectML에서만 |
+| 8 | 빠른 편성 안에서 유휴 대기 단축 | 약 -75 ms | 모델링 | 거기서 캡처 CPU를 상시 사용 | 작음 | 보류 |
+| 9 | 스크롤 단계 간 라벨 잉크 캐시 | 약 -40 ms | 같은 이름 쌍 18/18이 0.2 미만, 나머지 6/6이 0.36 초과 | 임계값이 프레임 4개에서 나옴 | 작음 | 2번 뒤에 |
+| 10 | `hcu/capture.rs`의 절반 캡처 병렬화 | -30~-40 ms | 측정 안 함. `BitBlt` 두 번이 84~125 중 33 ms | 병합된 모듈 | 작음 | 제안 |
+| 11 | `BitBlt` 한 번 + 리사이즈 한 번 | -35~-50 ms | 49~74 대 84~125 ms | 프레임 수치가 바뀜, OCR 박스 1개가 다름 | 작음 | ROI를 다시 보정하지 않으면 폐기 |
+| 12 | ORT 스레드, 최적화, 메모리 옵션 | 없음 | 모두 잡음 범위이거나 더 느림 | 없음 | 없음 | 폐기, 기본값이 최적 |
+| 13 | 인식 배치나 검출 limit 조정 | 25~35퍼센트 | 배치는 텍스트를 바꿈. limit 640은 15프레임 중 14프레임을 바꿈 | 정확도 | 없음 | 폐기 |
+| 14 | 템플릿 화면의 알려진 박스에서만 인식 | 그런 화면에서 최대 60~70퍼센트 | 프로토타입 없음 | 화면별 안전 장치 필요 | 큼 | DirectML을 쓰는 동안은 건너뜀 |
+| 15 | 재방문용 전체 프레임 해시 캐시 | 뒤로 가기에서 OCR 생략 | 라이브 테스트 안 함. 같은 화면 재캡처가 이미 1.46 차이 | 라이브 숫자와 타이머가 프레임을 바꿈 | 중간 | 건너뜀 |
 
-## Top 3 recommendations
+## 권장 3가지
 
-1. DirectML OCR (`--features directml`) is measured at 2.7x with identical text on all 15 fixtures, and the portable package is built with it (`scripts/package-portable.ps1`). The check of the game's frame rate while it reads is still open.
-2. In 빠른 편성, once the scene is known and the popup pixel test passes, read the free text per label band instead of the whole frame:
-   reaction for scrolls from about 1.0 s to about 0.55 s with the CPU alone (model), and the same pixel test takes icons down at once when the popup closes.
-3. Try input hints as an experimental option; do it after 1 and 2, because the model shows the click and scroll look-times only pay off when OCR is cheap.
+1. DirectML OCR(`--features directml`)은 2.7배로 측정되었고 픽스처 15개 모두에서 텍스트가 같다. 포터블 패키지도 이 기능을 켜고
+   빌드한다(`scripts/package-portable.ps1`). 읽는 동안 게임 프레임 레이트를 확인하는 일은 아직 남아 있다.
+2. 빠른 편성에서 화면 종류를 알고 팝업 픽셀 검사가 통과하면 프레임 전체 대신 라벨 띠마다 자유 텍스트를 읽는다.
+   CPU만으로 스크롤 반응이 약 1.0초에서 약 0.55초로 줄고(모델) 같은 픽셀 검사로 팝업이 닫힐 때 아이콘을 바로 내린다.
+3. 입력 힌트는 실험 옵션으로 시도한다. 1번과 2번 뒤에 한다. 모델상 클릭과 스크롤의 확인 시점은 OCR이 쌀 때만 효과가 있기 때문이다.
 
-## What was not tested
+## 검증하지 못한 것
 
-* Anything with real input: the game's reaction lag, animation lengths, scroll inertia, the real hook (never installed), whether hints help in play.
-* Recognition of the closed-popup (편성) screen: there is no fixture PNG for it; the earlier failure was not reproduced.
-* DirectML over hours (memory), on another GPU or on an integrated GPU, with the game rendering at high load, and the effect on the game's frame rate.
-* CPU use of the idle loop and of the overlay thread after the change (the earlier `OVERLAY=` lever in `perf_loop` exists, not rerun).
-* Speculative OCR, the idle-pause change and the settle-pause change on the live loop (modelled only).
-* DirectML for the closed-set recogniser session (`probs`/`choose`, 6.5 ms per label on CPU): it still runs on the CPU.
-* Passive watching of a real transition: `WATCH=30` saw no motion (the game was idle), so no real animation length was recorded.
+* 실제 입력이 필요한 모든 것: 게임의 반응 지연, 애니메이션 길이, 스크롤 관성, 실제 훅(설치한 적 없음), 힌트가 실제 플레이에서 도움이 되는지.
+* 팝업이 닫힌 화면(편성)의 인식: PNG 픽스처가 없다. 앞서 있었던 실패는 재현하지 못했다.
+* 몇 시간에 걸친 DirectML(메모리), 다른 GPU나 내장 GPU, 게임이 높은 부하로 렌더링할 때, 게임 프레임 레이트에 미치는 영향.
+* 변경 뒤 유휴 루프와 오버레이 스레드의 CPU 사용량(`perf_loop`에 이전 `OVERLAY=` 조절 장치가 있으나 다시 돌리지 않았다).
+* 라이브 루프에서의 선행 OCR, 유휴 대기 변경, 안정화 대기 변경(모델링만 했다).
+* 닫힌 집합 인식기 세션(`probs`/`choose`, CPU에서 라벨당 6.5 ms)의 DirectML 적용: 아직 CPU에서 돈다.
+* 실제 전환의 수동 관찰: `WATCH=30`에서 움직임이 없었으므로(게임이 유휴) 실제 애니메이션 길이는 기록하지 못했다.

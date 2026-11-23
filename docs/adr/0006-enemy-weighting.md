@@ -1,30 +1,29 @@
-# 0006 Enemy armor and attack mix weighted by HP
+# 0006 적의 방어 타입과 공격 타입 구성은 HP로 가중한다
 
-Status: Accepted (merged, schema v4). Full research and sources: [enemy-weighting.md](../enemy-weighting.md).
+상태: 확정(병합 완료, 스키마 v4). 조사 전문과 출처는 [enemy-weighting.md](../enemy-weighting.md)에 있다.
 
-## Context
-Counting enemies per armor type treats a one-HP minion and a boss alike. A raid boss with parts (the drum
-crab: special-armor body, light-armor hull and claws) cannot be one type, and equal shares over all types
-tell the player nothing.
+## 배경
+방어 타입별로 적의 수를 세면 HP 1짜리 졸개와 보스가 같게 취급된다. 부위가 있는 레이드 보스(드럼 크랩: 특수장갑 몸체,
+경장갑 선체와 집게)는 하나의 타입이 될 수 없고, 모든 타입에 비중을 똑같이 주면 플레이어에게 알려 주는 것이 없다.
 
-## Decision
-An enemy weighs its HP at the encounter's level and grade, using SchaleDB's own formula. Summoned, Student
-and DestructibleProjectile weigh 0. In a raid, a non-boss entry whose HP equals a boss's HP is that boss's own
-body and weighs 0; parts with less HP keep their weight. The expected damage multiplier of a student against
-the mix is the weighted mean. The UI shows shares ("경장갑 36%", under 5 percent merged into 기타) and says
-"HP 비중 기준". There are no role multipliers, because no source supports a number.
+## 결정
+적은 인카운터의 레벨과 등급에서의 HP로 가중한다. 공식은 SchaleDB의 것을 그대로 쓴다. Summoned, Student,
+DestructibleProjectile은 가중치가 0이다. 레이드에서 HP가 보스의 HP와 같은 비보스 항목은 그 보스 자신의 몸체이므로
+가중치가 0이다. HP가 더 적은 부위는 가중치를 유지한다. 구성에 대한 학생의 기대 피해 배율은 가중 평균이다. UI는 비중을
+보여 주고("경장갑 36%", 5% 미만은 기타로 합친다) "HP 비중 기준"이라고 표시한다. 역할 배율은 없다. 숫자를 뒷받침하는
+출처가 없기 때문이다.
 
-## Alternatives (compared on real rows)
-Head count (old) gives 78/22 for the drum crab. Plain HP weighting gives 91/9, which hides the hull. HP with
-the structural mirror rule gives Normal 64/36, Insane 68/32 and Lunatic 82/18 (chosen).
+## 대안 (실제 행으로 비교)
+머릿수 기준(기존)은 드럼 크랩에 78/22를 준다. HP만으로 가중하면 91/9로 선체가 가려진다. 구조적 거울 규칙을 더한 HP
+가중은 Normal 64/36, Insane 68/32, Lunatic 82/18이다(채택).
 
-## Consequences
-- Fit tiers change for several stages (현상수배 고저택, KV 하이웨이, drum crab).
-- HP share is not time share. Swarms killed together by area attacks are under-counted.
-- Raid extra HP buffs and floor raid stat changes are not modelled.
+## 결과
+- 여러 스테이지의 적합도 등급이 바뀐다(현상수배 고저택, KV 하이웨이, 드럼 크랩).
+- HP 비중은 시간 비중이 아니다. 범위 공격으로 한꺼번에 잡는 무리는 과소 집계된다.
+- 레이드의 추가 HP 버프와 층별 레이드 능력치 변화는 모델에 넣지 않았다.
 
-## Evidence
-`weight_report` example prints head count against HP weighting side by side.
+## 근거
+`weight_report` 예제가 머릿수 기준과 HP 가중을 나란히 출력한다.
 
-## Revisit when
-Time-to-kill data per part becomes available, or live checks show the mirror rule is wrong.
+## 다시 볼 조건
+부위별 처치 시간 데이터를 얻을 수 있을 때, 또는 라이브 확인에서 거울 규칙이 틀렸다고 드러날 때.

@@ -1,29 +1,29 @@
-# 0005 Facts come from the static DB, the screen supplies keys
+# 0005 사실은 정적 DB에서 가져오고 화면은 조회 키만 준다
 
-Status: Accepted
+상태: 확정
 
-## Context
-OCR is slow, noisy and language dependent. Dungeon facts and student types change with patches, not with the
-screen. An early raid path let on-screen armor and attack words override the database, and the drum crab
-case (the screen shows two armors, the DB had one) looked like a reason to trust the screen.
+## 배경
+OCR은 느리고 노이즈가 있으며 언어에 따라 달라진다. 던전 정보와 학생 타입은 화면이 아니라 패치에 따라 바뀐다. 초기
+레이드 경로는 화면에 보이는 방어 타입과 공격 타입 단어가 데이터베이스를 덮어쓰게 했다. 드럼 크랩 사례(화면에는 방어 타입이
+둘, DB에는 하나)는 화면을 믿어야 하는 이유처럼 보였다.
 
-## Decision
-Dynamic data, read from the screen: which screen, which mission, stage, boss, difficulty and mode, the
-squad's names and slots, selection state. Static data, from the database only: enemy armor and attack mix,
-levels, terrain, student types, terrain adaptation, roles, the type table. The add-on keeps
-screen words about types only as a cross-check. It reports a mismatch, which means the DB model is incomplete.
+## 결정
+동적 데이터는 화면에서 읽는다. 어떤 화면인지, 어떤 임무, 스테이지, 보스, 난이도, 모드인지, 부대의 이름과 슬롯, 선택
+상태가 여기에 든다. 정적 데이터는 데이터베이스에서만 가져온다. 적의 방어 타입과 공격 타입 구성, 레벨, 지형, 학생 타입,
+지형 적응, 역할, 타입 상성표가 여기에 든다. 애드온은 타입에 관한 화면 단어를 교차 검증에만 쓴다. 불일치를 보고하며,
+이는 DB 모델이 불완전하다는 뜻이다.
 
-## Alternatives
-- Letting the screen win breaks silently on OCR noise and hides DB gaps.
-- Using the screen only gives no facts for screens that show none (formation).
+## 대안
+- 화면이 이기게 하면 OCR 노이즈에서 조용히 깨지고 DB의 빈틈이 가려진다.
+- 화면만 쓰면 정보가 없는 화면(편성)에서 사실을 얻을 수 없다.
 
-## Consequences
-- A lookup is deterministic given its keys (tested with wrong or missing screen words).
-- The developer fixes a mismatch in the DB model (ADR 0006) instead of special-casing the screen.
+## 결과
+- 조회 키가 정해지면 조회 결과는 결정적이다(틀린 화면 단어나 빠진 화면 단어로 테스트했다).
+- 개발자는 불일치를 화면 쪽 예외 처리로 덮지 않고 DB 모델에서 고친다(결정 기록 0006).
 
-## Evidence
-`docs/enemy-weighting.md` (static and dynamic table), `assist/src/raid_lookup.rs`, property test over screen
-words, 15 of 15 mock bosses match the DB.
+## 근거
+`docs/enemy-weighting.md`(정적 데이터와 동적 데이터 표), `assist/src/raid_lookup.rs`, 화면 단어에 대한 속성 테스트,
+모의총력전 보스 15개 중 15개가 DB와 일치한다.
 
-## Revisit when
-A screen shows data the DB cannot have, such as live event modifiers.
+## 다시 볼 조건
+DB에 담을 수 없는 데이터를 화면이 보여 줄 때(예: 실시간 이벤트 보정).

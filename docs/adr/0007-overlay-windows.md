@@ -1,35 +1,34 @@
-# 0007 Layered click-through windows, change cache, bookmark card
+# 0007 클릭이 통과하는 레이어드 창, 변경 캐시, 북마크 카드
 
-Status: Accepted. Details: [card-dock.md](../card-dock.md).
+상태: 확정. 자세한 내용은 [card-dock.md](../card-dock.md)에 있다.
 
-## Context
-The overlay must not take focus, swallow the game's clicks, appear in the frames the add-on reads, or cost
-CPU while nothing changes. Not every monitor has room beside the game.
+## 배경
+오버레이는 포커스를 가져가면 안 되고, 게임의 클릭을 삼키면 안 되고, 애드온이 읽는 프레임에 찍히면 안 되고, 바뀌는 것이
+없을 때 CPU를 쓰면 안 된다. 게임 옆에 자리가 있는 모니터도 아니다.
 
-## Decision
-- Four layered windows with `WS_EX_NOACTIVATE`, topmost, excluded from capture (`WDA_EXCLUDEFROMCAPTURE`):
-  the card (interactive), the in-game card, the icons layer and the tooltip (click-through).
-- The overlay thread draws only on change: a change token per layer (`cache.rs`), memoised renders, and a
-  wake signal instead of a fixed poll. Measured idle load fell from 11 to 14 percent of a core to 0.4 percent.
-- The assistant sends the surface only outputs that changed. Icons stay down while the view is moving,
-  because a redraw from a stale reading would put the old view's icons back.
-- Card placement is one of four anchors (outside left or right, inside top left or right) plus a presentation
-  (pinned or bookmark). Outside needs room on the monitor, otherwise the card falls back inside, and the stored
-  preference is kept. The bookmark tab is a small window, so the rest of the game stays clickable. Hover
-  opens after 100 ms, slides in 120 ms, closes 350 ms after the pointer leaves. Dragging snaps to the nearest
-  anchor.
-- Closing is a power icon in the header, and the tray icon closes the add-on whatever the windows do.
+## 결정
+- `WS_EX_NOACTIVATE`를 가진 레이어드 창 네 개를 최상위에 두고 캡처에서 제외한다(`WDA_EXCLUDEFROMCAPTURE`). 카드(상호작용
+  가능), 게임 안 카드, 아이콘 레이어, 툴팁(클릭 통과)이다.
+- 오버레이 스레드는 바뀔 때만 그린다. 레이어마다 변경 토큰(`cache.rs`)을 두고, 렌더 결과를 메모이즈하며, 고정 주기 폴링
+  대신 깨우기 신호를 쓴다. 측정한 유휴 부하는 코어의 11~14%에서 0.4%로 떨어졌다.
+- 어시스턴트는 바뀐 출력만 표면에 보낸다. 화면이 움직이는 동안에는 아이콘을 내려 둔다. 낡은 읽기 결과로 다시 그리면 이전
+  화면의 아이콘이 되살아나기 때문이다.
+- 카드 배치는 앵커 넷(바깥 왼쪽이나 오른쪽, 안쪽 위 왼쪽이나 오른쪽) 중 하나와 표시 방식(고정 또는 북마크)으로 정한다.
+  바깥 배치는 모니터에 자리가 있어야 하고, 없으면 카드가 안쪽으로 물러나되 저장된 설정은 유지한다. 북마크 탭은 작은 창이라
+  게임의 나머지 부분을 계속 클릭할 수 있다. 마우스를 올리면 100 ms 뒤에 열리고 120 ms에 걸쳐 밀려 나오며, 포인터가 떠난
+  뒤 350 ms에 닫힌다. 끌면 가장 가까운 앵커에 붙는다.
+- 닫기는 헤더의 전원 아이콘으로 하고, 창이 어떻게 되든 트레이 아이콘이 애드온을 닫는다.
 
-## Alternatives
-- One full-screen transparent window is simpler but covers every click and costs more to draw.
-- Fixed polling of state wastes wakeups and adds up to 90 ms of latency.
+## 대안
+- 전체 화면 투명 창 하나는 단순하지만 모든 클릭을 덮고 그리는 비용이 더 든다.
+- 상태를 고정 주기로 폴링하면 깨어나는 횟수가 낭비되고 지연이 최대 90 ms 늘어난다.
 
-## Consequences
-- The card width is 58 percent of the game window (230 to 360 px); inside it is 34 percent (220 to 320 px).
-- Z-order, DPI per monitor and the feel of hover need a live check.
+## 결과
+- 카드 너비는 게임 창의 58%(230~360 px)이고, 안쪽 배치에서는 34%(220~320 px)다.
+- Z 순서, 모니터별 DPI, 마우스를 올렸을 때의 느낌은 라이브로 확인해야 한다.
 
-## Evidence
-`overlay/src/cache.rs`, `placement.rs`, `fold.rs`, `tab.rs`, `win.rs`; tests with a fake clock; previews.
+## 근거
+`overlay/src/cache.rs`, `placement.rs`, `fold.rs`, `tab.rs`, `win.rs`, 가짜 시계를 쓴 테스트, 미리보기.
 
-## Revisit when
-The game ships its own overlay layer or changes window handling.
+## 다시 볼 조건
+게임이 자체 오버레이 레이어를 내놓거나 창 처리 방식을 바꿀 때.

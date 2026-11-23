@@ -1,36 +1,39 @@
-# Live end-to-end harness
+# 라이브 e2e 하네스
 
-One command: `pwsh scripts/live-e2e.ps1 -Label directml` (and `-Label cpu` to run the same suite with `BAOCR_OCR_DEVICE=cpu`).
-Code: `rust/crates/cli/examples/live_e2e/{main,rig,scenarios}.rs`, the hook `rust/crates/cli/src/dump.rs`.
-Reports: `<out>/<label>/report.md|json`, screenshots in `<out>/<label>/shots`.
+명령 하나로 돈다. `pwsh scripts/live-e2e.ps1 -Label directml`. 같은 묶음을 `BAOCR_OCR_DEVICE=cpu`로 돌리려면
+`-Label cpu`를 쓴다.
+코드는 `rust/crates/cli/examples/live_e2e/{main,rig,scenarios}.rs`와 훅 `rust/crates/cli/src/dump.rs`에 있다.
+보고서는 `<out>/<label>/report.md|json`, 스크린샷은 `<out>/<label>/shots`에 쌓인다.
 
-## The hook
-With `BAOCR_STATE_DUMP=<file>` set, the add-on wraps its `Surface` in `DumpSurface` and rewrites the file atomically on every change and at
-least every 250 ms. The file holds the main card (scene, title, rows as text, close), the in-game card, the marks count, the dock (anchor, presentation) as the overlay
-holds it, the card layer (`fold` open/folded/sliding/hidden, slide, rect, hit areas in screen pixels), `battle`, `locked`, `seq`, `mono_ms`,
-`unix_ms` and `changed_unix_ms`. When the variable is unset, the dump code is not in the path. Unit tests cover the pure parts (`dump.rs`).
+## 훅
+`BAOCR_STATE_DUMP=<file>`을 설정하면 애드온이 `Surface`를 `DumpSurface`로 감싸고, 상태가 바뀔 때마다 그리고 적어도
+250 ms마다 이 파일을 원자적으로 다시 쓴다. 파일에는 메인 카드(화면 종류, 제목, 텍스트로 된 행, 닫기), 게임 안 카드,
+표시 개수, 오버레이가 가진 도크(앵커, 표현 방식), 카드 레이어(`fold`는 open/folded/sliding/hidden, 슬라이드, 사각형,
+화면 픽셀 단위 히트 영역), `battle`, `locked`, `seq`, `mono_ms`, `unix_ms`, `changed_unix_ms`가 들어 있다. 변수를
+설정하지 않으면 덤프 코드는 실행 경로에 없다. 순수한 부분은 단위 테스트가 다룬다(`dump.rs`).
 
-## Safety
-Game input is navigation and the add-on's own scan only. Every click needs a fresh dump naming the expected scene and a frame that is
-not a battle; `Rig::forbidden` refuses 출격 areas, 소탕, real raid 입장 and any click on a real 총력전 formation. The one 입장 pressed is the
-모의 총력전 room popup (title must say 모의). 제약해제결전 is entered up to its 편성 screen only. Mouse input on the add-on's own card is real
-input. `overlay.json` is restored from the backup at the end. `recover()` backs out to the 업무 hub.
+## 안전장치
+게임에 보내는 입력은 이동과 애드온 자체의 스캔뿐이다. 클릭마다 기대하는 화면 종류를 밝힌 최신 덤프와 전투가 아닌
+프레임이 있어야 한다. `Rig::forbidden`은 출격 영역, 소탕, 실제 레이드 입장, 실제 총력전 편성에 대한 모든 클릭을
+거부한다. 누르는 입장은 모의 총력전 방 팝업 하나뿐이며 제목에 모의가 있어야 한다. 제약해제결전은 편성 화면까지만
+들어간다. 애드온 자체 카드에 대한 마우스 입력은 실제 입력이다. `overlay.json`은 끝날 때 백업에서 복원한다.
+`recover()`는 업무 허브까지 되돌아 나온다.
 
-## Scenarios and criteria
-| id | what | criterion |
+## 시나리오와 기준
+| id | 내용 | 기준 |
 |---|---|---|
-| nav | 업무, 총력전, 모의 boss list (5 bosses), 방 정보, 모의 편성, party tabs | scene label right; independent OCR has the screen's words; boss armor label from the DB is on the card; no "화면 / 위키" note; click-to-card median under 1.0 s |
-| stale | 빠른 편성 popup x5 | icons appear; marks 0 within 1.0 s of closing; stay 0 across a forced card redraw |
-| tour | 종합전술시험, 대결전, 현상수배, 특별의뢰, 학원교류회, 제약해제결전 (select, 단계, stage, 편성), main menu | scene label right, card rows |
-| battle | detector on fixtures, plus every live frame grabbed | true only for battle.png; 0 live frames true |
-| card | fold, pin, hover open/close, 40 ms pass, drag to anchors | open in 100..500 ms, close in 330..800 ms, anchors reached |
-| scan | card button, non-deep, to the end, injected ESC ignored | count equal, unresolved 0, complete, fields equal except page/column/detail_path |
-| guard | doctor, a covering window refuses the click, `input_selftest` | refused with `target_window_mismatch`, 0 events reach the cover, no FAIL |
+| nav | 업무, 총력전, 모의 보스 목록(보스 5), 방 정보, 모의 편성, 부대 탭 | 화면 종류 라벨이 맞음. 독립 OCR이 화면의 단어를 가짐. DB의 보스 방어 타입 라벨이 카드에 있음. "화면 / 위키" 메모 없음. 클릭부터 카드까지 중앙값 1.0 s 미만 |
+| stale | 빠른 편성 팝업 5회 | 아이콘이 나타남. 닫은 뒤 1.0 s 안에 표시 0. 카드를 강제로 다시 그려도 0 유지 |
+| tour | 종합전술시험, 대결전, 현상수배, 특별의뢰, 학원교류회, 제약해제결전(선택, 단계, 스테이지, 편성), 메인 메뉴 | 화면 종류 라벨이 맞음, 카드 행 |
+| battle | 픽스처에 대한 검출기, 그리고 잡은 모든 라이브 프레임 | battle.png에서만 참. 라이브 프레임은 참이 0 |
+| card | 접기, 고정, 호버 열기와 닫기, 40 ms 통과, 앵커로 끌기 | 100..500 ms에 열림, 330..800 ms에 닫힘, 앵커에 도달 |
+| scan | 카드 버튼, 비심층, 끝까지, 주입한 ESC는 무시 | 개수 같음, 미해결 0, 완료, page/column/detail_path 외의 필드가 같음 |
+| guard | doctor, 클릭을 거부하는 덮개 창, `input_selftest` | `target_window_mismatch`로 거부됨, 덮개에 이벤트 0, FAIL 없음 |
 
-## Not automatable (human)
-Real ESC and the real input lock (hooks ignore injected events by design), tray 종료, how the card looks, feel of hover and drag,
-game frame rate under DirectML, whether the unscripted game behaves the same on another monitor layout.
+## 자동화할 수 없는 것(사람이 확인)
+실제 ESC와 실제 입력 잠금(훅이 주입된 이벤트를 무시하도록 설계되어 있다), 트레이 종료, 카드의 겉모습, 호버와 드래그의
+감촉, DirectML에서 게임의 프레임 속도, 스크립트로 제어하지 않은 게임이 다른 모니터 배치에서도 같게 동작하는지.
 
-## Known limits of the harness
-Latency is measured to the dump's `changed_unix_ms`. Other windows or agents that take focus or sit over the game make clicks and
-hover results flaky (see the 2026-11-23 report in the session notes).
+## 하네스의 알려진 한계
+지연은 덤프의 `changed_unix_ms`까지 잰다. 다른 창이나 에이전트가 포커스를 가져가거나 게임 위에 놓이면 클릭과 호버
+결과가 불안정하다(세션 노트의 2026-11-23 보고서 참고).

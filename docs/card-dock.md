@@ -1,142 +1,126 @@
-# The card's place: anchors, bookmark tab, magnet
+# 카드 위치와 앵커, 북마크 탭, 자석
 
-Code: `rust/crates/overlay/src/{dock,placement,fold,tab,win}.rs`, settings in `assist/src/settings.rs`.
+코드는 `rust/crates/overlay/src/{dock,placement,fold,tab,win}.rs`이고 설정은 `assist/src/settings.rs`에 있다.
 
-## Model
+## 모델
 
-Two independent choices.
+서로 독립인 선택이 두 가지 있다.
 
-**Anchor** (where the card lives), a preference:
+**앵커**(카드가 놓이는 곳)는 선호 설정이다.
 
-| Anchor | Place | Opens toward |
+| 앵커 | 위치 | 열리는 방향 |
 |---|---|---|
-| `Outside(Right)` / `Outside(Left)` | against the game window, top level with the game's client top | away from the game |
-| `Inside(TopRight)` / `Inside(TopLeft)` | inside the client area, at that top corner, below the game's own header bar (7.5% of the client height, like the existing in-game card) | toward the middle of the game |
+| `Outside(Right)` / `Outside(Left)` | 게임 창 바깥에 붙고 게임 클라이언트의 위쪽과 높이를 맞춘다 | 게임에서 멀어지는 쪽 |
+| `Inside(TopRight)` / `Inside(TopLeft)` | 클라이언트 영역 안쪽 해당 위쪽 모서리이며 게임 자체 헤더 바(클라이언트 높이의 7.5%) 아래이다. 기존 게임 안 카드와 같다 | 게임 가운데 쪽 |
 
-Beside the game only works when the work area of the game's monitor has room for the card there.
-`effective_anchor` is the preferred anchor, else the other side, else the inside corner on the
-preferred side. The fallback does not overwrite the preference. When the window moves or shrinks
-and the room appears, the card goes back. An inside preference stays inside.
+게임 옆 배치는 게임이 있는 모니터의 작업 영역에 카드가 들어갈 자리가 있을 때만 가능하다.
+`effective_anchor`는 선호 앵커를 쓰고 안 되면 반대쪽 옆, 그것도 안 되면 선호한 쪽의 안쪽 모서리를 쓴다.
+대체한다고 선호 설정을 덮어쓰지는 않는다. 창이 움직이거나 줄어든 뒤 자리가 생기면 카드가 원래 자리로 돌아간다.
+안쪽을 선호했다면 계속 안쪽에 둔다.
 
-**Presentation** (how it shows itself):
+**표시 방식**(카드가 스스로를 보여 주는 방법)은 두 가지이다.
 
-* `Pinned`: always open.
-* `Bookmark`: a folded tab that unfolds while the pointer is on it.
+* `Pinned`: 항상 열려 있다.
+* `Bookmark`: 접힌 탭이며 포인터가 올라가 있는 동안 펼쳐진다.
 
-When the player has chosen nothing (`presentation` absent in the settings), the default is `Pinned` beside
-the game, which keeps the earlier behaviour, and `Bookmark` inside, because an open card would cover the game.
-The default follows where the card really is, so a card that falls back inside a cramped screen becomes a tab
-by itself. The pin button in the card's header (left of the power icon; tooltip "접기" while pinned, "고정"
-while folded) sets the choice, and the settings keep it. With no game window the card waits at the top right of
-the screen, always open, with no pin button.
+플레이어가 아무것도 고르지 않았으면(설정에 `presentation`이 없으면) 게임 옆에서는 `Pinned`가 기본이다. 이전 동작을 그대로
+지키기 위해서다. 안쪽에서는 열린 카드가 게임을 가리므로 `Bookmark`가 기본이다.
+기본값은 카드가 실제로 놓인 곳을 따르므로 좁은 화면에서 안쪽으로 밀려난 카드는 저절로 탭이 된다. 카드 헤더의 고정 버튼
+(전원 아이콘 왼쪽, 툴팁은 고정 상태에서 "접기", 접힌 상태에서 "고정")이 선택을 정하고 설정이 이를 저장한다.
+게임 창이 없으면 카드는 화면 오른쪽 위에서 항상 열린 채 기다리고 고정 버튼은 없다.
 
-## Geometry (`placement.rs`)
+## 배치 계산 (`placement.rs`)
 
-* `slot(frame, anchor, size)` returns the card's rectangle. Beside the game, the gap is 1.2% of the client
-  height (at least 6 px), the top is level with the client top, and the card is pushed up to stay on the monitor.
-  Inside, the margin is 1.2% of the client width (at least 4 px). If the card is too tall for the room, it
-  is first pushed up (no higher than the margin below the client top) and then cut. The card does not
-  scroll, so the part below the cut is not shown (the header and the first rows, which carry the
-  verdicts, stay). A card wider than the client is narrowed to it.
-* `resolve` returns the open rectangle plus the tab rectangle. The tab hangs on the card's edge nearest
-  the anchor and shares the card's top. That edge is the left edge for `Outside(Right)` and `Inside(TopLeft)`,
-  where the card opens to the right, and the right edge for the other two, where it opens to the left.
-* Inside width: `inside_card_width` is 34% of the client width, clamped to 220 to 320 px. Beside the game
-  it is 58%, clamped to 230 to 360 px. A 1280 px client gives 320, so the card covers at most a quarter of the game.
-* Tab: 28 x 72 px at the card's design scale (card width / 300), at least 18 x 48 px.
-* The slide (`strip`): the card comes out of its edge, and the part that has crossed it is shown. That is
-  the card's right end when it grows to the right and its left end when it grows to the left, and the
-  height grows with it. Only the part of the layer's own size is drawn, so the rest of the game
-  stays clickable.
+* `slot(frame, anchor, size)`가 카드의 사각형을 반환한다. 게임 옆에서는 간격이 클라이언트 높이의 1.2%(최소 6 px)이고
+  위쪽은 클라이언트 위쪽과 맞추며 카드는 모니터 안에 머물도록 위로 밀어 올린다. 안쪽에서는 여백이 클라이언트 폭의
+  1.2%(최소 4 px)이다. 자리보다 카드가 크면 먼저 위로 밀고(클라이언트 위쪽에서 여백 아래보다 높이 올라가지 않는다) 그다음에
+  자른다. 카드는 스크롤하지 않으므로 잘린 아래쪽은 보이지 않는다(판정이 있는 헤더와 첫 행은 남는다). 클라이언트보다 넓은
+  카드는 클라이언트 폭으로 줄인다.
+* `resolve`는 열린 사각형과 탭 사각형을 반환한다. 탭은 앵커에 가장 가까운 카드 가장자리에 걸리고 카드와 위쪽을 공유한다.
+  카드가 오른쪽으로 열리는 `Outside(Right)`와 `Inside(TopLeft)`에서는 왼쪽 가장자리이고, 왼쪽으로 열리는 나머지 둘에서는
+  오른쪽 가장자리이다.
+* 안쪽 폭: `inside_card_width`는 클라이언트 폭의 34%이며 220~320 px로 제한한다. 게임 옆에서는 58%이며 230~360 px로 제한한다.
+  클라이언트가 1280 px이면 320이 되어 카드가 게임의 4분의 1 이하만 가린다.
+* 탭: 카드의 디자인 배율(카드 폭 / 300)에서 28 x 72 px이고 최소 18 x 48 px이다.
+* 슬라이드(`strip`): 카드는 자기 가장자리에서 나오며 가장자리를 넘어온 부분만 보인다. 오른쪽으로 자랄 때는 카드의
+  오른쪽 끝, 왼쪽으로 자랄 때는 왼쪽 끝이 보이고 높이도 함께 자란다. 레이어 자체 크기만큼만 그리므로 게임의 나머지 부분은
+  계속 클릭할 수 있다.
 
-## Hover (`fold.rs`)
+## 호버 (`fold.rs`)
 
-A state machine driven by a clock the caller passes in (ms); the tests pass a fake clock.
+호출자가 넘겨 주는 시계(ms)로 구동되는 상태 기계이다. 테스트는 가짜 시계를 넘긴다.
 
-| Timing | Value |
+| 타이밍 | 값 |
 |---|---|
-| Dwell on the tab before it opens | 100 ms (a pass-by does not open it) |
-| Slide | 120 ms, ease-out |
-| Close delay after the pointer left | 350 ms |
+| 탭에 머문 뒤 열리기까지 | 100 ms (스치고 지나가면 열리지 않는다) |
+| 슬라이드 | 120 ms, ease-out |
+| 포인터가 떠난 뒤 닫히기까지 | 350 ms |
 
-If the pointer comes back while the card slides shut, the card reopens at once with no new dwell. "On it" means
-the pointer is inside the current rectangle (tab, strip, or open card), so an open card stays open while the
-pointer is on it. A tooltip needs the pointer on the card, so a showing tooltip already keeps it open.
+카드가 닫히며 슬라이드하는 중에 포인터가 돌아오면 새 대기 없이 바로 다시 열린다. "올라가 있다"는 포인터가 현재 사각형(탭, 스트립,
+열린 카드) 안에 있다는 뜻이므로 열린 카드는 포인터가 올라가 있는 동안 열려 있다. 툴팁은 포인터가 카드 위에 있어야 뜨므로
+툴팁이 보이면 이미 열린 상태가 유지된다.
 
-* While the open card is dragged, it stays open. While the folded tab is dragged, it stays shut, so it never
-  unfolds under the pointer.
-* When the window is covered or hidden, the state resets to folded and nothing is animated unseen.
-* When the card is pinned or there is no game, it is open and not animated.
-* **Scan (input locked).** The scan sends real clicks to screen positions (`hcu` `SendInput`), and
-  the card layer is not click-through, so an open card inside the game could swallow them. While
-  the input is locked an inside card is therefore a folded tab that never unfolds and shows a green
-  dot. In `crates/hcu/src/{roster,deep,scan}.rs` (1280 x 960 frame), the scan clicks and
-  scrolls at back (50, 40), the arrow (1250, 505), the list scroll point (1150, 750), the student
-  cards, and in the stat popup (755 to 1138, 258 to 320). The folded tab is about 28 x 72 px at
-  the card's design scale, starts 7.5% down (72 px), and sits at x 15 to 43 or 1237 to 1265 at that
-  size, so none of those points lie under it. A narrower window shrinks the tab with the card,
-  and the 7.5% rule keeps it clear of the back button. Beside the game nothing changes, because the progress
-  stays visible on the open card. If the input block fails to start, `locked` stays false and an
-  inside card opens on hover during the scan. That is the same as no protection, because the unfolded card could
-  then cover targets.
-* **The click-through in-game card** (widgets set to 게임 안) sits at the same top right corner. When
-  the main card is anchored at the inside top right, the overlay moves the in-game card left by the tab's
-  width plus 6 px so the tab does not hide it. An unfolded card still covers it while the pointer
-  is on it.
+* 열린 카드를 드래그하는 동안은 열린 채로 있다. 접힌 탭을 드래그하는 동안은 닫힌 채로 있어서 포인터 아래에서 펼쳐지는
+  일이 없다.
+* 창이 가려지거나 숨겨지면 상태가 접힘으로 초기화되고 보이지 않는 곳에서는 애니메이션하지 않는다.
+* 카드가 고정되었거나 게임이 없으면 열린 상태이고 애니메이션하지 않는다.
+* **스캔(입력 잠금).** 스캔은 화면 좌표로 실제 클릭을 보내고(`hcu`의 `SendInput`) 카드 레이어는 클릭 통과가 아니다.
+  그래서 게임 안쪽에서 열린 카드가 클릭을 가로챌 수 있다. 입력이 잠긴 동안 안쪽 카드는 펼쳐지지 않고 녹색 점을 보여 주는
+  접힌 탭이 된다. `crates/hcu/src/{roster,deep,scan}.rs`(1280 x 960 프레임)에서 스캔은 뒤로 가기 (50, 40), 화살표
+  (1250, 505), 목록 스크롤 지점 (1150, 750), 학생 카드, 능력치 팝업 (755~1138, 258~320)에서 클릭하고 스크롤한다. 접힌 탭은 카드의
+  디자인 배율에서 약 28 x 72 px이고 7.5%(72 px) 아래에서 시작하며 그 크기에서 x 15~43 또는 1237~1265에 놓인다. 따라서
+  위 지점 어느 것도 탭 아래에 있지 않다. 창이 좁아지면 탭도 카드와 함께 줄고 7.5% 규칙이 뒤로 가기 버튼을 피하게 해 준다.
+  게임 옆에서는 진행 상황이 열린 카드에 계속 보이므로 달라지는 것이 없다. 입력 차단 시작에 실패하면 `locked`가 false로 남고
+  스캔 중에도 안쪽 카드가 호버로 열린다. 펼친 카드가 대상을 가릴 수 있으므로 보호가 없는 것과 같다.
+* **클릭 통과 게임 안 카드**(위젯을 게임 안으로 둔 경우)는 같은 오른쪽 위 모서리에 있다. 메인 카드가 안쪽 오른쪽 위에
+  앵커되어 있으면 오버레이는 탭이 가리지 않도록 게임 안 카드를 탭 폭 + 6 px만큼 왼쪽으로 옮긴다. 펼친 카드는 포인터가 올라가
+  있는 동안 이 카드를 여전히 가린다.
 
-The overlay thread ticks every 90 ms normally, 40 ms while the card is a tab (hover), 16 ms while
-it slides or is dragged. The thread skips a redraw when what is shown (content, place, shape) is unchanged.
+오버레이 스레드는 평소 90 ms마다, 카드가 탭일 때(호버) 40 ms마다, 슬라이드하거나 드래그하는 중에는 16 ms마다 갱신한다.
+화면에 보이는 것(내용, 위치, 모양)이 그대로면 스레드는 다시 그리지 않는다.
 
-## Magnet (`snap`)
+## 자석 (`snap`)
 
-The open card, dragged by its header, and the tab, dragged anywhere on it, follow the pointer. On release
-`snap(frame, size, pointer, available)` picks the available anchor whose rectangle (for the size
-of what is dragged) has its middle nearest the pointer. The available anchors are both inside corners, always, and each
-side beside the game only if it has room for the card. While dragging, the overlay draws the nearest anchor's
-rectangle as a faint outline (in the tooltip layer). A press that moves the pointer less
-than 6 px (a click) chooses nothing, and neither does a release with nothing to snap to (the game
-vanished mid-drag). Only a real move replaces the stored preference. A real move ends as a
-choice even if it lands where the card already was (beside the game with no room, then dropped on
-the inside corner, makes the inside corner the preference). The overlay reports the result as an event
-and saves it:
+열린 카드는 헤더를 잡고 끌고 탭은 어디를 잡아도 끌 수 있으며 둘 다 포인터를 따라간다. 놓으면
+`snap(frame, size, pointer, available)`이 끄는 대상의 크기로 계산한 사각형의 중심이 포인터에 가장 가까운 사용 가능한 앵커를
+고른다. 사용 가능한 앵커는 안쪽 모서리 두 곳이 항상 포함되고 게임 옆은 카드가 들어갈 자리가 있는 쪽만 포함된다. 드래그하는 동안
+오버레이는 가장 가까운 앵커의 사각형을 흐린 윤곽선으로 그린다(툴팁 레이어에). 포인터가 6 px보다 적게 움직인 누름(클릭)은
+아무것도 고르지 않고, 붙일 곳이 없는 놓기(드래그 중 게임이 사라진 경우)도 그렇다. 실제 이동만 저장된 선호를 바꾼다. 실제
+이동은 카드가 원래 있던 자리에 놓더라도 선택으로 끝난다(자리가 없어 게임 옆 대신 안쪽에 있던 카드를 안쪽 모서리에 놓으면
+안쪽 모서리가 선호가 된다). 오버레이는 결과를 이벤트로 알리고 저장한다.
 
-* `dock:l`, `dock:r` (beside the game; the first version's events, unchanged), `dock:il`, `dock:ir`
-  (inside the top left / top right corner);
-* `present:pinned`, `present:bookmark` (the pin button).
+* `dock:l`, `dock:r`(게임 옆, 첫 버전의 이벤트 그대로), `dock:il`, `dock:ir`(안쪽 왼쪽 위 / 오른쪽 위 모서리)
+* `present:pinned`, `present:bookmark`(고정 버튼)
 
-## Differences from the first brief, on purpose
+## 처음 요구와 의도적으로 다른 점
 
-* The inside anchors sit 7.5% down the client (constant `INSIDE_TOP` in `placement.rs`), not at the
-  client top, to stay below the game's currency and menu bar like the in-game card already did.
-* The tab opens after a 100 ms dwell, so sweeping the pointer across the corner does not open it.
-* The settings fields are `dock_anchor` and `presentation` (`placements` already means the widgets).
-* `resolve(..)` takes the anchor from `effective_anchor(..)`, because the card's width (and so its
-  height) depends on whether it is beside or inside the game.
+* 안쪽 앵커는 클라이언트 위쪽이 아니라 7.5% 아래에 있다(`placement.rs`의 상수 `INSIDE_TOP`). 기존 게임 안 카드처럼 게임의
+  재화 바와 메뉴 바 아래에 두기 위해서다.
+* 탭은 100 ms 머문 뒤에 열린다. 포인터가 모서리를 쓸고 지나가도 열리지 않게 하려는 것이다.
+* 설정 필드는 `dock_anchor`와 `presentation`이다(`placements`는 이미 위젯을 뜻한다).
+* `resolve(..)`는 앵커를 `effective_anchor(..)`에서 가져온다. 카드 폭(그래서 높이)이 게임 옆인지 안쪽인지에 따라 달라지기 때문이다.
 
-## Settings (`%APPDATA%\baocr\overlay.json`)
+## 설정 (`%APPDATA%\baocr\overlay.json`)
 
-* `dock_right` (old, still written for the beside-the-game side).
-* `dock_anchor`: `"l" | "r" | "il" | "ir"`, optional; overrides `dock_right` when valid.
-* `presentation`: `"pinned" | "bookmark"`, optional; absent means the default above.
+* `dock_right`(예전 필드이고 게임 옆 쪽을 나타내려고 계속 쓴다).
+* `dock_anchor`: `"l" | "r" | "il" | "ir"`, 선택 사항이며 유효하면 `dock_right`보다 우선한다.
+* `presentation`: `"pinned" | "bookmark"`, 선택 사항이며 없으면 위의 기본값을 쓴다.
 
-Old files (without the two fields, or with unknown values) load and behave as before.
+두 필드가 없거나 알 수 없는 값이 있는 예전 파일도 읽히고 이전처럼 동작한다.
 
-## What was not verified live
+## 라이브에서 검증하지 못한 것
 
-Verified: pure tests (geometry for a roomy QHD window, a full 1080p game, a window at the monitor
-edge, tiny work area; snapping; hover with a fake clock; settings backward compatibility; press
-order tab / header icons / drag handle) and preview images over `fixtures/screens` (read only).
-Not verified, needs the real game window:
+검증한 것: 순수 테스트(여유 있는 QHD 창, 전체 화면 1080p 게임, 모니터 가장자리의 창, 아주 작은 작업 영역의 배치 계산, 자석,
+가짜 시계로 본 호버, 설정 하위 호환, 탭 / 헤더 아이콘 / 드래그 핸들의 누름 순서)와 `fixtures/screens` 위의 미리보기 이미지(읽기 전용).
+실제 게임 창이 필요해서 검증하지 못한 것:
 
-* Hover timing feel (100 / 120 / 350 ms) and the 40 ms poll; whether the tab at the inside
-  corner gets in the way of the game's own top-right buttons (it sits below the header bar by design).
-* Z-order of the tab and the card against the game (exclusive full screen would hide all of it,
-  as before), and against the tooltip and snap-hint layer (the hint is drawn on the tooltip layer).
-* Per-monitor DPI: the loop calls `SetProcessDPIAware`, all sizes derive from the client's pixels;
-  moving the window between monitors of different scale was not tried.
-* A real scan with an inside card: that the scan's clicks reach the game while the inside card is
-  folded (the design says they do; no input was sent in this work).
-* Whether a drag by the tab feels right at the game's edge, and whether leaving the pointer on the
-  tab while a window above the game appears behaves (the `covered()` path hides everything).
-* The layer is recreated at the size of the tab and of every slide step (an allocation per frame
-  for 120 ms); not measured.
+* 호버 타이밍의 체감(100 / 120 / 350 ms)과 40 ms 폴링. 안쪽 모서리의 탭이 게임 자체의 오른쪽 위 버튼을 방해하는지(설계상
+  헤더 바 아래에 놓인다).
+* 게임에 대한 탭과 카드의 Z 순서(독점 전체 화면이면 전부 가려진다. 이전과 같다)와 툴팁 및 자석 힌트 레이어에 대한 Z 순서
+  (힌트는 툴팁 레이어에 그려진다).
+* 모니터별 DPI: 루프가 `SetProcessDPIAware`를 호출하고 모든 크기는 클라이언트 픽셀에서 계산한다. 배율이 다른 모니터 사이로
+  창을 옮기는 것은 해 보지 않았다.
+* 안쪽 카드를 둔 실제 스캔: 안쪽 카드가 접혀 있는 동안 스캔의 클릭이 게임에 닿는지(설계상 닿는다. 이 작업에서는 입력을 보내지 않았다).
+* 게임 가장자리에서 탭을 끌 때의 느낌, 그리고 탭 위에 포인터를 둔 채 게임 위로 다른 창이 나타났을 때의 동작(`covered()`
+  경로가 전부 숨긴다).
+* 레이어를 탭 크기와 슬라이드 단계마다 새로 만든다(120 ms 동안 프레임마다 할당). 측정하지 않았다.

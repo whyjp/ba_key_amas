@@ -1,133 +1,107 @@
-# Architecture and decisions
+> 이 문서는 Go와 Tesseract 시절의 옛 기록이다. 현재 구조를 설명하지 않으며 내용은 당시 그대로 두었다.
 
-## Goals
+# 구조와 결정
 
-1. Collect what the player sees on the student screens without retyping it.
-2. View it as HTML.
-3. (Next) show extra stats as an overlay in other in-game menus (squad
-   composition etc.) without opening the student menu.
+## 목표
 
-## Layers (extraction is independent of computer-use automation)
+1. 플레이어가 학생 화면에서 보는 정보를 다시 입력하지 않고 수집한다.
+2. 수집한 정보를 HTML로 본다.
+3. (다음 단계) 학생 메뉴를 열지 않고도 다른 게임 내 메뉴(편성 등)에 추가 능력치를 오버레이로 보여 준다.
+
+## 계층 (추출은 computer-use 자동화와 독립이다)
 
 ```
  FrameSource ──► Extractor ──► Store ──► Views
   (frames)       (pixels→data)  (JSON+history)  HTML now / overlay later
 ```
 
-| Layer | Code | Notes |
+| 계층 | 코드 | 비고 |
 |---|---|---|
-| Frame sources | `arrow_scan.go` + `deepcapture.go` (HCU clicks), `watch.go` `hcuSource` (passive screenshots, **no input**), saved frames (`--reextract`, tests) | Anything that yields a 1280x960 (4:3) frame can feed the rest. |
-| Extractor | `main.go extractWith`, `meta.go`, `deepcapture.go extractDeep`, `fixed.go` | Pure: image in, `Student` out. No game access. |
-| Async pipeline | `pipeline.go` | Capture never waits for OCR; `index.json` tracks captured/extracted/failed; `--reextract` retries from saved frames. |
-| Store | `store.go` | Latest record per student + `history.jsonl`; a field a blurry read could not determine never overwrites a known value. |
-| Autonomous updater | `watch.go` (`--watch`) | Reads a profile only after it holds still, stores only what changed. Works while the player plays; no scan needed. |
+| 프레임 소스 | `arrow_scan.go` + `deepcapture.go`(HCU 클릭), `watch.go`의 `hcuSource`(수동 스크린샷, **입력 없음**), 저장된 프레임(`--reextract`, 테스트) | 1280x960(4:3) 프레임을 내는 것이면 무엇이든 나머지 계층에 넣을 수 있다. |
+| 추출기 | `main.go extractWith`, `meta.go`, `deepcapture.go extractDeep`, `fixed.go` | 순수 함수이다. 이미지를 받아 `Student`를 낸다. 게임에는 접근하지 않는다. |
+| 비동기 파이프라인 | `pipeline.go` | 캡처는 OCR을 기다리지 않는다. `index.json`이 캡처됨/추출됨/실패를 추적하고 `--reextract`가 저장된 프레임에서 다시 시도한다. |
+| 저장소 | `store.go` | 학생마다 최신 레코드 + `history.jsonl`. 흐릿한 읽기로 판정하지 못한 필드는 이미 아는 값을 덮어쓰지 않는다. |
+| 자율 갱신기 | `watch.go`(`--watch`) | 프로필이 멈춘 뒤에만 읽고 바뀐 것만 저장한다. 플레이어가 플레이하는 동안 동작하며 스캔이 필요 없다. |
 
-Collection stages: **fixed meta** comes from the dictionary (only changes with
-patches), **variable** values are read from pixels, a **single update** re-reads
-one profile (see README "Collection stages").
+수집 단계: **고정 메타**는 사전에서 오며 패치 때만 바뀐다. **가변** 값은 픽셀에서 읽는다. **단일 갱신**은 프로필 하나를 다시 읽는다
+(README의 "Collection stages" 참고).
 
-## OCR engine decision (measured, not assumed)
+## OCR 엔진 결정 (가정이 아니라 측정으로)
 
-Language does not change accuracy; the model does. So the question is
-Tesseract (LSTM, 2018) vs PP-OCRv5 (what oar-ocr/RapidOCR run), not Go vs Rust.
+정확도를 바꾸는 것은 언어가 아니라 모델이다. 따라서 문제는 Go 대 Rust가 아니라 Tesseract(LSTM, 2018) 대
+PP-OCRv5(oar-ocr과 RapidOCR이 쓰는 것)이다.
 
-Measured on 11 labelled screens / 68 fields (names, 4 stats, 4 skill levels,
-exp, level strip, bond number, 12 popup rows); `tools/ocr-bench/bench.py`:
+라벨을 붙인 화면 11개, 필드 68개(이름, 능력치 4개, 스킬 레벨 4개, 경험치, 레벨 띠, 유대 숫자, 팝업 행 12개)로 측정했다.
+`tools/ocr-bench/bench.py`를 썼다.
 
-| Engine / setup | Correct |
+| 엔진 / 설정 | 정답 |
 |---|---|
-| Tesseract, **heavily tuned** on these very screens (ink isolation, whitelists, dictionary snap) | 66/68 |
-| PP-OCRv5 Korean, detection+recognition, **untuned** (padding only) | 64/68 |
-| PP-OCRv5 Korean, recognition only on tight crops | 53/68 |
-| PP-OCRv5 Korean, recognition only on padded crops | 51/68 |
+| Tesseract, 바로 이 화면들에 맞춰 **강하게 튜닝**(잉크 분리, 화이트리스트, 사전 스냅) | 66/68 |
+| PP-OCRv5 한국어, 검출+인식, **튜닝 없음**(패딩만) | 64/68 |
+| PP-OCRv5 한국어, 꽉 맞춘 크롭에서 인식만 | 53/68 |
+| PP-OCRv5 한국어, 패딩을 준 크롭에서 인식만 | 51/68 |
 
-Reading the numbers honestly:
+숫자를 솔직하게 읽으면 다음과 같다.
 
-- The Tesseract score is optimistic (tuned on the test set). PP-OCRv5 reaches
-  parity with no tuning and reads the two cases Tesseract cannot: the thin
-  italic `Lv.1` (2/2) and the bond number in the heart (8/8, no special code).
-- Its misses were label bleed (`방어력 86` -> `886`) and `슌` -> `순`; both are
-  fixable by parsing and the existing dictionary snap.
-- Recognition-only is fragile (it wants a properly shaped text line);
-  detection+recognition is robust but ~0.5 s/crop in Python.
-- 68 fields on 11 screens is a small sample. A held-out comparison on the full
-  roster (the scan data) is the next step before any switch.
+- Tesseract 점수는 낙관적이다(테스트 세트에 맞춰 튜닝했다). PP-OCRv5는 튜닝 없이 같은 수준에 도달하고 Tesseract가 읽지
+  못하는 두 경우를 읽는다. 가늘고 기울어진 `Lv.1`(2/2)과 하트 안의 유대 숫자(8/8, 특별한 코드 없음)이다.
+- 틀린 것은 라벨이 번진 경우(`방어력 86` -> `886`)와 `슌` -> `순`이다. 둘 다 파싱과 기존 사전 스냅으로 고칠 수 있다.
+- 인식만 하는 방식은 취약하다(제대로 된 텍스트 줄 모양이 필요하다). 검출+인식은 튼튼하지만 파이썬에서 크롭당 약 0.5초가 든다.
+- 화면 11개에 필드 68개는 작은 표본이다. 교체 전에 전체 명단(스캔 데이터)으로 따로 떼어 둔 데이터로 비교를 하는 것이 다음 단계이다.
 
-Recommendation:
+권고:
 
-1. Keep Go. Rewriting in Rust buys no accuracy; Rust's advantage would be
-   oar-ocr already implementing detection/recognition, not speed or accuracy.
-2. Put a `Recognizer` seam behind `recognizePNG` (the single funnel every OCR
-   call goes through) and add a PP-OCRv5 backend (onnxruntime in-process, or an
-   OCR sidecar over local HTTP). Run both engines per field and use the
-   existing cross-checks (panel vs popup, dictionary, locks) to arbitrate.
-3. Decide the default engine on held-out data, field by field.
+1. Go를 유지한다. Rust로 다시 쓴다고 정확도가 늘지 않는다. Rust의 장점은 속도나 정확도가 아니라 oar-ocr이 이미 검출/인식을 구현했다는 점이다.
+2. `recognizePNG`(모든 OCR 호출이 지나는 단일 통로) 뒤에 `Recognizer` 이음매를 두고 PP-OCRv5 백엔드(프로세스 내 onnxruntime 또는
+   로컬 HTTP로 붙는 OCR 사이드카)를 추가한다. 필드마다 두 엔진을 모두 돌리고 기존 교차 검증(패널 대 팝업, 사전, 잠금)으로 판정한다.
+3. 기본 엔진은 따로 떼어 둔 데이터로 필드별로 정한다.
 
-### Correction and frame-level measurement
+### 정정과 프레임 단위 측정
 
-What was actually measured (RapidOCR 1.32 / onnxruntime on CPU): detection
-**PP-OCRv6 det small** (RapidOCR default), recognition **korean PP-OCRv5
-mobile** (forced), angle classifier v2.0 mobile. The 64/68 above ran detection
-+ recognition *per crop* (~0.5 s each, ~13 s per profile), which is too slow
-for `--watch` or an overlay. Running detection once per frame/panel instead
-(`tools/ocr-bench/frame_bench.py`):
+실제로 측정한 것은 다음과 같다(RapidOCR 1.32 / CPU의 onnxruntime). 검출은 **PP-OCRv6 det small**(RapidOCR 기본값), 인식은
+**korean PP-OCRv5 mobile**(강제), 각도 분류기는 v2.0 mobile이다. 위의 64/68은 *크롭마다* 검출+인식을 돌렸고(각 약 0.5초, 프로필당 약 13초)
+`--watch`나 오버레이에는 너무 느리다. 프레임이나 패널마다 검출을 한 번만 돌리면(`tools/ocr-bench/frame_bench.py`) 다음과 같다.
 
-| Setup | numbers (stats, skills, exp, level strip: 37 fields) | names (11) | bond heart (8) | time per profile |
+| 설정 | 숫자(능력치, 스킬, 경험치, 레벨 띠: 37개 필드) | 이름 (11) | 유대 하트 (8) | 프로필당 시간 |
 |---|---|---|---|---|
-| whole frame, native | 37/37 | 7 | 0 | ~0.8 s |
-| whole frame, 2x | 37/37 | 8 | 1 | ~1.2 s |
-| two panels | 37/37 | 8 | 5 | ~1.0 s |
+| 프레임 전체, 네이티브 | 37/37 | 7 | 0 | 약 0.8초 |
+| 프레임 전체, 2배 | 37/37 | 8 | 1 | 약 1.2초 |
+| 패널 둘 | 37/37 | 8 | 5 | 약 1.0초 |
 
-All numeric fields (including the `Lv.N` strip Tesseract could not read) are
-perfect from one frame pass. Names and the heart are small overlaid text that
-frame-level detection mostly misses, so the design is a **hybrid**: one
-detection+recognition pass per frame for the panel numbers, plus recognition-only
-reads of two small crops (name strip, bond heart; ~40 ms each, first benchmark:
-names 10/11, heart 7/8) resolved by the dictionary.
+숫자 필드는 모두(Tesseract가 읽지 못한 `Lv.N` 띠 포함) 프레임을 한 번 훑는 것으로 완벽하다. 이름과 하트는 위에 겹쳐 놓인 작은
+글자라서 프레임 단위 검출이 대부분 놓친다. 그래서 설계는 **하이브리드**이다. 패널 숫자는 프레임마다 검출+인식을 한 번 돌리고,
+작은 크롭 두 개(이름 띠, 유대 하트. 각 약 40 ms, 첫 벤치마크 이름 10/11, 하트 7/8)는 인식만 해서 사전으로 확정한다.
 
-Open items before the swap is final: held-out check on the 106 saved students
-(`--reextract`, scored without labels against the dictionary and `expToLevel`),
-model file hashes/sources/licences recorded before bundling, and the hosting
-choice (in-process vs sidecar below).
+교체를 확정하기 전에 남은 일은 저장된 학생 106명에 대한 따로 떼어 둔 데이터 점검(`--reextract`, 라벨 없이 사전과 `expToLevel`로 채점),
+번들하기 전에 모델 파일 해시/출처/라이선스 기록, 호스팅 선택(아래의 프로세스 내 대 사이드카)이다.
 
-Overlay implication (goal 3): Tesseract is spawned as a process per call
-(~20 calls per profile, 100-300 ms each) which is fine for scanning but too
-slow for a live overlay. An overlay needs an always-resident in-process model
-and a read-only data path: the Store (JSON/HTTP/WebSocket) serves a thin
-overlay window; screen reading and drawing stay separate processes.
+오버레이에 주는 시사점(목표 3): Tesseract는 호출마다 프로세스로 띄운다(프로필당 호출 약 20회, 각 100~300 ms). 스캔에는 괜찮지만
+실시간 오버레이에는 너무 느리다. 오버레이에는 상주하는 프로세스 내 모델과 읽기 전용 데이터 경로가 필요하다. 저장소(JSON/HTTP/WebSocket)가
+얇은 오버레이 창에 데이터를 제공하고 화면 읽기와 그리기는 별도 프로세스로 둔다.
 
-## Bond rank up to 100
+## 인연 랭크 100까지
 
-Bond is read from the pink heart by isolating dark glyphs inside the heart row
-by row, so it does not depend on digit count; values are capped at 100 and
-the 2-digit cases (2..13) are regression-tested. **No 3-digit sample exists
-yet**: a web search found only text (max bond 100 for 5-star students, 20 for
-3-star), no screenshots, and fan images are not safe to bundle. When the
-account reaches a 3-digit bond, add that screenshot as a fixture; the
-layout risk is the heart shrinking its font, which the guard below would show
-as an implausible read.
+유대는 분홍 하트 안의 어두운 글리프를 행 단위로 분리해 읽으므로 자릿수에 의존하지 않는다. 값은 100으로 제한하고 두 자리 경우(2..13)는
+회귀 테스트가 있다. **세 자리 표본은 아직 없다.** 웹 검색에서는 텍스트(5성 학생의 최대 유대 100, 3성은 20)만 나왔고 스크린샷은
+없었으며 팬 이미지는 번들하기에 안전하지 않다. 계정이 세 자리 유대에 도달하면 그 스크린샷을 픽스처로 추가한다. 레이아웃의 위험은
+하트가 글꼴을 줄이는 것이며 아래의 안전장치가 이를 비현실적인 읽기 값으로 드러낼 것이다.
 
-## Risks to keep in mind
+## 염두에 둘 위험
 
-- Reading the screen is passive, but an overlay drawn over the game window and
-  any automated clicking may conflict with the game's terms of service or
-  anti-cheat. Keep the watcher screenshot-only, never touch game memory or
-  files, and review the terms before shipping an overlay.
-- Layout is calibrated for 4:3 windowed only (see README "Screen setup").
+- 화면 읽기는 수동이지만 게임 창 위에 그리는 오버레이와 자동 클릭은 게임의 서비스 약관이나 안티 치트와 충돌할 수 있다. 감시기는
+  스크린샷만 쓰고 게임 메모리나 파일은 절대 건드리지 않는다. 오버레이를 배포하기 전에 약관을 검토한다.
+- 레이아웃은 4:3 창 모드에만 맞춰 보정했다(README의 "Screen setup" 참고).
 
-## Outcome: engine replaced, Rust port
+## 결과: 엔진 교체와 Rust 이식
 
-The OCR engine decision above was acted on. The Go+Tesseract extractor was
-ported to Rust (`rust/`) with PP-OCRv5 in process (oar-ocr for detection+
-recognition, `ort` directly for the closed-set CTC reads).
+위의 OCR 엔진 결정을 실행했다. Go+Tesseract 추출기를 Rust(`rust/`)로 이식하고 PP-OCRv5를 프로세스 안에 넣었다(검출+인식은
+oar-ocr, 닫힌 집합 CTC 읽기는 `ort` 직접 사용).
 
-- Names: 11/11 labelled screens and 106/106 saved frames, with no tuning tricks:
-  ink-isolated line + all-dictionary CTC scoring. Syllables outside the model's
-  vocabulary (e.g. 슌) are spelled with the nearest known syllable by likelihood.
-- Bond (1..=100): 106/106 saved frames.
-- Level: 105/105 against the exp table (the Tesseract path could not read it).
-- ~0.9 s per profile frame including the closed-set reads, in process.
-- Blank/off-layout frames are not "read": no ink means no name and no bond.
-- Remaining gaps: equipment icons beyond tier 4, 3-digit bond sample, ability
-  unlock (능력개방), 16:9/fullscreen, and live verification of the Rust scan and
-  `--watch` against the game (the unit tests use a fake HCU runner).
+- 이름: 라벨 붙인 화면 11/11, 저장된 프레임 106/106. 튜닝 요령은 없다. 잉크 분리한 줄 + 전체 사전 CTC 점수 계산이다. 모델 어휘에 없는
+  음절(예: 슌)은 가능도가 가장 높은 가까운 음절로 적는다.
+- 유대(1..=100): 저장된 프레임 106/106.
+- 레벨: 경험치 표 기준 105/105(Tesseract 경로는 읽지 못했다).
+- 닫힌 집합 읽기를 포함해 프로필 프레임당 약 0.9초, 프로세스 안에서.
+- 빈 프레임이나 레이아웃이 다른 프레임은 "읽지" 않는다. 잉크가 없으면 이름도 유대도 없다.
+- 남은 공백: 4단계를 넘는 장비 아이콘, 세 자리 유대 표본, 능력 개방(능력개방), 16:9/전체 화면, 게임에 대한 Rust 스캔과 `--watch`의
+  라이브 검증(단위 테스트는 가짜 HCU 러너를 쓴다).

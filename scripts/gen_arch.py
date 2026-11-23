@@ -14,20 +14,20 @@ RUST = ROOT / "rust"
 DOCS = ROOT / "docs"
 
 ROLE = {
-    "baocr": "add-on loop, scan, doctor (bin)",
-    "baocr-assist": "observer, widgets, assistant, settings",
-    "baocr-overlay": "layered windows, card, dock, tray",
-    "baocr-hcu": "desktop control, scan loops, guards",
-    "baocr-extract": "profile reading, scenes, raid tracker",
-    "baocr-ocr": "PP-OCR on ONNX Runtime, closed-set CTC",
-    "baocr-pixels": "pixel classifiers, frame key, battle",
-    "baocr-wikidb": "SchaleDB collector, DB, lookups",
-    "baocr-pipeline": "async extraction workers",
-    "baocr-export": "JSON store and index",
-    "baocr-names": "student name dictionary",
-    "baocr-equipment": "equipment icon reading",
-    "baocr-core": "data model, Ocr trait",
-    "baocr-namedict": "tool: builds the name dictionary",
+    "baocr": "애드온 루프, 스캔, doctor (바이너리)",
+    "baocr-assist": "옵저버, 위젯, 어시스턴트, 설정",
+    "baocr-overlay": "레이어드 창, 카드, 도킹, 트레이",
+    "baocr-hcu": "데스크톱 제어, 스캔 루프, 안전장치",
+    "baocr-extract": "프로필 읽기, 화면 종류, 레이드 트래커",
+    "baocr-ocr": "ONNX Runtime의 PP-OCR, 닫힌 집합 CTC",
+    "baocr-pixels": "픽셀 분류기, 프레임 키, 전투",
+    "baocr-wikidb": "SchaleDB 수집기, DB, 조회",
+    "baocr-pipeline": "비동기 추출 워커",
+    "baocr-export": "JSON 저장소와 색인",
+    "baocr-names": "학생 이름 사전",
+    "baocr-equipment": "장비 아이콘 읽기",
+    "baocr-core": "데이터 모델, Ocr 트레이트",
+    "baocr-namedict": "도구: 이름 사전을 만든다",
 }
 GROUP = {  # colour by layer of responsibility
     "baocr": "#1f3a63",
@@ -93,7 +93,7 @@ def main():
         svg.append(f'<g><rect x="{x:.0f}" y="{y:.0f}" width="{bw}" height="{bh}" rx="8" fill="{col}"/>')
         svg.append(f'<text x="{x + bw / 2:.0f}" y="{y + 22:.0f}" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">{n.replace("baocr-", "") or n}</text>')
         svg.append(f'<text x="{x + bw / 2:.0f}" y="{y + 40:.0f}" fill="#dbe4f0" font-size="10.5" text-anchor="middle">{ROLE.get(n, "")}</text>')
-        svg.append(f'<text x="{x + bw - 8:.0f}" y="{y + 52:.0f}" fill="#b7c4d6" font-size="9" text-anchor="end">{loc(pk[n])} lines</text></g>')
+        svg.append(f'<text x="{x + bw - 8:.0f}" y="{y + 52:.0f}" fill="#b7c4d6" font-size="9" text-anchor="end">{loc(pk[n])}줄</text></g>')
     svg.append("</svg>")
     svg_text = "\n".join(svg)
     (DOCS / "diagrams").mkdir(exist_ok=True)

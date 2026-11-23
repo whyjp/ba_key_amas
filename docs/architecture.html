@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Blue Archive add-on architecture</title>
+<title>Blue Archive 애드온 아키텍처</title>
 <style>
 :root{--bg:#f4f6fa;--card:#fff;--ink:#1b2433;--mute:#5d6b82;--line:#d5dbe6;--navy:#1f3a63;--blue:#2f6f9f;--amber:#8a5a1c;--violet:#6b3f8f;--green:#3f7f4f;--code:#eef2f8}
 @media (prefers-color-scheme:dark){:root{--bg:#10151e;--card:#171e2b;--ink:#e6ebf4;--mute:#9aa8bf;--line:#2b3649;--code:#1d2635}}
@@ -35,15 +35,15 @@ code{background:var(--code);padding:1px 5px;border-radius:4px;font-size:13px}
 </head>
 <body>
 <header>
-<h1>Blue Archive add-on: architecture</h1>
-<p>A resident Windows program in Rust that reads the game screen and answers with a card and icons. Source of truth: <code>docs/ARCHITECTURE.md</code> and <code>docs/adr/</code>.</p>
+<h1>Blue Archive 애드온 아키텍처</h1>
+<p>게임 화면을 읽고 카드와 아이콘으로 답하는 Rust 상주 Windows 프로그램이다. 원본 문서는 <code>docs/ARCHITECTURE.md</code>와 <code>docs/adr/</code>다.</p>
 </header>
 <main>
 
 <section>
-<h2>1. Runtime flow</h2>
+<h2>1. 실행 흐름</h2>
 <div class="diagram">
-<svg viewBox="0 0 980 345" role="img" aria-label="runtime flow" font-family="Pretendard, Segoe UI, sans-serif" font-size="13">
+<svg viewBox="0 0 980 345" role="img" aria-label="실행 흐름" font-family="Pretendard, Segoe UI, sans-serif" font-size="13">
 <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#8b97a8"/></marker></defs>
 <g fill="none" stroke="#8b97a8" stroke-width="1.5" marker-end="url(#a)">
 <path d="M150 70H190"/><path d="M310 70H350"/><path d="M470 70H510"/><path d="M630 70H670"/><path d="M790 70H830"/>
@@ -51,25 +51,25 @@ code{background:var(--code);padding:1px 5px;border-radius:4px;font-size:13px}
 <path d="M710 290H890V240"/>
 </g>
 <path d="M410 230V336H930V240" fill="none" stroke="#8b97a8" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#a)"/>
-<rect x="30" y="40" width="120" height="60" rx="9" fill="#555"/><text x="90" y="68" text-anchor="middle" fill="#fff" font-weight="700">game window</text><text x="90" y="86" text-anchor="middle" fill="#ddd" font-size="11">Win32, 4:3</text>
-<rect x="190" y="40" width="120" height="60" rx="9" fill="#8a5a1c"/><text x="250" y="68" text-anchor="middle" fill="#fff" font-weight="700">capture</text><text x="250" y="86" text-anchor="middle" fill="#f1e2cc" font-size="11">hcu, 2 zooms</text>
-<rect x="350" y="40" width="120" height="60" rx="9" fill="#6b3f8f"/><text x="410" y="68" text-anchor="middle" fill="#fff" font-weight="700">settle + battle</text><text x="410" y="86" text-anchor="middle" fill="#e6d8f2" font-size="11">frame key, pixels</text>
+<rect x="30" y="40" width="120" height="60" rx="9" fill="#555"/><text x="90" y="68" text-anchor="middle" fill="#fff" font-weight="700">게임 창</text><text x="90" y="86" text-anchor="middle" fill="#ddd" font-size="11">Win32, 4:3</text>
+<rect x="190" y="40" width="120" height="60" rx="9" fill="#8a5a1c"/><text x="250" y="68" text-anchor="middle" fill="#fff" font-weight="700">캡처</text><text x="250" y="86" text-anchor="middle" fill="#f1e2cc" font-size="11">hcu, 줌 2회</text>
+<rect x="350" y="40" width="120" height="60" rx="9" fill="#6b3f8f"/><text x="410" y="68" text-anchor="middle" fill="#fff" font-weight="700">안정화 + 전투</text><text x="410" y="86" text-anchor="middle" fill="#e6d8f2" font-size="11">프레임 키, 픽셀</text>
 <rect x="510" y="40" width="120" height="60" rx="9" fill="#6b3f8f"/><text x="570" y="68" text-anchor="middle" fill="#fff" font-weight="700">OCR</text><text x="570" y="86" text-anchor="middle" fill="#e6d8f2" font-size="11">PP-OCR, ONNX</text>
-<rect x="670" y="40" width="120" height="60" rx="9" fill="#6b3f8f"/><text x="730" y="68" text-anchor="middle" fill="#fff" font-weight="700">scene + keys</text><text x="730" y="86" text-anchor="middle" fill="#e6d8f2" font-size="11">extract, trackers</text>
+<rect x="670" y="40" width="120" height="60" rx="9" fill="#6b3f8f"/><text x="730" y="68" text-anchor="middle" fill="#fff" font-weight="700">화면 종류 + 조회 키</text><text x="730" y="86" text-anchor="middle" fill="#e6d8f2" font-size="11">extract, trackers</text>
 <rect x="830" y="40" width="120" height="60" rx="9" fill="#2f6f9f"/><text x="890" y="68" text-anchor="middle" fill="#fff" font-weight="700">Observer</text><text x="890" y="86" text-anchor="middle" fill="#d6e6f4" font-size="11">Observation</text>
-<rect x="830" y="160" width="120" height="80" rx="9" fill="#2f6f9f"/><text x="890" y="190" text-anchor="middle" fill="#fff" font-weight="700">Assistant</text><text x="890" y="208" text-anchor="middle" fill="#d6e6f4" font-size="11">widgets, diffing,</text><text x="890" y="222" text-anchor="middle" fill="#d6e6f4" font-size="11">settings, commands</text>
-<rect x="590" y="170" width="120" height="60" rx="9" fill="#2f6f9f"/><text x="650" y="196" text-anchor="middle" fill="#fff" font-weight="700">Surface</text><text x="650" y="214" text-anchor="middle" fill="#d6e6f4" font-size="11">output port</text>
-<rect x="350" y="170" width="120" height="60" rx="9" fill="#2f6f9f"/><text x="410" y="196" text-anchor="middle" fill="#fff" font-weight="700">Overlay</text><text x="410" y="214" text-anchor="middle" fill="#d6e6f4" font-size="11">own thread</text>
-<rect x="130" y="170" width="120" height="60" rx="9" fill="#555"/><text x="190" y="196" text-anchor="middle" fill="#fff" font-weight="700">on the game</text><text x="190" y="214" text-anchor="middle" fill="#ddd" font-size="11">card, icons</text>
-<rect x="590" y="260" width="120" height="60" rx="9" fill="#3f7f4f"/><text x="650" y="286" text-anchor="middle" fill="#fff" font-weight="700">wiki.db</text><text x="650" y="304" text-anchor="middle" fill="#d9eadd" font-size="11">static facts</text>
-<text x="450" y="328" fill="#8b97a8" font-size="11">dashed: button clicks return as events to the Assistant</text>
+<rect x="830" y="160" width="120" height="80" rx="9" fill="#2f6f9f"/><text x="890" y="190" text-anchor="middle" fill="#fff" font-weight="700">Assistant</text><text x="890" y="208" text-anchor="middle" fill="#d6e6f4" font-size="11">위젯, 변경 비교,</text><text x="890" y="222" text-anchor="middle" fill="#d6e6f4" font-size="11">설정, 명령</text>
+<rect x="590" y="170" width="120" height="60" rx="9" fill="#2f6f9f"/><text x="650" y="196" text-anchor="middle" fill="#fff" font-weight="700">Surface</text><text x="650" y="214" text-anchor="middle" fill="#d6e6f4" font-size="11">출력 포트</text>
+<rect x="350" y="170" width="120" height="60" rx="9" fill="#2f6f9f"/><text x="410" y="196" text-anchor="middle" fill="#fff" font-weight="700">Overlay</text><text x="410" y="214" text-anchor="middle" fill="#d6e6f4" font-size="11">자체 스레드</text>
+<rect x="130" y="170" width="120" height="60" rx="9" fill="#555"/><text x="190" y="196" text-anchor="middle" fill="#fff" font-weight="700">게임 위</text><text x="190" y="214" text-anchor="middle" fill="#ddd" font-size="11">카드, 아이콘</text>
+<rect x="590" y="260" width="120" height="60" rx="9" fill="#3f7f4f"/><text x="650" y="286" text-anchor="middle" fill="#fff" font-weight="700">wiki.db</text><text x="650" y="304" text-anchor="middle" fill="#d9eadd" font-size="11">정적 정보</text>
+<text x="450" y="328" fill="#8b97a8" font-size="11">점선: 버튼 클릭은 이벤트로 Assistant에 돌아간다</text>
 </svg>
 </div>
-<p class="note">The loop polls slowly in a battle and when a view is read and still; the overlay thread wakes on change.</p>
+<p class="note">루프는 전투 중이거나 화면을 읽은 뒤 화면이 멈춰 있으면 느리게 폴링한다. 오버레이 스레드는 변경이 있을 때 깨어난다.</p>
 </section>
 
 <section>
-<h2>2. Crate dependency graph <span class="note">(generated by <code>scripts/gen_arch.py</code> from <code>cargo metadata</code>)</span></h2>
+<h2>2. 크레이트 의존 그래프 <span class="note">(<code>scripts/gen_arch.py</code>가 <code>cargo metadata</code>에서 생성)</span></h2>
 <div class="diagram"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 894 614" role="img" aria-label="crate dependency graph" font-family="Pretendard, Segoe UI, sans-serif">
 <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#8b97a8"/></marker></defs>
 <path d="M338 85 C338 112 229 112 229 137" fill="none" stroke="#8b97a8" stroke-width="1.2" marker-end="url(#ah)" opacity="0.8"/>
@@ -106,139 +106,139 @@ code{background:var(--code);padding:1px 5px;border-radius:4px;font-size:13px}
 <path d="M774 421 C774 448 447 448 447 473" fill="none" stroke="#8b97a8" stroke-width="1.2" marker-end="url(#ah)" opacity="0.8"/>
 <g><rect x="240" y="27" width="196" height="58" rx="8" fill="#1f3a63"/>
 <text x="338" y="49" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">baocr</text>
-<text x="338" y="67" fill="#dbe4f0" font-size="10.5" text-anchor="middle">add-on loop, scan, doctor (bin)</text>
-<text x="428" y="79" fill="#b7c4d6" font-size="9" text-anchor="end">975 lines</text></g>
+<text x="338" y="67" fill="#dbe4f0" font-size="10.5" text-anchor="middle">애드온 루프, 스캔, doctor (바이너리)</text>
+<text x="428" y="79" fill="#b7c4d6" font-size="9" text-anchor="end">975줄</text></g>
 <g><rect x="458" y="27" width="196" height="58" rx="8" fill="#777777"/>
 <text x="556" y="49" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">namedict</text>
-<text x="556" y="67" fill="#dbe4f0" font-size="10.5" text-anchor="middle">tool: builds the name dictionary</text>
-<text x="646" y="79" fill="#b7c4d6" font-size="9" text-anchor="end">117 lines</text></g>
+<text x="556" y="67" fill="#dbe4f0" font-size="10.5" text-anchor="middle">도구: 이름 사전을 만든다</text>
+<text x="646" y="79" fill="#b7c4d6" font-size="9" text-anchor="end">117줄</text></g>
 <g><rect x="131" y="139" width="196" height="58" rx="8" fill="#2f6f9f"/>
 <text x="229" y="161" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">assist</text>
-<text x="229" y="179" fill="#dbe4f0" font-size="10.5" text-anchor="middle">observer, widgets, assistant, settings</text>
-<text x="319" y="191" fill="#b7c4d6" font-size="9" text-anchor="end">3062 lines</text></g>
+<text x="229" y="179" fill="#dbe4f0" font-size="10.5" text-anchor="middle">옵저버, 위젯, 어시스턴트, 설정</text>
+<text x="319" y="191" fill="#b7c4d6" font-size="9" text-anchor="end">3062줄</text></g>
 <g><rect x="349" y="139" width="196" height="58" rx="8" fill="#8a5a1c"/>
 <text x="447" y="161" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">hcu</text>
-<text x="447" y="179" fill="#dbe4f0" font-size="10.5" text-anchor="middle">desktop control, scan loops, guards</text>
-<text x="537" y="191" fill="#b7c4d6" font-size="9" text-anchor="end">4004 lines</text></g>
+<text x="447" y="179" fill="#dbe4f0" font-size="10.5" text-anchor="middle">데스크톱 제어, 스캔 루프, 안전장치</text>
+<text x="537" y="191" fill="#b7c4d6" font-size="9" text-anchor="end">4004줄</text></g>
 <g><rect x="567" y="139" width="196" height="58" rx="8" fill="#6b3f8f"/>
 <text x="665" y="161" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">pipeline</text>
-<text x="665" y="179" fill="#dbe4f0" font-size="10.5" text-anchor="middle">async extraction workers</text>
-<text x="755" y="191" fill="#b7c4d6" font-size="9" text-anchor="end">496 lines</text></g>
+<text x="665" y="179" fill="#dbe4f0" font-size="10.5" text-anchor="middle">비동기 추출 워커</text>
+<text x="755" y="191" fill="#b7c4d6" font-size="9" text-anchor="end">496줄</text></g>
 <g><rect x="22" y="251" width="196" height="58" rx="8" fill="#3f7f4f"/>
 <text x="120" y="273" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">export</text>
-<text x="120" y="291" fill="#dbe4f0" font-size="10.5" text-anchor="middle">JSON store and index</text>
-<text x="210" y="303" fill="#b7c4d6" font-size="9" text-anchor="end">464 lines</text></g>
+<text x="120" y="291" fill="#dbe4f0" font-size="10.5" text-anchor="middle">JSON 저장소와 색인</text>
+<text x="210" y="303" fill="#b7c4d6" font-size="9" text-anchor="end">464줄</text></g>
 <g><rect x="240" y="251" width="196" height="58" rx="8" fill="#6b3f8f"/>
 <text x="338" y="273" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">extract</text>
-<text x="338" y="291" fill="#dbe4f0" font-size="10.5" text-anchor="middle">profile reading, scenes, raid tracker</text>
-<text x="428" y="303" fill="#b7c4d6" font-size="9" text-anchor="end">1729 lines</text></g>
+<text x="338" y="291" fill="#dbe4f0" font-size="10.5" text-anchor="middle">프로필 읽기, 화면 종류, 레이드 트래커</text>
+<text x="428" y="303" fill="#b7c4d6" font-size="9" text-anchor="end">1729줄</text></g>
 <g><rect x="458" y="251" width="196" height="58" rx="8" fill="#2f6f9f"/>
 <text x="556" y="273" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">overlay</text>
-<text x="556" y="291" fill="#dbe4f0" font-size="10.5" text-anchor="middle">layered windows, card, dock, tray</text>
-<text x="646" y="303" fill="#b7c4d6" font-size="9" text-anchor="end">4518 lines</text></g>
+<text x="556" y="291" fill="#dbe4f0" font-size="10.5" text-anchor="middle">레이어드 창, 카드, 도킹, 트레이</text>
+<text x="646" y="303" fill="#b7c4d6" font-size="9" text-anchor="end">4518줄</text></g>
 <g><rect x="676" y="251" width="196" height="58" rx="8" fill="#3f7f4f"/>
 <text x="774" y="273" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">wikidb</text>
-<text x="774" y="291" fill="#dbe4f0" font-size="10.5" text-anchor="middle">SchaleDB collector, DB, lookups</text>
-<text x="864" y="303" fill="#b7c4d6" font-size="9" text-anchor="end">2580 lines</text></g>
+<text x="774" y="291" fill="#dbe4f0" font-size="10.5" text-anchor="middle">SchaleDB 수집기, DB, 조회</text>
+<text x="864" y="303" fill="#b7c4d6" font-size="9" text-anchor="end">2580줄</text></g>
 <g><rect x="22" y="363" width="196" height="58" rx="8" fill="#6b3f8f"/>
 <text x="120" y="385" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">equipment</text>
-<text x="120" y="403" fill="#dbe4f0" font-size="10.5" text-anchor="middle">equipment icon reading</text>
-<text x="210" y="415" fill="#b7c4d6" font-size="9" text-anchor="end">456 lines</text></g>
+<text x="120" y="403" fill="#dbe4f0" font-size="10.5" text-anchor="middle">장비 아이콘 읽기</text>
+<text x="210" y="415" fill="#b7c4d6" font-size="9" text-anchor="end">456줄</text></g>
 <g><rect x="240" y="363" width="196" height="58" rx="8" fill="#6b3f8f"/>
 <text x="338" y="385" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">names</text>
-<text x="338" y="403" fill="#dbe4f0" font-size="10.5" text-anchor="middle">student name dictionary</text>
-<text x="428" y="415" fill="#b7c4d6" font-size="9" text-anchor="end">649 lines</text></g>
+<text x="338" y="403" fill="#dbe4f0" font-size="10.5" text-anchor="middle">학생 이름 사전</text>
+<text x="428" y="415" fill="#b7c4d6" font-size="9" text-anchor="end">649줄</text></g>
 <g><rect x="458" y="363" width="196" height="58" rx="8" fill="#6b3f8f"/>
 <text x="556" y="385" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">ocr</text>
-<text x="556" y="403" fill="#dbe4f0" font-size="10.5" text-anchor="middle">PP-OCR on ONNX Runtime, closed-set CTC</text>
-<text x="646" y="415" fill="#b7c4d6" font-size="9" text-anchor="end">372 lines</text></g>
+<text x="556" y="403" fill="#dbe4f0" font-size="10.5" text-anchor="middle">ONNX Runtime의 PP-OCR, 닫힌 집합 CTC</text>
+<text x="646" y="415" fill="#b7c4d6" font-size="9" text-anchor="end">372줄</text></g>
 <g><rect x="676" y="363" width="196" height="58" rx="8" fill="#6b3f8f"/>
 <text x="774" y="385" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">pixels</text>
-<text x="774" y="403" fill="#dbe4f0" font-size="10.5" text-anchor="middle">pixel classifiers, frame key, battle</text>
-<text x="864" y="415" fill="#b7c4d6" font-size="9" text-anchor="end">1361 lines</text></g>
+<text x="774" y="403" fill="#dbe4f0" font-size="10.5" text-anchor="middle">픽셀 분류기, 프레임 키, 전투</text>
+<text x="864" y="415" fill="#b7c4d6" font-size="9" text-anchor="end">1361줄</text></g>
 <g><rect x="349" y="475" width="196" height="58" rx="8" fill="#555555"/>
 <text x="447" y="497" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">core</text>
-<text x="447" y="515" fill="#dbe4f0" font-size="10.5" text-anchor="middle">data model, Ocr trait</text>
-<text x="537" y="527" fill="#b7c4d6" font-size="9" text-anchor="end">365 lines</text></g>
+<text x="447" y="515" fill="#dbe4f0" font-size="10.5" text-anchor="middle">데이터 모델, Ocr 트레이트</text>
+<text x="537" y="527" fill="#b7c4d6" font-size="9" text-anchor="end">365줄</text></g>
 </svg></div>
 </section>
 
 <section>
-<h2>3. Static data and dynamic data</h2>
+<h2>3. 정적 데이터와 동적 데이터</h2>
 <table>
-<tr><th>Data</th><th>Kind</th><th>Source</th></tr>
-<tr><td>Screen, mission, stage, raid boss, difficulty, mode</td><td>dynamic</td><td>OCR and pixels (keys only)</td></tr>
-<tr><td>Squad members and slots</td><td>dynamic</td><td>closed-set name reading</td></tr>
-<tr><td>Enemy armor and attack mix, levels, terrain</td><td>static</td><td><code>wiki.db</code></td></tr>
-<tr><td>Student types, adaptation, role; type table</td><td>static</td><td><code>wiki.db</code></td></tr>
-<tr><td>Dock placement, fold state, switches</td><td>user state</td><td><code>overlay.json</code></td></tr>
+<tr><th>데이터</th><th>종류</th><th>출처</th></tr>
+<tr><td>화면, 임무, 스테이지, 레이드 보스, 난이도, 모드</td><td>동적</td><td>OCR과 픽셀(조회 키만)</td></tr>
+<tr><td>편성 구성원과 슬롯</td><td>동적</td><td>닫힌 집합 이름 읽기</td></tr>
+<tr><td>적 방어 타입과 공격 타입 비중, 레벨, 지형</td><td>정적</td><td><code>wiki.db</code></td></tr>
+<tr><td>학생 타입, 적응, 역할, 타입 상성표</td><td>정적</td><td><code>wiki.db</code></td></tr>
+<tr><td>도킹 위치, 접기 상태, 스위치</td><td>사용자 상태</td><td><code>overlay.json</code></td></tr>
 </table>
-<p class="note">Rule: the screen supplies keys, the database supplies facts (ADR 0005).</p>
+<p class="note">규칙: 화면은 조회 키를 제공하고, 데이터베이스는 정보를 제공한다(ADR 0005).</p>
 </section>
 
 <section>
-<h2>4. OCR pipeline</h2>
+<h2>4. OCR 파이프라인</h2>
 <div class="diagram">
-<svg viewBox="0 0 980 190" role="img" aria-label="OCR pipeline" font-family="Pretendard, Segoe UI, sans-serif" font-size="13">
+<svg viewBox="0 0 980 190" role="img" aria-label="OCR 파이프라인" font-family="Pretendard, Segoe UI, sans-serif" font-size="13">
 <defs><marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#8b97a8"/></marker></defs>
 <g fill="none" stroke="#8b97a8" stroke-width="1.5" marker-end="url(#b)"><path d="M150 50H200"/><path d="M350 50H400"/><path d="M550 50H600"/><path d="M750 50H800"/><path d="M475 80V120"/><path d="M475 150H350"/></g>
-<rect x="30" y="20" width="120" height="60" rx="9" fill="#555"/><text x="90" y="55" text-anchor="middle" fill="#fff" font-weight="700">frame 1280x960</text>
-<rect x="200" y="20" width="150" height="60" rx="9" fill="#6b3f8f"/><text x="275" y="46" text-anchor="middle" fill="#fff" font-weight="700">detector</text><text x="275" y="64" text-anchor="middle" fill="#e6d8f2" font-size="11">PP-OCRv6 det small</text>
-<rect x="400" y="20" width="150" height="60" rx="9" fill="#6b3f8f"/><text x="475" y="46" text-anchor="middle" fill="#fff" font-weight="700">recogniser</text><text x="475" y="64" text-anchor="middle" fill="#e6d8f2" font-size="11">Korean PP-OCRv5, batch 4</text>
-<rect x="600" y="20" width="150" height="60" rx="9" fill="#6b3f8f"/><text x="675" y="46" text-anchor="middle" fill="#fff" font-weight="700">text boxes</text><text x="675" y="64" text-anchor="middle" fill="#e6d8f2" font-size="11">scene classification</text>
-<rect x="800" y="20" width="150" height="60" rx="9" fill="#2f6f9f"/><text x="875" y="46" text-anchor="middle" fill="#fff" font-weight="700">keys</text><text x="875" y="64" text-anchor="middle" fill="#d6e6f4" font-size="11">mission, boss, mode</text>
-<rect x="200" y="120" width="150" height="60" rx="9" fill="#6b3f8f"/><text x="275" y="146" text-anchor="middle" fill="#fff" font-weight="700">closed-set CTC</text><text x="275" y="164" text-anchor="middle" fill="#e6d8f2" font-size="11">names, ink-width model</text>
-<text x="500" y="145" fill="#8b97a8" font-size="12">same recogniser, second session (CPU)</text>
+<rect x="30" y="20" width="120" height="60" rx="9" fill="#555"/><text x="90" y="55" text-anchor="middle" fill="#fff" font-weight="700">프레임 1280x960</text>
+<rect x="200" y="20" width="150" height="60" rx="9" fill="#6b3f8f"/><text x="275" y="46" text-anchor="middle" fill="#fff" font-weight="700">검출기</text><text x="275" y="64" text-anchor="middle" fill="#e6d8f2" font-size="11">PP-OCRv6 det small</text>
+<rect x="400" y="20" width="150" height="60" rx="9" fill="#6b3f8f"/><text x="475" y="46" text-anchor="middle" fill="#fff" font-weight="700">인식기</text><text x="475" y="64" text-anchor="middle" fill="#e6d8f2" font-size="11">한국어 PP-OCRv5, 배치 4</text>
+<rect x="600" y="20" width="150" height="60" rx="9" fill="#6b3f8f"/><text x="675" y="46" text-anchor="middle" fill="#fff" font-weight="700">텍스트 박스</text><text x="675" y="64" text-anchor="middle" fill="#e6d8f2" font-size="11">화면 종류 분류</text>
+<rect x="800" y="20" width="150" height="60" rx="9" fill="#2f6f9f"/><text x="875" y="46" text-anchor="middle" fill="#fff" font-weight="700">조회 키</text><text x="875" y="64" text-anchor="middle" fill="#d6e6f4" font-size="11">임무, 보스, 모드</text>
+<rect x="200" y="120" width="150" height="60" rx="9" fill="#6b3f8f"/><text x="275" y="146" text-anchor="middle" fill="#fff" font-weight="700">닫힌 집합 CTC</text><text x="275" y="164" text-anchor="middle" fill="#e6d8f2" font-size="11">이름, 잉크 너비 모델</text>
+<text x="500" y="145" fill="#8b97a8" font-size="12">같은 인식기, 두 번째 세션(CPU)</text>
 </svg>
 </div>
-<p class="note">Runs on CPU or DirectML (<code>--features directml</code>, 2.7 times faster on the fixtures, identical text). See ADR 0002.</p>
+<p class="note">CPU나 DirectML(<code>--features directml</code>)에서 돈다. 픽스처에서 2.7배 빠르고 결과 텍스트는 같다. ADR 0002 참고.</p>
 </section>
 
 <section>
-<h2>5. Threads and windows</h2>
+<h2>5. 스레드와 창</h2>
 <table>
-<tr><th>Thread or window</th><th>Job</th></tr>
-<tr><td>main loop</td><td>capture, read, observe, present, run the scan</td></tr>
-<tr><td>overlay worker</td><td>four layered windows (card interactive; in-game card, icons, tooltip click-through; all excluded from capture); draws on change</td></tr>
-<tr><td>tray</td><td>notification icon with 종료, on its own hidden window</td></tr>
-<tr><td>input block</td><td>only during a scan: low-level hooks, injected events pass, ESC aborts</td></tr>
-<tr><td>input hints (off)</td><td>pass-through mouse timestamps for earlier recognition</td></tr>
+<tr><th>스레드 또는 창</th><th>하는 일</th></tr>
+<tr><td>메인 루프</td><td>캡처, 읽기, 관찰, 표시, 스캔 실행</td></tr>
+<tr><td>오버레이 워커</td><td>레이어드 창 네 개(카드는 상호작용형, 게임 내 카드, 아이콘, 툴팁은 클릭 통과, 모두 캡처에서 제외), 변경이 있을 때 그린다</td></tr>
+<tr><td>트레이</td><td>종료 메뉴가 있는 알림 아이콘, 자체 숨은 창에서 동작</td></tr>
+<tr><td>입력 차단</td><td>스캔 중에만 동작: 저수준 훅, 주입된 이벤트는 통과, ESC로 중단</td></tr>
+<tr><td>입력 힌트(꺼짐)</td><td>더 빠른 인식을 위한 통과형 마우스 타임스탬프</td></tr>
 </table>
 </section>
 
 <section>
-<h2>6. Input policy</h2>
+<h2>6. 입력 정책</h2>
 <ul>
-<li>Passive code gets a read-only handle. Input exists only on <code>Exclusive</code>, taken when the player starts a scan.</li>
-<li>Guards at one boundary: point on a monitor, window layout unchanged, target window under the point, partial input is <code>effect_unknown</code> and never retried.</li>
-<li>Every input call is logged without content; the player's own input is blocked during the scan, hardware ESC returns control.</li>
+<li>수동 관찰 코드는 읽기 전용 핸들을 받는다. 입력은 <code>Exclusive</code>에만 있고, 플레이어가 스캔을 시작할 때 얻는다.</li>
+<li>안전장치는 한 경계에 둔다. 점이 모니터 안에 있는지, 창 레이아웃이 그대로인지, 점 아래에 대상 창이 있는지 검사한다. 부분 입력은 <code>effect_unknown</code>으로 처리하고 재시도하지 않는다.</li>
+<li>입력 호출은 모두 내용 없이 기록한다. 스캔 중에는 플레이어 자신의 입력이 막히고, 하드웨어 ESC가 제어권을 돌려준다.</li>
 </ul>
 </section>
 
 <section>
-<h2>7. Decision records</h2>
+<h2>7. 결정 기록</h2>
 <div class="adr">
-<a href="adr/0001-addon-shell.md"><b>0001 Add-on shell <span class="tag ok">Accepted</span></b>A resident add-on, passive first, scan by hand.</a>
-<a href="adr/0002-ocr-stack.md"><b>0002 OCR stack <span class="tag ok">Accepted</span></b>PP-OCR on ONNX Runtime in process, DirectML optional, closed-set names.</a>
-<a href="adr/0003-native-desktop-control.md"><b>0003 Native desktop control <span class="tag ok">Accepted</span></b>Win32 in process instead of the HCU helper.</a>
-<a href="adr/0004-input-policy.md"><b>0004 Input policy <span class="tag ok">Accepted</span></b>Input only for the scan, guarded, observe never intercept.</a>
-<a href="adr/0005-static-db-dynamic-screen.md"><b>0005 Static DB, dynamic screen <span class="tag ok">Accepted</span></b>Facts from the database, keys from the screen.</a>
-<a href="adr/0006-enemy-weighting.md"><b>0006 Enemy weighting <span class="tag ok">Accepted</span></b>HP-weighted armor and attack mix (DB v4).</a>
-<a href="adr/0007-overlay-windows.md"><b>0007 Overlay windows <span class="tag ok">Accepted</span></b>Layered windows, change cache, bookmark card.</a>
-<a href="adr/0008-raid-modelling.md"><b>0008 Raid modelling <span class="tag ok">Accepted</span></b>Difficulty rows, seasons, raid screens.</a>
-<a href="adr/0009-build-limits.md"><b>0009 Build limits <span class="tag ok">Accepted</span></b>Settings that bound RAM and disk.</a>
+<a href="adr/0001-addon-shell.md"><b>0001 애드온 셸 <span class="tag ok">확정</span></b>상주 애드온, 수동 관찰 우선, 스캔은 직접 시작.</a>
+<a href="adr/0002-ocr-stack.md"><b>0002 OCR 스택 <span class="tag ok">확정</span></b>프로세스 내 ONNX Runtime의 PP-OCR, DirectML은 선택, 이름은 닫힌 집합 읽기.</a>
+<a href="adr/0003-native-desktop-control.md"><b>0003 네이티브 데스크톱 제어 <span class="tag ok">확정</span></b>HCU 헬퍼 대신 프로세스 내 Win32.</a>
+<a href="adr/0004-input-policy.md"><b>0004 입력 정책 <span class="tag ok">확정</span></b>입력은 스캔에만, 안전장치를 거치고, 관찰만 하며 가로채지 않는다.</a>
+<a href="adr/0005-static-db-dynamic-screen.md"><b>0005 정적 DB, 동적 화면 <span class="tag ok">확정</span></b>정보는 데이터베이스에서, 조회 키는 화면에서.</a>
+<a href="adr/0006-enemy-weighting.md"><b>0006 적 가중 <span class="tag ok">확정</span></b>HP로 가중한 방어 타입과 공격 타입 비중(DB v4).</a>
+<a href="adr/0007-overlay-windows.md"><b>0007 오버레이 창 <span class="tag ok">확정</span></b>레이어드 창, 변경 캐시, 북마크 카드.</a>
+<a href="adr/0008-raid-modelling.md"><b>0008 레이드 모델링 <span class="tag ok">확정</span></b>난이도 행, 시즌, 레이드 화면.</a>
+<a href="adr/0009-build-limits.md"><b>0009 빌드 제한 <span class="tag ok">확정</span></b>RAM과 디스크를 제한하는 설정.</a>
 </div>
 </section>
 
 <section>
-<h2>8. Verification levels</h2>
+<h2>8. 검증 수준</h2>
 <table>
-<tr><th>Level</th><th>What</th></tr>
-<tr><td>unit</td><td>scenes, trackers, geometry, hover, weights, guards with a fake desktop</td></tr>
-<tr><td>fixtures</td><td>real screenshots and OCR boxes in <code>fixtures/screens</code></td></tr>
-<tr><td>measurement</td><td>timelines and OCR timing, <code>docs/speed-research.md</code></td></tr>
-<tr><td>live e2e</td><td>the add-on against the real game with a state dump (harness in progress)</td></tr>
-<tr><td>human</td><td>taste, hardware ESC, tray menu, frame rate</td></tr>
+<tr><th>수준</th><th>내용</th></tr>
+<tr><td>단위</td><td>화면 종류, 트래커, 기하, 호버, 가중치, 가짜 데스크톱을 쓴 안전장치</td></tr>
+<tr><td>픽스처</td><td><code>fixtures/screens</code>의 실제 스크린샷과 OCR 박스</td></tr>
+<tr><td>측정</td><td>타임라인과 OCR 시간, <code>docs/speed-research.md</code></td></tr>
+<tr><td>라이브 e2e</td><td>실제 게임에서 돌리는 애드온과 상태 덤프(하네스 작업 중)</td></tr>
+<tr><td>사람</td><td>카드의 시각 품질, 호버 체감, 하드웨어 ESC, 트레이 메뉴, 프레임 속도</td></tr>
 </table>
 </section>
 

@@ -1,26 +1,26 @@
-# 0001 A resident add-on, passive first, scan by hand
+# 0001 애드온은 상주하고 수동 관찰이 기본이며 스캔은 사용자가 시작한다
 
-Status: Accepted
+상태: 확정
 
-## Context
-The project began as a one-shot roster scanner. Players want guidance while they play (mission facts, squad
-fit) more than another export, and the game window appears, closes and restarts at any time.
+## 배경
+이 프로젝트는 한 번 돌리고 끝나는 명단 스캐너로 시작했다. 플레이어는 내보내기 파일보다 플레이 중에 받는 안내(임무 정보,
+편성 적합도)를 더 원한다. 게임 창은 언제든 나타나고 닫히고 다시 시작된다.
 
-## Decision
-`baocr` with no arguments runs as an add-on. It finds the game window whenever it exists, docks a card
-against it, and reads the screen passively. The roster scan is one feature, started from the card by the
-player, and is the only thing that sends input to the game. Output of the scan is JSON only.
+## 결정
+`baocr`를 인자 없이 실행하면 애드온으로 동작한다. 게임 창이 있을 때마다 찾아서 그 옆에 카드를 붙이고 화면을 수동 관찰로
+읽는다. 명단 스캔은 기능 하나이며 플레이어가 카드에서 시작한다. 게임에 입력을 보내는 기능은 스캔뿐이다. 스캔 결과는
+JSON으로만 내보낸다.
 
-## Alternatives
-- A separate overlay program and a separate scanner: two processes to start and keep consistent.
-- Scanning automatically on a schedule. Rejected, because input to the game must be an explicit act.
+## 대안
+- 오버레이 프로그램과 스캐너를 따로 두는 방식. 프로세스 둘을 띄우고 서로 맞춰 관리해야 한다.
+- 일정에 따라 자동으로 스캔하는 방식. 게임에 보내는 입력은 명시적인 행동이어야 하므로 기각했다.
 
-## Consequences
-- One process, one settings file, one tray icon that can always close it.
-- The loop must survive the game being absent, restarted or covered (`forget`, region re-detection).
+## 결과
+- 프로세스 하나, 설정 파일 하나, 언제든 애드온을 끌 수 있는 트레이 아이콘 하나로 구성된다.
+- 루프는 게임이 없거나 다시 시작되거나 가려져도 살아 있어야 한다(`forget`, 영역 재검출).
 
-## Evidence
-README sections "What it does" and "Card behaviour"; `cli/src/assist.rs`; started before and after the game in live runs.
+## 근거
+README의 "What it does"와 "Card behaviour" 절, `cli/src/assist.rs`, 라이브 실행에서 게임 시작 전과 후에 애드온을 띄워 확인했다.
 
-## Revisit when
-The game offers an official overlay or API.
+## 다시 볼 조건
+게임이 공식 오버레이나 API를 제공할 때.

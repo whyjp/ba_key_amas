@@ -1,38 +1,36 @@
-# 0004 Input only for the scan, guarded at one boundary, observe never intercept
+# 0004 입력은 스캔에만 쓰고 한 경계에서 막으며 관찰만 하고 가로채지 않는다
 
-Status: Accepted
+상태: 확정
 
-## Context
-Sending input to a live game is the risky part: wrong window, stale coordinates, half-sent actions, and a
-player who needs control back. A PRD review proposed a general policy layer for agents.
+## 배경
+실행 중인 게임에 입력을 보내는 것이 가장 위험한 부분이다. 창을 잘못 잡거나 좌표가 낡거나 동작이 반쯤만 전달될 수 있고,
+플레이어는 조작권을 돌려받아야 한다. PRD 검토에서 에이전트용 일반 정책 계층이 제안되었다.
 
-## Decision
-1. Passive code holds a read-only handle (`Hcu`). Input exists only on `Exclusive`, taken when the player
-   starts a scan.
-2. The native runner refuses input at its boundary: a point on no monitor, a changed window layout over the
-   target, or a foreign window under the point (the add-on's own windows are excluded from the layout). Partial
-   delivery answers `effect_unknown` and is never retried.
-3. Every input call is logged (time, points, window, result code) to `%APPDATA%\baocr\input.log`. No typed
-   content, no images. `BAOCR_INPUT_LOG=0` turns it off.
-4. During a scan the player's own input is blocked by low-level hooks that let injected events pass. An
-   injected ESC does not abort, hardware ESC does. The block lifts at scan end, on ESC, from the tray, and
-   after 40 minutes.
-5. The add-on may observe the player's mouse (optional, off by default) but never intercepts or forwards it.
+## 결정
+1. 수동 관찰 코드는 읽기 전용 핸들(`Hcu`)만 쥔다. 입력은 `Exclusive`에만 있고, 플레이어가 스캔을 시작할 때 잡는다.
+2. 네이티브 러너는 경계에서 입력을 거부한다. 모니터에 속하지 않는 점, 대상 위의 창 레이아웃이 바뀐 경우, 점 아래에 다른
+   창이 있는 경우가 해당한다(애드온 자신의 창은 레이아웃에서 제외한다). 일부만 전달되면 `effect_unknown`으로 응답하고
+   다시 시도하지 않는다.
+3. 입력 호출은 모두 `%APPDATA%\baocr\input.log`에 기록한다(시각, 좌표, 창, 결과 코드). 입력한 내용과 이미지는 남기지
+   않는다. `BAOCR_INPUT_LOG=0`으로 끈다.
+4. 스캔 중에는 플레이어 자신의 입력을 저수준 훅으로 막되 주입된 이벤트는 통과시킨다. 주입된 ESC는 중단시키지 못하고
+   하드웨어 ESC는 중단시킨다. 차단은 스캔이 끝날 때, ESC를 누를 때, 트레이에서 해제할 때, 40분이 지난 뒤에 풀린다.
+5. 애드온은 플레이어의 마우스를 관찰할 수 있지만(선택 사항, 기본은 꺼짐) 가로채거나 전달하지 않는다.
 
-## Alternatives
-- A full policy engine with modes and consent is too much for one game with two modes (read, scan).
-- A transparent overlay that captures clicks and re-injects them adds a hop, breaks drag, hold and scroll,
-  and makes every play input look injected (account risk). Rejected.
-- No input block. A stray click during a scan corrupts the data.
+## 대안
+- 모드와 동의를 갖춘 완전한 정책 엔진. 모드가 읽기와 스캔 둘뿐인 게임 하나에는 과하다.
+- 클릭을 받아 다시 주입하는 투명 오버레이. 단계가 하나 늘고 드래그, 누르고 있기, 스크롤이 깨지며 모든 플레이 입력이
+  주입된 것으로 보인다(계정 위험). 기각했다.
+- 입력 차단 없음. 스캔 중에 잘못 클릭하면 데이터가 망가진다.
 
-## Consequences
-- ESC and the real input lock cannot be tested with injected events; a human checks them.
-- Guards are tested with a fake desktop; the real paths are exercised by the live e2e harness.
-- Measured cost of the settle wait after input: about 130 ms on a still screen in tests, up to 600 ms on a
-  never-still one (`BAOCR_HCU_SETTLE_MS`).
+## 결과
+- ESC와 실제 입력 잠금은 주입된 이벤트로 테스트할 수 없어서 사람이 확인한다.
+- 안전장치는 가짜 데스크톱으로 테스트하고 실제 경로는 라이브 e2e 하네스로 검증한다.
+- 입력 뒤 화면이 멈출 때까지 기다리는 비용을 측정했다. 테스트에서 정지한 화면은 약 130 ms, 끝내 멈추지 않는 화면은
+  최대 600 ms다(`BAOCR_HCU_SETTLE_MS`).
 
-## Evidence
+## 근거
 `hcu/src/guard.rs`, `native.rs`, `audit.rs`, `overlay/src/input_block.rs`, `docs/hcu-native.md`.
 
-## Revisit when
-The game exposes an input API, or a scan must run unattended.
+## 다시 볼 조건
+게임이 입력 API를 제공할 때, 또는 스캔을 사람 없이 돌려야 할 때.

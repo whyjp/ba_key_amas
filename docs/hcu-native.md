@@ -1,95 +1,91 @@
-# In-process desktop control (`crates/hcu`)
+# 프로세스 내 데스크톱 제어 (`crates/hcu`)
 
-The add-on no longer starts Microsoft's `computer-use` helper. `native.rs` answers the same requests with the
-same JSON records, so everything above the `Runner` trait is unchanged. The helper backend is still reachable
-with `BAOCR_HCU=process` for comparison, until a live parity scan has been accepted.
+애드온은 더 이상 Microsoft의 `computer-use` 헬퍼를 띄우지 않는다. `native.rs`가 같은 요청에 같은 JSON 레코드로 답하므로
+`Runner` 트레이트 위쪽은 바뀌지 않았다. 라이브 동등성 스캔이 승인될 때까지는 비교용으로 `BAOCR_HCU=process`로 헬퍼 백엔드를 쓸 수 있다.
 
-Reference: Microsoft Hybrid Computer Use (MIT), revision `8ce82b310b014ab1133b28febc2eca81527e43e6`
-(2026-11-18). Attribution: `THIRD_PARTY_NOTICES.md`. We read the C# as a specification and copied nothing.
+참조: Microsoft Hybrid Computer Use(MIT), 리비전 `8ce82b310b014ab1133b28febc2eca81527e43e6`
+(2026-11-18). 저작권 표시는 `THIRD_PARTY_NOTICES.md`에 있다. C# 코드는 명세로만 읽었고 구현에 복사한 것은 없다.
+원본 파일의 보관 사본과 이식 대응표, 아직 이식하지 않은 기능은 [hcu-reference.md](hcu-reference.md)에 정리했다.
 
-## What was ported
+## 이식한 것
 
-| Request (CLI) | Native behaviour |
+| 요청 (CLI) | 네이티브 동작 |
 |---|---|
-| `gui screenshot` | The whole virtual desktop, delivered at no more than 1366x768 and never enlarged (`delivered_size`). The runner reads the layout of the visible windows before and after the grab and repeats the grab (3 attempts, 25 ms apart) when the layout changed. The answer carries the delivered size. |
-| `gui zoom x0 y0 x1 y1` | Region in delivered-frame pixels, at least 8 px a side, inside the frame. It snaps outward to whole native pixels, is enlarged at most 4x and at most to 1366x768, and the answer carries the region actually covered with its scale (`zoom_geometry`). |
-| `gui click x y` and `gui --json` (click, scroll) | A frame point maps to the native pixel `(u + 0.5) * scale - 0.5` (clamped inside the desktop), is sent with `SendInput` as an absolute coordinate on the virtual desktop (`(p * 65536 + len - 1) / len`), then press and release of the left button. A scroll is moved-to, then wheel notches of 120 units, 12 ms apart. |
-| `apps`, `activate` | Visible top-level windows with a title (`wN "title" app=window [active]`); activation restores a minimised window and asks Windows for the foreground with a plain `SetForegroundWindow` (see "Activating the game window"). |
+| `gui screenshot` | 가상 데스크톱 전체를 1366x768 이하로 전달하며 확대하지 않는다(`delivered_size`). 러너는 캡처 전후에 보이는 창의 레이아웃을 읽고 레이아웃이 바뀌었으면 캡처를 반복한다(3회, 25 ms 간격). 응답에 전달된 크기가 들어 있다. |
+| `gui zoom x0 y0 x1 y1` | 전달된 프레임 픽셀 기준의 영역이며 한 변이 8 px 이상이고 프레임 안이어야 한다. 바깥쪽으로 네이티브 픽셀 단위에 맞추고 최대 4배, 최대 1366x768까지 확대한다. 응답에 실제로 덮은 영역과 배율이 들어 있다(`zoom_geometry`). |
+| `gui click x y`, `gui --json` (클릭, 스크롤) | 프레임 점은 네이티브 픽셀 `(u + 0.5) * scale - 0.5`(데스크톱 안으로 제한)로 변환하고 가상 데스크톱의 절대 좌표(`(p * 65536 + len - 1) / len`)로 `SendInput`에 보낸 뒤 왼쪽 버튼을 누르고 뗀다. 스크롤은 이동한 뒤 12 ms 간격으로 120 단위 휠 눈금을 보낸다. |
+| `apps`, `activate` | 제목이 있는 보이는 최상위 창(`wN "title" app=window [active]`). 활성화는 최소화된 창을 복원하고 단순한 `SetForegroundWindow`로 포그라운드를 요청한다("게임 창 활성화" 참고). |
 
-Coordinates are physical pixels (the process calls `SetProcessDPIAware`). Frames are the whole desktop, so a
-point in the game's client area is converted with `to_frame_region`.
+좌표는 물리 픽셀이다(프로세스가 `SetProcessDPIAware`를 호출한다). 프레임은 데스크톱 전체이므로 게임 클라이언트 영역의 점은
+`to_frame_region`으로 변환한다.
 
-## Not ported, on purpose
+## 일부러 이식하지 않은 것
 
-- Accessibility tree and UI Automation (`AX`, FlaUI). The add-on reads pixels only.
-- Text input, key chords, drag, right/middle/double click: nothing here sends them.
-- The helper daemon, its socket protocol, `hello`/`schema`/session handling, request replay, and MCP.
-- The helper's final screenshot after each input call (the settle wait below replaces what callers used from it).
-- Multi-monitor frame ids and the published-layout table of the C# (a frame here carries its own layout snapshot).
+- 접근성 트리와 UI Automation(`AX`, FlaUI). 애드온은 픽셀만 읽는다.
+- 텍스트 입력, 키 조합, 드래그, 오른쪽/가운데/더블 클릭. 여기서는 어느 것도 보내지 않는다.
+- 헬퍼 데몬, 소켓 프로토콜, `hello`/`schema`/세션 처리, 요청 재생, MCP.
+- 입력 호출마다 헬퍼가 찍던 마지막 스크린샷(호출자가 거기서 얻던 것은 아래 안정화 대기가 대신한다).
+- C#의 멀티 모니터 프레임 id와 게시된 레이아웃 표(여기서는 프레임이 자체 레이아웃 스냅샷을 가진다).
 
-## Guards at the boundary
+## 경계의 안전장치
 
-All of these live in `NativeRunner`, not in callers. They are refusals. Nothing is sent, and the answer is
-`ok:false` with `input_emitted:false` unless stated.
+모두 호출자가 아니라 `NativeRunner` 안에 있다. 전부 거부 동작이며 아무것도 보내지 않고 별도 언급이 없으면 응답은
+`ok:false`와 `input_emitted:false`이다.
 
-1. **Layout per frame.** Each screenshot stores the visible top-level windows (handle, rectangle, class, front-to-back
-   order; titles are ignored). The runner refuses input with `gui_frame_stale` when the windows over the target pixel are not
-   the ones the frame saw (port of `WindowsDesktopZoom.RegionStillValid`). A zoom runs the same check on its region
-   before and after the grab. `Hcu` retries an input once after a fresh screenshot, and only when nothing was sent.
-2. **Window under the point.** Right before each action, the top-level window that receives a click at the pixel
-   (`WindowFromPoint`, root) must have the exact title of the target (`Blue Archive` in the app). Otherwise
-   `target_window_mismatch`.
-3. **Own windows.** The add-on's own windows are left out of layout snapshots (they redraw constantly and would make
-   every frame stale). They are click-through, so they cannot be the target either, and the runner refuses input
-   when one is reported under the point. We decided this rather than assuming it, because a click that would land on
-   an overlay is not aimed at the game. Click-through windows of other programs (layered and transparent) are
-   skipped in snapshots for the same reason.
-4. **Dead space.** The virtual desktop can contain pixels no monitor shows. A point there is refused with
-   `target_off_monitor` (`MonitorFromPoint`, no default monitor). `baocr --doctor` on the development machine reports
-   9 % dead space.
-5. **Partial input.** When some events went out and a later one failed or was refused, the answer is `ok:false`,
-   `code:"effect_unknown"`, `input_emitted:true`, `completed:n`. `Hcu` never repeats such a call. A failed press/release
-   retries the release up to three times so the button is not left down.
-6. **Audit log.** One JSON line per input call in `%APPDATA%\baocr\input.log` (UTC time, kind, number of actions, frame
-   point, native pixel, title and class of the window under the point, result code, `input_emitted`, completed count,
-   milliseconds). No typed content and no images. At about 1 MB the file becomes `input.log.1` (one old file kept).
-   `BAOCR_INPUT_LOG=0` switches it off. A log that cannot be written does not stop the input.
-7. **Settle.** After input the call waits until two captures of the target window, 60 ms apart, are identical, or
-   `BAOCR_HCU_SETTLE_MS` (default 600; 0 turns the wait off) has passed. Measured with the fake desktop (a small window): about
-   130 ms when the screen is still, about 650 ms when it never is. A game with an idle animation will often run to the
-   cap, so expect up to 0.6 s per input call; the old helper took about 1.35 s per call. Not measured on the real game.
+1. **프레임별 레이아웃.** 스크린샷마다 보이는 최상위 창(핸들, 사각형, 클래스, 앞에서 뒤로의 순서. 제목은 무시)을 저장한다.
+   대상 픽셀 위의 창이 프레임이 본 창과 다르면 러너는 `gui_frame_stale`로 입력을 거부한다(`WindowsDesktopZoom.RegionStillValid`의 이식).
+   줌은 캡처 전후에 자기 영역에 같은 검사를 한다. `Hcu`는 입력을 새 스크린샷 뒤에 한 번 다시 시도하며 아무것도 보내지 않았을 때만 그렇게 한다.
+2. **점 아래의 창.** 각 동작 직전에 그 픽셀에서 클릭을 받는 최상위 창(`WindowFromPoint`, 루트)의 제목이 대상의 제목과
+   정확히 같아야 한다(앱에서는 `Blue Archive`). 그렇지 않으면 `target_window_mismatch`이다.
+3. **자체 창.** 애드온 자신의 창은 레이아웃 스냅샷에서 제외한다(계속 다시 그려서 모든 프레임을 낡은 것으로 만들기 때문이다).
+   이 창들은 클릭 통과라서 대상이 될 수도 없고 점 아래에서 자체 창이 보고되면 러너가 입력을 거부한다. 오버레이에 떨어질 클릭은
+   게임을 겨냥한 것이 아니므로 가정하지 않고 이렇게 정했다. 다른 프로그램의 클릭 통과 창(레이어드와 투명)도 같은 이유로
+   스냅샷에서 건너뛴다.
+4. **빈 영역.** 가상 데스크톱에는 어느 모니터에도 나오지 않는 픽셀이 있을 수 있다. 그곳의 점은 `target_off_monitor`로 거부한다
+   (`MonitorFromPoint`, 기본 모니터 없음). 개발 머신에서 `baocr --doctor`는 빈 영역이 9 %라고 보고한다.
+5. **일부만 보낸 입력.** 일부 이벤트가 나간 뒤 이후 이벤트가 실패하거나 거부되면 응답은 `ok:false`, `code:"effect_unknown"`,
+   `input_emitted:true`, `completed:n`이다. `Hcu`는 이런 호출을 절대 반복하지 않는다. 누름/뗌이 실패하면 버튼이 눌린 채로 남지
+   않도록 뗌을 최대 세 번 다시 시도한다.
+6. **감사 로그.** 입력 호출마다 JSON 한 줄을 `%APPDATA%\baocr\input.log`에 남긴다(UTC 시각, 종류, 동작 수, 프레임 점, 네이티브
+   픽셀, 점 아래 창의 제목과 클래스, 결과 코드, `input_emitted`, 완료 수, 밀리초). 입력한 내용과 이미지는 남기지 않는다. 파일이
+   약 1 MB가 되면 `input.log.1`이 된다(이전 파일은 하나만 둔다). `BAOCR_INPUT_LOG=0`으로 끈다. 로그를 쓸 수 없어도 입력은 멈추지 않는다.
+7. **안정화.** 입력 뒤 호출은 대상 창의 캡처 두 장이 60 ms 간격으로 같아질 때까지 기다리거나 `BAOCR_HCU_SETTLE_MS`(기본 600,
+   0이면 대기를 끈다)가 지날 때까지 기다린다. 가짜 데스크톱(작은 창)에서 측정한 결과 화면이 멈춰 있으면 약 130 ms, 계속
+   움직이면 약 650 ms였다. 유휴 애니메이션이 있는 게임은 자주 상한까지 가므로 입력 호출마다 최대 0.6초를 예상해야 한다.
+   예전 헬퍼는 호출당 약 1.35초였다. 실제 게임에서는 측정하지 않았다.
 
-Passive code cannot send input: `Hcu` has screenshot, zoom, window list and frame size only. Input
-(`click`, `scroll`, `scroll_n`, `actions`, `activate`) is on `Exclusive`, which only `HcuSession::exclusive()` creates.
+수동 코드는 입력을 보낼 수 없다. `Hcu`에는 스크린샷, 줌, 창 목록, 프레임 크기만 있다. 입력(`click`, `scroll`, `scroll_n`,
+`actions`, `activate`)은 `Exclusive`에 있고 `Exclusive`는 `HcuSession::exclusive()`만 만든다.
 
-## Known limits
+## 알려진 한계
 
-- The game region is detected from the window rectangle once per scan. If the game window is moved mid-scan, the
-  frame check refuses, `Hcu` re-takes a screenshot and repeats, and the same region then points at where the window
-  used to be. The guard still checks that the window under the point is the game, but not that the point is the same place in it.
-- A game running elevated while the add-on is not drops `SendInput` silently. `--doctor` detects it.
-- `input_selftest` (examples) is the manual check against a harmless window; it is not run by `cargo test`.
+- 게임 영역은 스캔마다 한 번 창 사각형에서 검출한다. 스캔 도중 게임 창을 옮기면 프레임 검사가 거부하고 `Hcu`가 스크린샷을
+  다시 찍어 반복하는데, 이때 같은 영역이 창이 있던 자리를 가리킨다. 안전장치는 점 아래의 창이 게임인지는 확인하지만 그 점이
+  창 안에서 같은 위치인지는 확인하지 않는다.
+- 게임이 관리자 권한으로 실행되고 애드온은 아닌 경우 `SendInput`이 조용히 버려진다. `--doctor`가 이를 검출한다.
+- `input_selftest`(예제)는 무해한 창을 대상으로 하는 수동 점검이며 `cargo test`로는 실행하지 않는다.
 
-## Activating the game window
+## 게임 창 활성화
 
-`activate` asks Windows for the foreground with a plain `SetForegroundWindow` and waits up to 750 ms. It sends no key (an earlier version tapped Alt) and attaches no input queue, because those tricks take the focus from whatever the player is doing. If Windows refuses, the call fails with a message asking the player to click the game window once, and a scan does not start. Already being the foreground window is a success without any call.
+`activate`는 단순한 `SetForegroundWindow`로 포그라운드를 요청하고 최대 750 ms 기다린다. 키를 보내지 않고(예전 버전은 Alt를
+눌렀다) 입력 큐도 붙이지 않는다. 이런 방법은 플레이어가 하던 일에서 포커스를 빼앗기 때문이다. Windows가 거부하면 호출이
+실패하며 플레이어에게 게임 창을 한 번 클릭하라는 메시지를 보이고 스캔은 시작하지 않는다. 이미 포그라운드 창이면 호출 없이 성공으로 친다.
 
-## Trying the input path without the game
+## 게임 없이 입력 경로 시험하기
 
-`baocr --doctor` reads the game window, DPI, monitors (including dead space in the virtual desktop), the
-game's and the add-on's elevation and the focus, and prints OK/경고 lines. It sends no input.
+`baocr --doctor`는 게임 창, DPI, 모니터(가상 데스크톱의 빈 영역 포함), 게임과 애드온의 권한 상승 여부, 포커스를 읽고
+OK/경고 줄을 출력한다. 입력은 보내지 않는다.
 
-Two examples in `rust/crates/hcu/examples` exercise the in-process input against a harmless window instead
-of the game. They are **not** run by `cargo test`, because `input_selftest` moves the real mouse:
+`rust/crates/hcu/examples`의 예제 두 개가 게임 대신 무해한 창을 상대로 프로세스 내 입력을 시험한다. `input_selftest`가
+실제 마우스를 움직이므로 `cargo test`로는 실행하지 **않는다**.
 
 ```
 cargo build -p baocr-hcu --examples
 cargo run -p baocr-hcu --example input_selftest     # starts input_target itself
 ```
 
-`input_target` is a plain window titled "HCU Test Target" (coloured quadrants, a white marker square) that
-logs the screen position of every click and wheel turn it receives. `input_selftest` takes a screenshot and
-a zoom, clicks at three points, turns the wheel, and checks that the target saw each event where it was aimed.
-It also checks the refusals, which must reach nothing: the window moved after the frame, the point covered by
-another window, and a point on no monitor. Each check prints PASS/FAIL and the exit code is 1 on any FAIL.
-Every input call is also written to `%APPDATA%\baocr\input.log` (the selftest uses `%TEMP%\hcu-selftest-input.log`).
+`input_target`은 제목이 "HCU Test Target"인 평범한 창(색칠한 사분면과 흰 표식 사각형)이며 받은 모든 클릭과 휠 회전의 화면 위치를
+기록한다. `input_selftest`는 스크린샷과 줌을 찍고, 세 지점을 클릭하고, 휠을 돌린 뒤 대상이 각 이벤트를 겨냥한 위치에서 받았는지
+확인한다. 아무것도 닿으면 안 되는 거부 경우도 확인한다. 프레임 뒤에 창이 움직인 경우, 점이 다른 창에 가려진 경우, 어느
+모니터에도 없는 점이다. 각 검사는 PASS/FAIL을 출력하고 FAIL이 하나라도 있으면 종료 코드가 1이다.
+모든 입력 호출은 `%APPDATA%\baocr\input.log`에도 기록된다(selftest는 `%TEMP%\hcu-selftest-input.log`를 쓴다).
