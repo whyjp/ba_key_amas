@@ -47,7 +47,7 @@
 <g><rect x="349" y="139" width="196" height="58" rx="8" fill="#8a5a1c"/>
 <text x="447" y="161" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">hcu</text>
 <text x="447" y="179" fill="#dbe4f0" font-size="10.5" text-anchor="middle">데스크톱 제어, 스캔 루프, 안전장치</text>
-<text x="537" y="191" fill="#b7c4d6" font-size="9" text-anchor="end">3942줄</text></g>
+<text x="537" y="191" fill="#b7c4d6" font-size="9" text-anchor="end">3938줄</text></g>
 <g><rect x="567" y="139" width="196" height="58" rx="8" fill="#6b3f8f"/>
 <text x="665" y="161" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">pipeline</text>
 <text x="665" y="179" fill="#dbe4f0" font-size="10.5" text-anchor="middle">비동기 추출 워커</text>
@@ -59,11 +59,11 @@
 <g><rect x="240" y="251" width="196" height="58" rx="8" fill="#6b3f8f"/>
 <text x="338" y="273" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">extract</text>
 <text x="338" y="291" fill="#dbe4f0" font-size="10.5" text-anchor="middle">프로필 읽기, 화면 종류, 레이드 트래커</text>
-<text x="428" y="303" fill="#b7c4d6" font-size="9" text-anchor="end">1792줄</text></g>
+<text x="428" y="303" fill="#b7c4d6" font-size="9" text-anchor="end">1814줄</text></g>
 <g><rect x="458" y="251" width="196" height="58" rx="8" fill="#2f6f9f"/>
 <text x="556" y="273" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">overlay</text>
 <text x="556" y="291" fill="#dbe4f0" font-size="10.5" text-anchor="middle">레이어드 창, 카드, 도킹, 트레이</text>
-<text x="646" y="303" fill="#b7c4d6" font-size="9" text-anchor="end">4567줄</text></g>
+<text x="646" y="303" fill="#b7c4d6" font-size="9" text-anchor="end">4732줄</text></g>
 <g><rect x="676" y="251" width="196" height="58" rx="8" fill="#3f7f4f"/>
 <text x="774" y="273" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">wikidb</text>
 <text x="774" y="291" fill="#dbe4f0" font-size="10.5" text-anchor="middle">SchaleDB 수집기, DB, 조회</text>
@@ -87,5 +87,5 @@
 <g><rect x="349" y="475" width="196" height="58" rx="8" fill="#555555"/>
 <text x="447" y="497" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">core</text>
 <text x="447" y="515" fill="#dbe4f0" font-size="10.5" text-anchor="middle">데이터 모델, Ocr 트레이트</text>
-<text x="537" y="527" fill="#b7c4d6" font-size="9" text-anchor="end">365줄</text></g>
+<text x="537" y="527" fill="#b7c4d6" font-size="9" text-anchor="end">444줄</text></g>
 </svg>
