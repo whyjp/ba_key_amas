@@ -30,6 +30,8 @@ pub enum Scene {
     MissionMap,
     /// 편성: squad formation.
     Squad,
+    /// The 빠른 편성 popup: the grid of students to put into the squad.
+    QuickFormation,
     /// Student list and student profile, told apart by pixels, not text.
     StudentList,
     StudentProfile,
@@ -49,6 +51,7 @@ impl Scene {
             Scene::EnemyInfo => "적 정보",
             Scene::MissionMap => "임무 지도",
             Scene::Squad => "편성",
+            Scene::QuickFormation => "빠른 편성",
             Scene::StudentList => "학생 목록",
             Scene::StudentProfile => "학생 정보",
             Scene::Unknown => "",
@@ -72,7 +75,7 @@ fn header(boxes: &[TextBox]) -> String {
 
 /// A popup's title: centred near the top of the popup, around y 200..260.
 fn popup_title_is(boxes: &[TextBox], word: &str) -> bool {
-    boxes.iter().any(|b| norm(&b.text) == word && b.y0 > 190.0 && b.y1 < 300.0 && (b.x0 + b.x1) / 2.0 > 450.0 && (b.x0 + b.x1) / 2.0 < 830.0)
+    boxes.iter().any(|b| norm(&b.text) == word && b.y0 > 170.0 && b.y1 < 300.0 && (b.x0 + b.x1) / 2.0 > 450.0 && (b.x0 + b.x1) / 2.0 < 830.0)
 }
 
 /// Headers of the screens that hold place-based missions.
@@ -94,6 +97,9 @@ pub fn classify(boxes: &[TextBox], pixel_scene: Option<Scene>) -> Scene {
     }
     if has(boxes, "적정보") && has(boxes, "상성정보") {
         return Scene::EnemyInfo;
+    }
+    if popup_title_is(boxes, "빠른편성") {
+        return Scene::QuickFormation;
     }
     if popup_title_is(boxes, "임무정보") {
         return Scene::MissionInfo;
@@ -179,6 +185,26 @@ pub fn place_from_list(boxes: &[TextBox]) -> Option<String> {
     card.first().map(|b| b.text.trim().to_string()).filter(|t| t.chars().count() >= 2)
 }
 
+/// A student card in the 빠른 편성 grid, found by the name written on it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CardName {
+    /// The name as OCR read it (may carry small errors).
+    pub text: String,
+    /// Horizontal centre of the card and the top of its name label, in the 1280x960 frame.
+    pub x: f32,
+    pub y0: f32,
+}
+
+/// The student cards visible in the 빠른 편성 grid: the name labels on the right half of the popup.
+pub fn quick_formation_cards(boxes: &[TextBox]) -> Vec<CardName> {
+    let has_hangul = |t: &str| t.chars().any(|c| ('\u{AC00}'..='\u{D7A3}').contains(&c));
+    boxes
+        .iter()
+        .filter(|b| b.x0 >= 560.0 && b.x1 <= 1250.0 && b.y0 >= 380.0 && b.y1 <= 650.0 && has_hangul(&b.text))
+        .map(|b| CardName { text: b.text.trim().to_string(), x: (b.x0 + b.x1) / 2.0, y0: b.y0 })
+        .collect()
+}
+
 /// Remembers the mission across the screens that do not name it.
 #[derive(Debug, Default)]
 pub struct MissionTracker {
@@ -227,7 +253,7 @@ impl MissionTracker {
                 self.mission = None;
                 self.place = None;
             }
-            Scene::MissionMap | Scene::Squad | Scene::Unknown => {}
+            Scene::MissionMap | Scene::Squad | Scene::QuickFormation | Scene::Unknown => {}
         }
         self.mission.as_ref()
     }
@@ -260,6 +286,7 @@ mod tests {
             ("enemy-info", Scene::EnemyInfo),
             ("mission-map", Scene::MissionMap),
             ("squad", Scene::Squad),
+            ("quick-formation", Scene::QuickFormation),
             ("dungeon-select-bounty", Scene::DungeonSelect),
             ("dungeon-select-week", Scene::DungeonSelect),
             ("dungeon-select-school", Scene::DungeonSelect),
@@ -332,6 +359,22 @@ mod tests {
             assert!(t.update(Scene::DungeonSelect, &boxes("dungeon-select-bounty")).is_none());
         }
         assert_eq!(place_from_list(&boxes("dungeon-list-school")).as_deref(), Some("트리니티"));
+    }
+
+    #[test]
+    fn the_quick_formation_grid_yields_one_name_per_visible_card() {
+        let cards = quick_formation_cards(&boxes("quick-formation"));
+        let names: Vec<&str> = cards.iter().map(|c| c.text.as_str()).collect();
+        for want in ["호시노(무장)", "하나코(수영복)", "리오(무장)", "케이", "아리스"] {
+            assert!(names.contains(&want), "{want} in {names:?}");
+        }
+        assert!(!names.iter().any(|n| n.contains("Lv") || n.contains("자동") || n.contains("확인") || n.contains("STRIKER")), "{names:?}");
+        let hoshino = cards.iter().find(|c| c.text == "호시노(무장)").unwrap();
+        assert!((hoshino.x - 736.0).abs() < 6.0 && (hoshino.y0 - 429.0).abs() < 4.0, "{hoshino:?}");
+        // the mission is kept while the popup is open
+        let mut t = MissionTracker::default();
+        t.update(Scene::MissionInfo, &boxes("mission-info"));
+        assert!(t.update(Scene::QuickFormation, &boxes("quick-formation")).is_some());
     }
 
     #[test]

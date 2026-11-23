@@ -6,7 +6,8 @@
 //! screenshots where the OS supports it.
 use crate::panel::{panel_origin, panel_width, render_panel};
 use crate::render::{banner_layout, banner_origin, load_fonts, render, Fonts, Ltrb};
-use crate::Shown;
+use crate::marks::render_marks;
+use crate::{Card, Shown};
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -255,6 +256,72 @@ impl Worker {
     }
 }
 
+/// One layered, click-through, capture-excluded window and the bitmap it shows.
+struct Layer {
+    hwnd: isize,
+    canvas: Option<Canvas>,
+    visible: bool,
+    /// What was last drawn (a key of the content, position and size), to skip identical redraws.
+    drawn: Option<u64>,
+}
+
+unsafe fn create_layer(inst: isize, class: &[u16], title: &str) -> Option<Layer> {
+    let title = wide(title);
+    let hwnd = CreateWindowExW(WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, class.as_ptr(), title.as_ptr(), WS_POPUP, 0, 0, 10, 10, 0, 0, inst, std::ptr::null());
+    if hwnd == 0 {
+        return None;
+    }
+    // Keep it out of the screenshots the scanner reads (Windows 10 2004+).
+    let capturable = std::env::var_os("BAOCR_OVERLAY_CAPTURABLE").is_some(); // tests only
+    if !capturable && SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE) == 0 {
+        // Without capture exclusion the overlay would appear in the frames being read and
+        // hide fields: reading the game matters more than showing anything.
+        DestroyWindow(hwnd);
+        return None;
+    }
+    Some(Layer { hwnd, canvas: None, visible: false, drawn: None })
+}
+
+impl Layer {
+    unsafe fn hide(&mut self) {
+        if self.visible {
+            ShowWindow(self.hwnd, SW_HIDE);
+            self.visible = false;
+            self.drawn = None;
+        }
+    }
+
+    /// Show `img` at screen position `pos`; `key` identifies the content so that an
+    /// unchanged layer is not redrawn.
+    unsafe fn show(&mut self, screen_dc: isize, img: &image::RgbaImage, pos: (i32, i32), key: u64) {
+        if self.visible && self.drawn == Some(key) {
+            return;
+        }
+        let (w, h) = (img.width() as i32, img.height() as i32);
+        if self.canvas.as_ref().map(|c| (c.w, c.h)) != Some((w, h)) {
+            self.canvas = Canvas::new(screen_dc, w, h);
+        }
+        if let Some(c) = self.canvas.as_mut() {
+            c.blit(img);
+            let (p, size, src) = (Point { x: pos.0, y: pos.1 }, Size { cx: w, cy: h }, Point { x: 0, y: 0 });
+            let blend = BlendFunction { op: 0, flags: 0, alpha: 255, format: 1 };
+            UpdateLayeredWindow(self.hwnd, screen_dc, &p, &size, c.dc, &src, 0, &blend, ULW_ALPHA);
+            if !self.visible {
+                ShowWindow(self.hwnd, SW_SHOWNOACTIVATE);
+                self.visible = true;
+            }
+            self.drawn = Some(key);
+        }
+    }
+}
+
+fn hash_of<T: std::hash::Hash>(v: &T) -> u64 {
+    use std::hash::Hasher;
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    v.hash(&mut h);
+    h.finish()
+}
+
 fn run(state: Arc<Mutex<Shown>>, stop: Arc<AtomicBool>, fonts: Fonts) {
     unsafe {
         SetProcessDPIAware();
@@ -275,37 +342,11 @@ fn run(state: Arc<Mutex<Shown>>, stop: Arc<AtomicBool>, fonts: Fonts) {
             icon_sm: 0,
         };
         RegisterClassExW(&wc); // already registered on a second run: harmless
-        let title = wide("ba-scanner");
-        let hwnd = CreateWindowExW(
-            WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
-            class.as_ptr(),
-            title.as_ptr(),
-            WS_POPUP,
-            0,
-            0,
-            10,
-            10,
-            0,
-            0,
-            inst,
-            std::ptr::null(),
-        );
-        if hwnd == 0 {
-            eprintln!("overlay: could not create the banner window");
+        let (Some(mut card), Some(mut marks)) = (create_layer(inst, &class, "ba-scanner"), create_layer(inst, &class, "ba-scanner-marks")) else {
+            eprintln!("overlay: this Windows version cannot hide the overlay from screen capture (or the window could not be created); running without it");
             return;
-        }
-        // Keep the banner out of the screenshots the scanner reads (Windows 10 2004+).
-        let capturable = std::env::var_os("BAOCR_OVERLAY_CAPTURABLE").is_some(); // tests only
-        if !capturable && SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE) == 0 {
-            // Without capture exclusion the banner would appear in the frames being read
-            // and hide fields: reading the game matters more than showing progress.
-            eprintln!("overlay: this Windows version cannot hide the banner from screen capture; running without it");
-            DestroyWindow(hwnd);
-            return;
-        }
+        };
         let screen_dc = GetDC(0);
-        let mut canvas: Option<Canvas> = None;
-        let mut visible = false;
         let mut rect = None;
         let mut tick: u32 = 0;
         while !stop.load(Ordering::Relaxed) {
@@ -319,52 +360,39 @@ fn run(state: Arc<Mutex<Shown>>, stop: Arc<AtomicBool>, fonts: Fonts) {
             }
             match rect {
                 None => {
-                    if visible {
-                        ShowWindow(hwnd, SW_HIDE);
-                        visible = false;
-                    }
+                    card.hide();
+                    marks.hide();
                 }
                 Some((client, outer, work)) => {
                     let (cw, ch) = (client.2 - client.0, client.3 - client.1);
-                    let shown = state.lock().map(|g| g.clone()).unwrap_or(Shown::Hidden);
-                    // what to draw and where: the banner goes above/below the window, the panel beside it
-                    let placed = match &shown {
-                        Shown::Hidden => None,
-                        Shown::Banner(s) => {
+                    let shown = state.lock().map(|g| g.clone()).unwrap_or(Shown { card: Card::Hidden, marks: Vec::new() });
+                    // the card: the banner goes above/below the window, the panel beside it
+                    let placed = match &shown.card {
+                        Card::Hidden => None,
+                        Card::Banner(s) => {
                             let (_, _, bw, _) = banner_layout(cw, ch); // proportional to this window
                             let img = render(bw, s, tick, &fonts);
                             let at = banner_origin(client, outer, work, (img.width() as i32, img.height() as i32));
-                            Some((img, at))
+                            Some((img, at, u64::from(tick)))
                         }
-                        Shown::Panel(p) => {
+                        Card::Panel(p) => {
                             let img = render_panel(panel_width(cw) as u32, p, &fonts);
-                            panel_origin(client, outer, work, (img.width() as i32, img.height() as i32)).map(|at| (img, at))
+                            let key = hash_of(&(format!("{p:?}"), cw, ch));
+                            panel_origin(client, outer, work, (img.width() as i32, img.height() as i32)).map(|at| (img, at, key ^ hash_of(&at)))
                         }
                     };
                     match placed {
-                        None => {
-                            if visible {
-                                ShowWindow(hwnd, SW_HIDE);
-                                visible = false;
-                            }
-                        }
-                        Some((img, (px, py))) => {
-                            let (w, h) = (img.width() as i32, img.height() as i32);
-                            if canvas.as_ref().map(|c| (c.w, c.h)) != Some((w, h)) {
-                                canvas = Canvas::new(screen_dc, w, h);
-                            }
-                            if let Some(c) = canvas.as_mut() {
-                                c.blit(&img);
-                                let pos = Point { x: px, y: py };
-                                let size = Size { cx: w, cy: h };
-                                let src = Point { x: 0, y: 0 };
-                                let blend = BlendFunction { op: 0, flags: 0, alpha: 255, format: 1 };
-                                UpdateLayeredWindow(hwnd, screen_dc, &pos, &size, c.dc, &src, 0, &blend, ULW_ALPHA);
-                                if !visible {
-                                    ShowWindow(hwnd, SW_SHOWNOACTIVATE);
-                                    visible = true;
-                                }
-                            }
+                        Some((img, at, key)) => card.show(screen_dc, &img, at, key),
+                        None => card.hide(),
+                    }
+                    // the icons over the portraits: the layer covers the game's client area
+                    if shown.marks.is_empty() {
+                        marks.hide();
+                    } else {
+                        let key = hash_of(&(&shown.marks, client.0, client.1, cw, ch));
+                        if !(marks.visible && marks.drawn == Some(key)) {
+                            let img = render_marks(cw as u32, ch as u32, &shown.marks, &fonts);
+                            marks.show(screen_dc, &img, (client.0, client.1), key);
                         }
                     }
                 }
@@ -372,8 +400,16 @@ fn run(state: Arc<Mutex<Shown>>, stop: Arc<AtomicBool>, fonts: Fonts) {
             tick = tick.wrapping_add(1);
             std::thread::sleep(Duration::from_millis(90));
         }
-        drop(canvas);
+        drop(card);
+        drop(marks);
         ReleaseDC(0, screen_dc);
-        DestroyWindow(hwnd);
+    }
+}
+
+impl Drop for Layer {
+    fn drop(&mut self) {
+        unsafe {
+            DestroyWindow(self.hwnd);
+        }
     }
 }

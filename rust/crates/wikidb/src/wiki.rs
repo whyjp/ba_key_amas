@@ -30,8 +30,50 @@ pub struct MissionBrief {
     pub best_attack: Vec<Tally>,
 }
 
+/// A student as the formation helpers need it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StudentBrief {
+    pub id: i64,
+    pub name: String,
+    /// Attack type code (Explosion, Pierce, Mystic, Sonic).
+    pub bullet_type: String,
+    /// Armor type code.
+    pub armor_type: String,
+    /// Terrain adaptation, 0 (worst) to 4 (best): the game's five faces.
+    pub street: u8,
+    pub outdoor: u8,
+    pub indoor: u8,
+    /// "Main" (STRIKER) or "Support" (SPECIAL).
+    pub squad_type: String,
+}
+
+impl StudentBrief {
+    /// Adaptation for a terrain code (Street | Outdoor | Indoor).
+    pub fn adaptation(&self, terrain: &str) -> Option<u8> {
+        match terrain {
+            "Street" => Some(self.street),
+            "Outdoor" => Some(self.outdoor),
+            "Indoor" => Some(self.indoor),
+            _ => None,
+        }
+    }
+}
+
 pub struct Wiki {
     conn: Connection,
+}
+
+/// Edit distance between two short strings.
+fn distance(a: &[char], b: &[char]) -> usize {
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.iter().enumerate() {
+        let mut cur = vec![i + 1];
+        for (j, cb) in b.iter().enumerate() {
+            cur.push((prev[j] + usize::from(ca != cb)).min(prev[j + 1] + 1).min(cur[j] + 1));
+        }
+        prev = cur;
+    }
+    prev[b.len()]
 }
 
 /// Name without spaces and punctuation, so OCR spacing differences do not matter.
@@ -47,6 +89,56 @@ impl Wiki {
 
     pub fn from_connection(conn: Connection) -> Wiki {
         Wiki { conn }
+    }
+
+    /// Every Global-released student.
+    pub fn students(&self) -> Result<Vec<StudentBrief>> {
+        let mut st = self.conn.prepare(
+            "SELECT id, name_ko, bullet_type, armor_type, COALESCE(street_adapt, 0), COALESCE(outdoor_adapt, 0), COALESCE(indoor_adapt, 0), squad_type
+             FROM student WHERE released_global = 1 ORDER BY id",
+        )?;
+        let rows = st.query_map([], |r| {
+            Ok(StudentBrief {
+                id: r.get(0)?,
+                name: r.get(1)?,
+                bullet_type: r.get(2)?,
+                armor_type: r.get(3)?,
+                street: r.get::<_, i64>(4)?.clamp(0, 4) as u8,
+                outdoor: r.get::<_, i64>(5)?.clamp(0, 4) as u8,
+                indoor: r.get::<_, i64>(6)?.clamp(0, 4) as u8,
+                squad_type: r.get(7)?,
+            })
+        })?;
+        rows.collect::<std::result::Result<_, _>>().map_err(Into::into)
+    }
+
+    /// The student a name read by OCR stands for. Punctuation and spaces are ignored
+    /// ("시로코*테러" and "시로코테러" are one name); a single wrong or missing character is
+    /// tolerated only when exactly one student is that close. Ambiguity gives None: a
+    /// wrong match would put the wrong icons on a portrait.
+    pub fn match_student(students: &[StudentBrief], ocr: &str) -> Option<StudentBrief> {
+        let want: Vec<char> = norm(ocr).chars().collect();
+        if want.len() < 2 {
+            return None;
+        }
+        let mut best: Option<(usize, &StudentBrief)> = None;
+        let mut tie = false;
+        for s in students {
+            let have: Vec<char> = norm(&s.name).chars().collect();
+            let d = distance(&want, &have);
+            if d > 1 || (d == 1 && have.len().min(want.len()) < 3) {
+                continue;
+            }
+            match best {
+                Some((bd, _)) if d > bd => {}
+                Some((bd, _)) if d == bd => tie = true,
+                _ => {
+                    best = Some((d, s));
+                    tie = false;
+                }
+            }
+        }
+        best.filter(|_| !tie).map(|(_, s)| s.clone())
     }
 
     fn label(&self, kind: &str, code: &str) -> String {
@@ -185,6 +277,24 @@ mod tests {
         let m = &w.campaign_missions(Some((19, 3)), "설원 지구 제2 지역").unwrap()[0];
         // 1 light + 2 heavy: explosion (200 + 2*100)/3 = 133 %, pierce (50 + 2*200)/3 = 150 %
         assert_eq!(m.best_attack.iter().map(|t| (t.ko.as_str(), t.n)).collect::<Vec<_>>(), vec![("관통", 150), ("폭발", 133)]);
+    }
+
+    #[test]
+    fn ocr_names_are_matched_to_students_and_ambiguity_gives_none() {
+        let mk = |id: i64, name: &str| StudentBrief { id, name: name.into(), bullet_type: "Pierce".into(), armor_type: "Light".into(), street: 4, outdoor: 2, indoor: 0, squad_type: "Main".into() };
+        let all = vec![mk(1, "시로코*테러"), mk(2, "시로코"), mk(3, "호시노(무장)"), mk(4, "호시노"), mk(5, "슌"), mk(6, "하나코(수영복)")];
+        let id = |t: &str| Wiki::match_student(&all, t).map(|s| s.id);
+        assert_eq!(id("시로코테러"), Some(1), "the star is lost in OCR");
+        assert_eq!(id("시로코"), Some(2), "an exact name beats a longer one");
+        assert_eq!(id("호시노(무장)"), Some(3));
+        assert_eq!(id("호시노무장"), Some(3));
+        assert_eq!(id("하나코(수영북)"), Some(6), "one wrong character");
+        assert_eq!(id("순"), None, "too short to trust one wrong character");
+        assert_eq!(id("아무개"), None);
+        assert_eq!(id(""), None);
+        // two students equally close: no answer
+        let twins = vec![mk(10, "마리(체육복)"), mk(11, "마리(체육목)")];
+        assert_eq!(Wiki::match_student(&twins, "마리(체육북)"), None);
     }
 
     #[test]

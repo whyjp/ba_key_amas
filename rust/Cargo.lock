@@ -233,10 +233,12 @@ dependencies = [
  "baocr-overlay",
  "baocr-pipeline",
  "baocr-pixels",
+ "baocr-wikidb",
  "chrono",
  "clap",
  "ctrlc",
  "image",
+ "rusqlite",
  "serde_json",
 ]
 

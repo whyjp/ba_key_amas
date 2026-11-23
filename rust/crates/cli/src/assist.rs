@@ -4,11 +4,11 @@
 //! game window.
 use anyhow::{bail, Result};
 use baocr_core::ocr_api::Ocr;
-use baocr_extract::scene::{classify, MissionRef, MissionTracker, Scene};
+use baocr_extract::scene::{classify, quick_formation_cards, CardName, MissionRef, MissionTracker, Scene};
 use baocr_hcu::{detect_region, game_capture, screen_kind, Hcu, Screen};
-use baocr_overlay::{Chip, Overlay, PanelState, Row, Tone};
+use baocr_overlay::{Chip, Icon, Mark, Overlay, PanelState, Row, Tone};
 use baocr_pixels::{frame_distance, frame_key};
-use baocr_wikidb::{MissionBrief, Tally, Wiki};
+use baocr_wikidb::{MissionBrief, StudentBrief, Tally, Wiki};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -29,7 +29,7 @@ pub fn panel_for(scene: Scene, mission: Option<&MissionRef>, wiki: &Wiki) -> Opt
         return None;
     }
     let mut p = PanelState { scene: scene.label().to_string(), ..Default::default() };
-    let on_mission_screen = matches!(scene, Scene::MissionInfo | Scene::EnemyInfo | Scene::MissionMap | Scene::Squad);
+    let on_mission_screen = matches!(scene, Scene::MissionInfo | Scene::EnemyInfo | Scene::MissionMap | Scene::Squad | Scene::QuickFormation);
     let Some(m) = mission.filter(|_| on_mission_screen) else {
         return Some(p);
     };
@@ -48,6 +48,38 @@ pub fn panel_for(scene: Scene, mission: Option<&MissionRef>, wiki: &Wiki) -> Opt
         Err(e) => p.rows.push(Row::Note(format!("위키DB 오류: {e}"))),
     }
     Some(p)
+}
+
+/// Where the card is placed relative to a student card's name label (frame pixels): the
+/// icon row sits on the portrait, above the label, clear of the level and the stars.
+const ICONS_ABOVE_NAME: f32 = 58.0;
+
+/// The missions the game's mission screen can stand for (empty when unknown).
+fn briefs(m: &MissionRef, wiki: &Wiki) -> Vec<MissionBrief> {
+    match (m.stage_no, m.place.as_deref()) {
+        (Some(n), Some(place)) => wiki.dungeon_missions(place, n),
+        (Some(_), None) => Ok(Vec::new()),
+        _ => wiki.campaign_missions(m.number, &m.name),
+    }
+    .unwrap_or_default()
+}
+
+/// Icons for the student cards on screen: attack and armor type, and, when the mission's
+/// terrain is known, how well the student fits it (the game's own face).
+pub fn marks_for(cards: &[CardName], students: &[StudentBrief], terrain: Option<&str>) -> Vec<Mark> {
+    cards
+        .iter()
+        .filter_map(|c| {
+            let s = Wiki::match_student(students, &c.text)?;
+            let mut icons = Vec::new();
+            if let Some(level) = terrain.and_then(|t| s.adaptation(t)) {
+                icons.push(Icon::Face(level));
+            }
+            icons.push(Icon::Attack(s.bullet_type.clone()));
+            icons.push(Icon::Armor(s.armor_type.clone()));
+            Some(Mark { cx: c.x.round() as i32, cy: (c.y0 - ICONS_ABOVE_NAME).round() as i32, icons })
+        })
+        .collect()
 }
 
 fn rows_for(p: &mut PanelState, found: &[MissionBrief]) {
@@ -74,6 +106,7 @@ pub fn run(ocr: &dyn Ocr, hcu: &Hcu, mut region: [f64; 4], auto_region: bool, wi
         bail!("wiki database not found at {}: build it with `cargo run -p baocr-wikidb --release`", wiki_path.display());
     }
     let wiki = Wiki::open(wiki_path)?;
+    let students = wiki.students()?;
     let overlay = Overlay::start_hidden();
     let stop = Arc::new(AtomicBool::new(false));
     let flag = stop.clone();
@@ -114,10 +147,25 @@ pub fn run(ocr: &dyn Ocr, hcu: &Hcu, mut region: [f64; 4], auto_region: bool, wi
                 };
             }
             let mission = tracker.update(scene, &boxes).cloned();
+            // The grid shows names only in the list view; the compact view has none to read.
+            let compact_grid = scene == Scene::QuickFormation && quick_formation_cards(&boxes).is_empty();
             match panel_for(scene, mission.as_ref(), &wiki) {
-                Some(p) => overlay.panel(p),
+                Some(mut p) => {
+                    if compact_grid {
+                        p.rows.push(Row::Note("학생 이름이 보이는 보기(목록 오른쪽 위 버튼)에서 아이콘이 표시됩니다".into()));
+                    }
+                    overlay.panel(p)
+                }
                 None => overlay.hide(),
             }
+            // icons over the portraits of the 빠른 편성 grid, only while that popup is up
+            let marks = if scene == Scene::QuickFormation {
+                let terrain = mission.as_ref().and_then(|m| briefs(m, &wiki).into_iter().next()).and_then(|b| b.terrain.map(|t| t.code));
+                marks_for(&quick_formation_cards(&boxes), &students, terrain.as_deref())
+            } else {
+                Vec::new()
+            };
+            overlay.marks(marks);
             println!("assist: {:?}{}", scene, mission.as_ref().map(|m| format!("  mission: {}", m.display())).unwrap_or_default());
             handled = Some(key);
         }
@@ -195,6 +243,25 @@ mod tests {
         assert!(p.rows.contains(&Row::Info { label: "추천 Lv".into(), value: "20".into() }));
         let no_place = MissionRef { place: None, ..m };
         assert!(matches!(panel_for(Scene::Squad, Some(&no_place), &w).unwrap().rows.as_slice(), [Row::Note(_)]));
+    }
+
+    #[test]
+    fn student_cards_get_attack_armor_and_terrain_icons() {
+        let mk = |id: i64, name: &str, bullet: &str, armor: &str, street: u8| StudentBrief { id, name: name.into(), bullet_type: bullet.into(), armor_type: armor.into(), street, outdoor: 0, indoor: 0, squad_type: "Main".into() };
+        let students = vec![mk(1, "호시노(무장)", "Pierce", "HeavyArmor", 4), mk(2, "케이", "Mystic", "Unarmed", 1)];
+        let cards = vec![
+            CardName { text: "호시노(무장)".into(), x: 736.0, y0: 429.0 },
+            CardName { text: "케이".into(), x: 1181.0, y0: 432.0 },
+            CardName { text: "알수없음".into(), x: 900.0, y0: 430.0 },
+        ];
+        let with = marks_for(&cards, &students, Some("Street"));
+        assert_eq!(with.len(), 2, "a name that matches no student gets no icons");
+        assert_eq!(with[0].icons, vec![Icon::Face(4), Icon::Attack("Pierce".into()), Icon::Armor("HeavyArmor".into())]);
+        assert_eq!((with[0].cx, with[0].cy), (736, 371), "on the portrait, above the name label");
+        assert_eq!(with[1].icons[0], Icon::Face(1));
+        // without a known mission terrain only the types are shown
+        let without = marks_for(&cards, &students, None);
+        assert_eq!(without[0].icons, vec![Icon::Attack("Pierce".into()), Icon::Armor("HeavyArmor".into())]);
     }
 
     #[test]

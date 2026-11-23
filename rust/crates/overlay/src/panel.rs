@@ -44,7 +44,7 @@ impl Tone {
         }
     }
 
-    fn rgb(self) -> [u8; 3] {
+    pub(crate) fn rgb(self) -> [u8; 3] {
         match self {
             Tone::Neutral => [96, 112, 140],
             Tone::Explosion | Tone::LightArmor => [178, 58, 62],

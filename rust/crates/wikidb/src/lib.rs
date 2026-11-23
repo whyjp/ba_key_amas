@@ -3,7 +3,7 @@
 //! changes shape does not touch the others. The schema lives in `wikidb/schema.sql`.
 pub mod schaledb;
 pub mod wiki;
-pub use wiki::{MissionBrief, Tally, Wiki};
+pub use wiki::{MissionBrief, StudentBrief, Tally, Wiki};
 
 use anyhow::{Context, Result};
 use rusqlite::Connection;

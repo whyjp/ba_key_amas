@@ -4,25 +4,33 @@
 //! window, so it cannot take focus or swallow the scanner's clicks. It is also
 //! excluded from screen capture (when the OS supports it) so it never appears in
 //! the frames being read. On non-Windows targets it is a no-op.
+mod marks;
 mod panel;
 mod render;
 #[cfg(windows)]
 mod win;
 
+pub use marks::{render_marks, Icon, Mark};
 pub use panel::{panel_origin, panel_width, render_panel, Chip, PanelState, Row, Tone};
 
 pub use render::{banner_layout, banner_origin, Ltrb, load_fonts, render, BannerState, Fonts, Phase, BASE_H, BASE_W};
 
 use std::sync::{Arc, Mutex};
 
-/// What the overlay window shows.
+/// The card window: scan progress, or the guide card beside the game window.
 #[derive(Debug, Clone, PartialEq)]
-pub enum Shown {
-    /// Scan progress, over/above the game window.
+pub enum Card {
     Banner(BannerState),
-    /// Guide card beside the game window.
     Panel(PanelState),
     Hidden,
+}
+
+/// Everything the overlay shows: the card and the icons over the game's own portraits
+/// (two separate windows, so each updates on its own).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Shown {
+    pub card: Card,
+    pub marks: Vec<Mark>,
 }
 
 /// Handle to the running banner. Dropping it closes the window.
@@ -36,16 +44,16 @@ impl Overlay {
     /// Show the banner over the game window ("Blue Archive"). Never fails the
     /// caller: if the banner cannot be shown, scanning just runs without it.
     pub fn start() -> Overlay {
-        Overlay::start_with(Shown::Banner(BannerState::default()))
+        Overlay::start_with(Card::Banner(BannerState::default()))
     }
 
     /// Start with nothing shown (the guide panel appears when `panel` is called).
     pub fn start_hidden() -> Overlay {
-        Overlay::start_with(Shown::Hidden)
+        Overlay::start_with(Card::Hidden)
     }
 
-    fn start_with(first: Shown) -> Overlay {
-        let state = Arc::new(Mutex::new(first));
+    fn start_with(first: Card) -> Overlay {
+        let state = Arc::new(Mutex::new(Shown { card: first, marks: Vec::new() }));
         #[cfg(windows)]
         let worker = win::Worker::start(state.clone());
         Overlay {
@@ -55,24 +63,31 @@ impl Overlay {
         }
     }
 
-    fn show(&self, s: Shown) {
+    fn show(&self, c: Card) {
         if let Ok(mut g) = self.state.lock() {
-            *g = s;
+            g.card = c;
+        }
+    }
+
+    /// Icons over the game's portraits (positions in the 1280x960 frame); empty clears them.
+    pub fn marks(&self, marks: Vec<Mark>) {
+        if let Ok(mut g) = self.state.lock() {
+            g.marks = marks;
         }
     }
 
     /// Replace the shown banner state.
     pub fn set(&self, s: BannerState) {
-        self.show(Shown::Banner(s));
+        self.show(Card::Banner(s));
     }
 
     /// Show the guide card beside the game window.
     pub fn panel(&self, p: PanelState) {
-        self.show(Shown::Panel(p));
+        self.show(Card::Panel(p));
     }
 
     pub fn hide(&self) {
-        self.show(Shown::Hidden);
+        self.show(Card::Hidden);
     }
 
     pub fn counting(&self) {
