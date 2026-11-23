@@ -13,7 +13,7 @@ use anyhow::{bail, Context, Result};
 use baocr_core::ocr_api::Ocr;
 use baocr_export::{Index, Store};
 use baocr_extract::{Extractor, Options, FRAME_MYSTIC};
-use baocr_hcu::{check_aspect, detect_region, game_capture, parse_frame_region, Hcu, HcuSource, Watcher};
+use baocr_hcu::{check_aspect, detect_region, game_capture, parse_frame_region, Hcu, HcuSession, HcuSource, Watcher};
 use baocr_ocr::PpOcr;
 use baocr_overlay::{BannerState, Overlay};
 use baocr_pipeline::reextract;
@@ -184,13 +184,14 @@ fn real_main() -> Result<()> {
     // The add-on (the default): it finds the game window itself, whenever that appears.
     if chosen == 0 || args.assist {
         let ocr: Arc<dyn Ocr> = Arc::new(load_ocr(&args)?);
-        return assist::run(ocr, &Hcu::default_backend(), &args.region, &wiki_path(&args), &args.out_dir(), args.workers);
+        return assist::run(ocr, &HcuSession::default_backend(), &args.region, &wiki_path(&args), &args.out_dir(), args.workers);
     }
 
     // Everything below drives or watches the game.
-    let hcu = Hcu::default_backend();
+    let session = HcuSession::default_backend();
+    let hcu = session.view();
     let region = if args.region == "auto" {
-        let r = detect_region(&hcu)?;
+        let r = detect_region(hcu)?;
         println!("game window found: --region {:.2},{:.2},{:.2},{:.2}", r[0], r[1], r[2], r[3]);
         r
     } else {
@@ -199,17 +200,17 @@ fn real_main() -> Result<()> {
     check_aspect(region)?;
 
     if let Some(path) = &args.grab {
-        hcu.activate()?;
-        game_capture(&hcu, region)?.save(path)?;
+        session.exclusive().activate()?;
+        game_capture(hcu, region)?.save(path)?;
         return Ok(());
     }
     if let Some(dir) = &args.learn {
-        return run_learn(&args, &hcu, region, dir);
+        return run_learn(&args, hcu, region, dir);
     }
     if args.watch {
-        return run_watch(&args, &hcu, region, opts);
+        return run_watch(&args, hcu, region, opts);
     }
-    run_scan(&args, &hcu, region, opts)
+    run_scan(&args, &session, region, opts)
 }
 
 fn run_image(args: &Args, path: &PathBuf, opts: &Options) -> Result<()> {
@@ -230,7 +231,7 @@ fn run_image(args: &Args, path: &PathBuf, opts: &Options) -> Result<()> {
     Ok(())
 }
 
-fn run_scan(args: &Args, hcu: &Hcu, region: [f64; 4], opts: Options) -> Result<()> {
+fn run_scan(args: &Args, session: &HcuSession, region: [f64; 4], opts: Options) -> Result<()> {
     let overlay = (!args.no_overlay).then(Overlay::start);
     let report = |s: BannerState| {
         if let Some(o) = &overlay {
@@ -240,7 +241,7 @@ fn run_scan(args: &Args, hcu: &Hcu, region: [f64; 4], opts: Options) -> Result<(
     let ocr: Arc<dyn Ocr> = Arc::new(load_ocr(args)?);
     let out = args.out_dir();
     let req = scan::ScanRequest { out: &out, deep: !args.fast, workers: args.workers, max_students: args.max_students, from_first: args.from_first };
-    let summary = scan::scan_students(ocr, hcu, region, &req, opts, &report);
+    let summary = scan::scan_students(ocr, &session.exclusive(), region, &req, opts, &report);
     if overlay.is_some() {
         // let the final state be read
         std::thread::sleep(std::time::Duration::from_secs(if summary.is_ok() { 3 } else { 4 }));

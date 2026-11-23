@@ -11,8 +11,12 @@
 //! the screenshot is the whole virtual desktop delivered at no more than 1366x768; zoom regions and
 //! click points are in that delivered frame; a click point maps to the native pixel
 //! `(u + 0.5) * scale - 0.5` and is sent as a `SendInput` absolute coordinate on the virtual desktop;
-//! a wheel notch is 120 units. Input is refused (nothing is sent) when the desktop's size is no longer
-//! the one the last frame was taken at: the caller takes a fresh screenshot and repeats.
+//! a wheel notch is 120 units.
+//!
+//! Input is guarded here, at the boundary, so no caller has to remember to (see `docs/hcu-native.md`):
+//! nothing is sent when the frame is stale (desktop size or the windows over the point changed since
+//! the screenshot), when no monitor shows the point, or when the window under it is not the intended
+//! one. Input that stopped half way is answered `effect_unknown` and is never repeated.
 use crate::audit::{iso_utc, AuditSink};
 use crate::guard::{failure_record, same_over, Refusal, SendError, WinInfo};
 use crate::hcu::Runner;

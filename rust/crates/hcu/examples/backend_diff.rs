@@ -1,11 +1,11 @@
 //! Compares the in-process desktop with the `computer-use` helper on the live screen (screenshots
 //! only, no input): frame size, the detected game region, the 1280x960 game capture, and speed.
-use baocr_hcu::{detect_region, game_capture, Hcu};
+use baocr_hcu::{detect_region, game_capture, HcuSession};
 use std::time::Instant;
 
 fn main() -> anyhow::Result<()> {
     let bin = std::env::args().nth(1).unwrap_or_else(|| "../vendor/hcu/computer-use.exe".into());
-    let (native, process) = (Hcu::native(), Hcu::new(bin));
+    let (native, process) = (HcuSession::native(), HcuSession::new(bin));
     let mut caps = Vec::new();
     for (name, h) in [("native", &native), ("process", &process)] {
         let t = Instant::now();

@@ -1,7 +1,7 @@
 //! Roster preparation: learn the total number of students before scanning, and
 //! open the first student, so progress can be shown as n/m and the scan always
 //! starts at the beginning.
-use crate::{click_game, game_capture, to_frame, Hcu};
+use crate::{click_game, game_capture, to_frame, Exclusive, Hcu};
 use anyhow::{anyhow, bail, Result};
 use baocr_pixels::{detail_visible, roster_cards, roster_visible_pixels, same_cards, scroll_thumb, signature_distance, list_shift, slot_occupied, unowned_banner, Card, CardSignature};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -38,7 +38,7 @@ pub fn merge_new_cards(seen: &mut Vec<CardSignature>, cards: &[Card]) -> usize {
 }
 
 /// `count` wheel movements (of the largest size) in one HCU call.
-fn wheel(h: &Hcu, region: R4, delta: i32, count: usize) -> Result<()> {
+fn wheel(h: &Exclusive, region: R4, delta: i32, count: usize) -> Result<()> {
     let (x, y) = to_frame(region, SCROLL_AT.0, SCROLL_AT.1);
     h.scroll_n(x, y, delta, count)
 }
@@ -50,7 +50,7 @@ fn at_top(img: &RgbImage) -> bool {
 /// Scroll the roster back to its first row, `moves` wheel movements per call. The
 /// thumb position, not the card positions (which depend on the scroll), says when
 /// the top is reached.
-pub fn scroll_to_top_by(h: &Hcu, region: R4, moves: usize) -> Result<RgbImage> {
+pub fn scroll_to_top_by(h: &Exclusive, region: R4, moves: usize) -> Result<RgbImage> {
     let mut img = game_capture(h, region)?;
     for _ in 0..MAX_PAGES {
         if at_top(&img) {
@@ -63,7 +63,7 @@ pub fn scroll_to_top_by(h: &Hcu, region: R4, moves: usize) -> Result<RgbImage> {
     bail!("could not scroll the roster back to its start")
 }
 
-pub fn scroll_to_top(h: &Hcu, region: R4) -> Result<RgbImage> {
+pub fn scroll_to_top(h: &Exclusive, region: R4) -> Result<RgbImage> {
     scroll_to_top_by(h, region, TOP_MOVES)
 }
 
@@ -144,7 +144,7 @@ const MAX_MOVES: usize = 12;
 /// The number of wheel movements per call follows the measured travel, so every
 /// scroll advances nearly a screen minus one line (so every line is shown whole once).
 /// Stops at the "미보유" banner or the end of the list. Returns the movements used last.
-fn capture_pages(h: &Hcu, region: R4, first: RgbImage, lines: Option<i32>, delta: i32, tx: &Sender<(RgbImage, i32, bool)>, counts: &Receiver<usize>, on_count: &mut dyn FnMut(usize)) -> Result<usize> {
+fn capture_pages(h: &Exclusive, region: R4, first: RgbImage, lines: Option<i32>, delta: i32, tx: &Sender<(RgbImage, i32, bool)>, counts: &Receiver<usize>, on_count: &mut dyn FnMut(usize)) -> Result<usize> {
     let mut img = first;
     let (_, pitch) = page_geometry(&img).ok_or_else(|| anyhow!("no student lines visible"))?;
     // A line is seen whole on some page as long as one scroll is at most the list's
@@ -191,7 +191,7 @@ fn capture_pages(h: &Hcu, region: R4, first: RgbImage, lines: Option<i32>, delta
     bail!("the roster has more than {MAX_PAGES} pages; stopping the count")
 }
 
-fn count_pages(h: &Hcu, region: R4, lines: Option<i32>, delta: i32, on_count: &mut dyn FnMut(usize)) -> Result<usize> {
+fn count_pages(h: &Exclusive, region: R4, lines: Option<i32>, delta: i32, on_count: &mut dyn FnMut(usize)) -> Result<usize> {
     let first = scroll_to_top(h, region)?;
     if !roster_visible_pixels(&first) {
         bail!("the student roster (All) is not visible");
@@ -230,7 +230,7 @@ fn count_pages(h: &Hcu, region: R4, lines: Option<i32>, delta: i32, on_count: &m
 ///
 /// Fast path: several lines per scroll. If a page shares no line with the previous
 /// one (the scroll skipped lines) the count is redone one line at a time.
-pub fn count_roster(h: &Hcu, region: R4, mut on_count: impl FnMut(usize)) -> Result<usize> {
+pub fn count_roster(h: &Exclusive, region: R4, mut on_count: impl FnMut(usize)) -> Result<usize> {
     // How far a wheel movement goes differs between machines and game sessions: when the
     // first scroll goes too far, start over from the top with a smaller movement.
     let mut delta = SCROLL_MAX;
@@ -254,7 +254,7 @@ pub fn count_roster(h: &Hcu, region: R4, mut on_count: impl FnMut(usize)) -> Res
 }
 
 /// From a profile, go back to the roster list.
-pub fn go_to_roster(h: &Hcu, region: R4) -> Result<RgbImage> {
+pub fn go_to_roster(h: &Exclusive, region: R4) -> Result<RgbImage> {
     click_game(h, region, BACK.0, BACK.1)?;
     for _ in 0..12 {
         sleep(Duration::from_millis(400));
@@ -283,7 +283,7 @@ fn settled_roster(h: &Hcu, region: R4) -> Result<RgbImage> {
 
 /// Click the first card and wait for the profile. The grid is allowed to settle
 /// first, and a click that did not open anything is retried on a fresh frame.
-pub fn open_first_student(h: &Hcu, region: R4) -> Result<RgbImage> {
+pub fn open_first_student(h: &Exclusive, region: R4) -> Result<RgbImage> {
     scroll_to_top(h, region)?;
     for _ in 0..3 {
         let img = settled_roster(h, region)?;
@@ -320,7 +320,7 @@ pub fn screen_kind(img: &RgbImage) -> Screen {
 }
 
 /// From the main menu, press the 학생 button and wait for the student list.
-fn enter_student_menu(h: &Hcu, region: R4, button: (i32, i32)) -> Result<RgbImage> {
+fn enter_student_menu(h: &Exclusive, region: R4, button: (i32, i32)) -> Result<RgbImage> {
     click_game(h, region, button.0, button.1)?;
     for _ in 0..15 {
         sleep(Duration::from_millis(400));
@@ -337,7 +337,7 @@ fn enter_student_menu(h: &Hcu, region: R4, button: (i32, i32)) -> Result<RgbImag
 /// Any other screen is left alone (no clicks) and reported.
 ///
 /// `student_button` recognises the main menu in a frame and returns where 학생 is.
-fn reach_roster(h: &Hcu, region: R4, student_button: &dyn Fn(&RgbImage) -> Option<(i32, i32)>) -> Result<()> {
+fn reach_roster(h: &Exclusive, region: R4, student_button: &dyn Fn(&RgbImage) -> Option<(i32, i32)>) -> Result<()> {
     let img = game_capture(h, region)?;
     match screen_kind(&img) {
         Screen::Roster => Ok(()),
@@ -354,7 +354,7 @@ fn reach_roster(h: &Hcu, region: R4, student_button: &dyn Fn(&RgbImage) -> Optio
 /// Wherever the game is (profile, list or main menu) it ends on the first
 /// student. The list is always scrolled to its start before counting and again
 /// afterwards, so the scroll position it was left in does not matter.
-pub fn prepare_scan(h: &Hcu, region: R4, student_button: &dyn Fn(&RgbImage) -> Option<(i32, i32)>, on_count: impl FnMut(usize)) -> Result<usize> {
+pub fn prepare_scan(h: &Exclusive, region: R4, student_button: &dyn Fn(&RgbImage) -> Option<(i32, i32)>, on_count: impl FnMut(usize)) -> Result<usize> {
     h.activate()?;
     reach_roster(h, region, student_button)?;
     let total = count_roster(h, region, on_count)?;
@@ -363,7 +363,7 @@ pub fn prepare_scan(h: &Hcu, region: R4, student_button: &dyn Fn(&RgbImage) -> O
 }
 
 /// Make sure a profile is open (used when the total could not be counted).
-pub fn ensure_profile(h: &Hcu, region: R4, student_button: &dyn Fn(&RgbImage) -> Option<(i32, i32)>) -> Result<()> {
+pub fn ensure_profile(h: &Exclusive, region: R4, student_button: &dyn Fn(&RgbImage) -> Option<(i32, i32)>) -> Result<()> {
     let img = game_capture(h, region)?;
     if let Screen::Profile = screen_kind(&img) {
         return Ok(());

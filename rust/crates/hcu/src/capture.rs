@@ -132,7 +132,7 @@ fn capture_once(h: &Hcu, region: [f64; 4], fresh_frame: bool) -> Result<RgbImage
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hcu::Runner;
+    use crate::hcu::{HcuSession, Runner};
     use image::Rgb;
     use std::sync::Mutex;
 
@@ -220,7 +220,7 @@ mod tests {
 
     #[test]
     fn game_capture_stitches_halves() {
-        let h = Hcu::with_runner(Box::new(Geo { log: Default::default() }));
+        let h = HcuSession::with_runner(Box::new(Geo { log: Default::default() }));
         let img = game_capture(&h, [100.0, 50.0, 500.0, 350.0]).unwrap();
         assert_eq!(img.dimensions(), (1280, 960));
         // No blue padding leaked into the stitched frame, halves are the right colour.
@@ -236,7 +236,7 @@ mod tests {
     fn game_capture_zoom_arguments() {
         let geo = Geo { log: Default::default() };
         let log = geo.log.clone();
-        let h = Hcu::with_runner(Box::new(geo));
+        let h = HcuSession::with_runner(Box::new(geo));
         game_capture(&h, [100.4, 50.0, 500.2, 350.0]).unwrap();
         game_capture(&h, [100.4, 50.0, 500.2, 350.0]).unwrap();
         let log = log.lock().unwrap();
@@ -256,7 +256,7 @@ mod tests {
 
     #[test]
     fn game_capture_rejects_outside_region() {
-        let h = Hcu::with_runner(Box::new(Geo { log: Default::default() }));
+        let h = HcuSession::with_runner(Box::new(Geo { log: Default::default() }));
         assert!(game_capture(&h, [100.0, 50.0, 1100.0, 350.0]).is_err());
         assert!(game_capture(&h, [-1.0, 50.0, 500.0, 350.0]).is_err());
     }

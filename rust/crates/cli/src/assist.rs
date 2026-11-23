@@ -11,7 +11,7 @@ use baocr_assist::{read_library, Assistant, Command, Observer, Settings};
 use baocr_core::ocr_api::Ocr;
 use baocr_extract::scene::Scene;
 use baocr_extract::Options;
-use baocr_hcu::{check_aspect, detect_region, game_capture, parse_frame_region, screen_kind, Hcu, Screen};
+use baocr_hcu::{check_aspect, detect_region, game_capture, parse_frame_region, screen_kind, Hcu, HcuSession, Screen};
 use baocr_overlay::{set_escape_target, BannerState, Overlay};
 use baocr_pixels::{frame_distance, frame_key};
 use baocr_wikidb::Wiki;
@@ -39,7 +39,7 @@ fn find_region(hcu: &Hcu, spec: &str) -> Result<[f64; 4]> {
     Ok(region)
 }
 
-pub fn run(ocr: Arc<dyn Ocr>, hcu: &Hcu, region_spec: &str, wiki_path: &Path, out: &Path, workers: usize) -> Result<()> {
+pub fn run(ocr: Arc<dyn Ocr>, session: &HcuSession, region_spec: &str, wiki_path: &Path, out: &Path, workers: usize) -> Result<()> {
     if !wiki_path.exists() {
         bail!("wiki database not found at {}: build it with `cargo run -p baocr-wikidb --release`", wiki_path.display());
     }
@@ -52,6 +52,7 @@ pub fn run(ocr: Arc<dyn Ocr>, hcu: &Hcu, region_spec: &str, wiki_path: &Path, ou
     let flag = stop.clone();
     ctrlc::set_handler(move || flag.store(true, Ordering::Relaxed))?;
     // ESC during a scan (or the tray's 종료) cancels every HCU call, which stops the scan at once
+    let hcu = session.view();
     let cancel = hcu.cancel_token();
     set_escape_target(cancel.clone());
     println!("add-on running (it only looks at the game, never sends input); settings: {}; Ctrl-C to stop", settings_path.display());
@@ -78,7 +79,7 @@ pub fn run(ocr: Arc<dyn Ocr>, hcu: &Hcu, region_spec: &str, wiki_path: &Path, ou
                     assistant.begin_scan();
                     let last = RefCell::new(BannerState::counting(0));
                     let req = ScanRequest { out, deep, workers, max_students: 300, from_first: true };
-                    match scan::scan_students(ocr.clone(), hcu, r, &req, Options::default(), &|s| {
+                    match scan::scan_students(ocr.clone(), &session.exclusive(), r, &req, Options::default(), &|s| {
                         *last.borrow_mut() = s.clone();
                         assistant.scan_progress(s)
                     }) {

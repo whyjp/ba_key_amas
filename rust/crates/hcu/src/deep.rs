@@ -1,12 +1,12 @@
 use crate::capture::{game_capture, to_frame};
-use crate::hcu::Hcu;
+use crate::hcu::{Exclusive, Hcu};
 use anyhow::{anyhow, bail, Context, Result};
 use baocr_extract::DeepFrames;
 use baocr_pixels::panel_delta;
 use image::RgbImage;
 
 /// Click at a 1280x960 client coordinate.
-pub fn click_game(h: &Hcu, region: [f64; 4], x: i32, y: i32) -> Result<()> {
+pub fn click_game(h: &Exclusive, region: [f64; 4], x: i32, y: i32) -> Result<()> {
     let (fx, fy) = to_frame(region, x, y);
     h.click(fx, fy)
 }
@@ -54,7 +54,7 @@ pub fn settle_quiet(h: &Hcu, region: [f64; 4]) -> Result<RgbImage> {
 /// top (the popup reopens at whatever offset it was left at, so this is always done),
 /// then down twice to the end. The two frames must differ, otherwise one of the
 /// scrolls did not take effect and the sequence is repeated once.
-fn read_popup_ends(h: &Hcu, region: [f64; 4]) -> Result<(RgbImage, RgbImage)> {
+fn read_popup_ends(h: &Exclusive, region: [f64; 4]) -> Result<(RgbImage, RgbImage)> {
     let (fx, fy) = to_frame(region, 640, 560);
     let mut last_err = anyhow!("stat popup ends not read");
     for _ in 0..2 {
@@ -82,7 +82,7 @@ const POPUP_ENDS_DIFFER: f64 = 0.02;
 /// Walks the read-only menus (상세 popup top/bottom, 레벨 업 tab, 신비 해방 tab)
 /// and returns the frames it saw. No OCR. The UI is left on the basic-info tab;
 /// if that cannot be confirmed it returns an error.
-pub fn capture_deep(h: &Hcu, region: [f64; 4], before: &RgbImage) -> Result<DeepFrames> {
+pub fn capture_deep(h: &Exclusive, region: [f64; 4], before: &RgbImage) -> Result<DeepFrames> {
     click_game(h, region, 1138, 320)?; // 상세
     let _ = settle(h, region, before).context("stat popup")?;
     let (top, bottom) = read_popup_ends(h, region)?;
@@ -104,6 +104,7 @@ pub fn capture_deep(h: &Hcu, region: [f64; 4], before: &RgbImage) -> Result<Deep
 mod tests {
     use super::*;
     use crate::fake::{flat, World};
+    use crate::hcu::HcuSession;
 
     const R: [f64; 4] = [0.0, 0.0, 1280.0, 960.0];
 
@@ -111,11 +112,11 @@ mod tests {
     fn settle_requires_change_then_two_stable() {
         // screen 0 = from; world flips to screen 1 on the first click.
         let w = World::new(|s| 20 + 50 * s as u8, |s, _, _| *s = 1, |_, _| {});
-        let h = Hcu::with_runner(Box::new(w.clone())).without_sleep();
+        let h = HcuSession::with_runner(Box::new(w.clone())).without_sleep();
         let from = game_capture(&h, R).unwrap();
         // no click yet: the screen never changes
         assert!(settle(&h, R, &from).is_err());
-        click_game(&h, R, 10, 10).unwrap();
+        click_game(&h.exclusive(), R, 10, 10).unwrap();
         let cur = settle(&h, R, &from).unwrap();
         assert_eq!(cur.get_pixel(5, 5).0, [70, 70, 70]);
     }
@@ -123,7 +124,7 @@ mod tests {
     #[test]
     fn settle_quiet_needs_no_change() {
         let w = World::new(|_| 30, |_, _, _| {}, |_, _| {});
-        let h = Hcu::with_runner(Box::new(w)).without_sleep();
+        let h = HcuSession::with_runner(Box::new(w)).without_sleep();
         assert!(settle_quiet(&h, R).is_ok());
     }
 
@@ -131,9 +132,9 @@ mod tests {
     fn settle_waits_out_animation() {
         // screen advances on every capture until 3, so 'stable' only happens at the end
         let w = World::new(|s| 20 + 50 * s as u8, |s, _, _| *s = 1, |_, _| {}).animate_to(3);
-        let h = Hcu::with_runner(Box::new(w.clone())).without_sleep();
+        let h = HcuSession::with_runner(Box::new(w.clone())).without_sleep();
         let from = flat(20);
-        click_game(&h, R, 10, 10).unwrap();
+        click_game(&h.exclusive(), R, 10, 10).unwrap();
         let cur = settle(&h, R, &from).unwrap();
         assert_eq!(cur.get_pixel(5, 5).0, [170, 170, 170]);
     }
@@ -156,9 +157,9 @@ mod tests {
             }
         };
         let w = World::new(|s| 20 + 30 * s as u8, on_click, on_scroll);
-        let h = Hcu::with_runner(Box::new(w.clone())).without_sleep();
+        let h = HcuSession::with_runner(Box::new(w.clone())).without_sleep();
         let before = flat(20);
-        let f = capture_deep(&h, R, &before).unwrap();
+        let f = capture_deep(&h.exclusive(), R, &before).unwrap();
         assert_eq!(f.popup_top.get_pixel(0, 0).0, [50, 50, 50]);
         assert_eq!(f.popup_bottom.get_pixel(0, 0).0, [80, 80, 80]);
         assert_eq!(f.level_up.get_pixel(0, 0).0, [140, 140, 140]);
@@ -190,8 +191,8 @@ mod tests {
                 *s += 1
             }
         });
-        let h = Hcu::with_runner(Box::new(w)).without_sleep();
-        let err = capture_deep(&h, R, &flat(10)).err().unwrap();
+        let h = HcuSession::with_runner(Box::new(w)).without_sleep();
+        let err = capture_deep(&h.exclusive(), R, &flat(10)).err().unwrap();
         let err = format!("{err:#}");
         assert!(err.contains("did not return to the basic-info tab"), "{err}");
     }
