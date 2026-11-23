@@ -1,0 +1,159 @@
+-- Blue Archive reference database ("wiki DB"). Global server (the Korean client is Global).
+-- Reference data only, rebuilt from sources by the collectors. The user's own roster stays
+-- in the scan output (index.json) and joins to this DB by student.id.
+-- Local assist use only: the DB file is not distributed (see source.note).
+-- Version 1. Bump meta.schema_version on every incompatible change.
+
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+-- Where a row came from. Every entity row names its source, so a collector can replace
+-- exactly its own rows and a reader can show provenance.
+CREATE TABLE source (
+    id          INTEGER PRIMARY KEY,
+    name        TEXT NOT NULL UNIQUE,       -- 'schaledb' | 'arisu-archive'
+    url         TEXT NOT NULL,
+    fetched_at  TEXT NOT NULL,              -- ISO 8601 UTC
+    version     TEXT,                       -- upstream data version / commit, when it has one
+    note        TEXT                        -- licence, attribution and use conditions
+);
+
+-- Korean display names for the closed code sets.
+CREATE TABLE label (
+    kind TEXT NOT NULL,                     -- 'BulletType' | 'ArmorType' | 'Terrain' | 'StageType' | 'EnemyRank' | ...
+    code TEXT NOT NULL,
+    ko   TEXT NOT NULL,
+    PRIMARY KEY (kind, code)
+);
+
+-- Damage multiplier of an attack (bullet) type against an armor type, in basis points (10000 = 100 %).
+CREATE TABLE type_effectiveness (
+    bullet_type   TEXT NOT NULL,
+    armor_type    TEXT NOT NULL,
+    multiplier_bp INTEGER NOT NULL,
+    PRIMARY KEY (bullet_type, armor_type)
+);
+
+CREATE TABLE student (
+    id              INTEGER PRIMARY KEY,    -- game student id, same as the scan's student id
+    path_name       TEXT NOT NULL,
+    dev_name        TEXT NOT NULL,
+    name_ko         TEXT NOT NULL,
+    school          TEXT,
+    club            TEXT,
+    star_grade      INTEGER NOT NULL,       -- initial stars
+    squad_type      TEXT NOT NULL,          -- 'Main' (STRIKER) | 'Support' (SPECIAL)
+    tactic_role     TEXT,
+    position        TEXT,
+    bullet_type     TEXT NOT NULL,          -- attack type
+    armor_type      TEXT NOT NULL,
+    street_adapt    INTEGER,                -- terrain adaptation grade (higher is better)
+    outdoor_adapt   INTEGER,
+    indoor_adapt    INTEGER,
+    weapon_type     TEXT,
+    released_global INTEGER NOT NULL CHECK (released_global IN (0, 1)),
+    source_id       INTEGER NOT NULL REFERENCES source(id),
+    raw             TEXT NOT NULL CHECK (json_valid(raw))   -- the source record, for fields not modelled yet
+);
+
+CREATE TABLE enemy (
+    id          INTEGER PRIMARY KEY,
+    dev_name    TEXT,
+    name_ko     TEXT NOT NULL,
+    rank        TEXT NOT NULL,              -- Minion | Elite | Champion | Boss | Summoned | ...
+    squad_type  TEXT,
+    bullet_type TEXT,
+    armor_type  TEXT,
+    size        TEXT,
+    source_id   INTEGER NOT NULL REFERENCES source(id),
+    raw         TEXT NOT NULL CHECK (json_valid(raw))     -- stats and skills stay here until a reader needs them
+);
+
+-- Campaign missions, bounties (현상수배), 특별의뢰, 학원교류회.
+CREATE TABLE stage (
+    id                  INTEGER PRIMARY KEY,
+    category            TEXT NOT NULL,      -- Campaign | Bounty | WeekDungeon | SchoolDungeon
+    type                TEXT,               -- ChaserA-E, FindGift, Blood, SchoolA-C; NULL for Campaign
+    area                INTEGER,            -- campaign area (1-x)
+    stage_no            INTEGER,
+    difficulty          INTEGER,            -- campaign: 0 normal, 1 hard
+    name_ko             TEXT,
+    terrain             TEXT,               -- Street | Outdoor | Indoor
+    level               INTEGER,
+    entry_cost          TEXT CHECK (entry_cost IS NULL OR json_valid(entry_cost)),
+    star_condition      TEXT CHECK (star_condition IS NULL OR json_valid(star_condition)),
+    challenge_condition TEXT CHECK (challenge_condition IS NULL OR json_valid(challenge_condition)),
+    source_id           INTEGER NOT NULL REFERENCES source(id)
+);
+CREATE INDEX stage_lookup ON stage (category, area, stage_no, difficulty);
+CREATE INDEX stage_name ON stage (name_ko);
+
+CREATE TABLE stage_formation (
+    id           INTEGER PRIMARY KEY,       -- the game's formation id
+    stage_id     INTEGER NOT NULL REFERENCES stage(id) ON DELETE CASCADE,
+    ordinal      INTEGER NOT NULL,
+    unit_grade   TEXT,                      -- Grade1 | Boss | ...
+    level_minion INTEGER,
+    grade_minion INTEGER
+);
+CREATE INDEX stage_formation_stage ON stage_formation (stage_id);
+
+CREATE TABLE formation_enemy (
+    formation_id INTEGER NOT NULL REFERENCES stage_formation(id) ON DELETE CASCADE,
+    ordinal      INTEGER NOT NULL,
+    enemy_id     INTEGER NOT NULL REFERENCES enemy(id),
+    PRIMARY KEY (formation_id, ordinal)
+);
+
+-- Total war, 종합전술시험, world raids, ...: a boss encounter.
+CREATE TABLE raid (
+    id              INTEGER NOT NULL,
+    kind            TEXT NOT NULL,          -- Raid | TimeAttack | WorldRaid | MultiFloorRaid | InteractiveWorldRaid
+    path_name       TEXT,
+    name_ko         TEXT,
+    bullet_type     TEXT,
+    armor_type      TEXT,
+    terrain         TEXT CHECK (terrain IS NULL OR json_valid(terrain)),   -- JSON array
+    released_global INTEGER CHECK (released_global IN (0, 1)),
+    source_id       INTEGER NOT NULL REFERENCES source(id),
+    raw             TEXT NOT NULL CHECK (json_valid(raw)),
+    PRIMARY KEY (kind, id)
+);
+
+CREATE TABLE raid_season (
+    season_id INTEGER PRIMARY KEY,
+    raid_id   INTEGER NOT NULL,
+    terrain   TEXT,
+    start_at  INTEGER,                      -- unix seconds
+    end_at    INTEGER
+);
+
+-- What a stage's enemies are made of: how many enemies of each armor type it holds.
+CREATE VIEW v_stage_armor AS
+SELECT f.stage_id AS stage_id, e.armor_type AS armor_type, COUNT(*) AS enemies
+FROM stage_formation f
+JOIN formation_enemy fe ON fe.formation_id = f.id
+JOIN enemy e ON e.id = fe.enemy_id
+WHERE e.armor_type IS NOT NULL AND e.rank <> 'Summoned'
+GROUP BY f.stage_id, e.armor_type;
+
+-- How well each student's attack type does against a stage's enemies (average multiplier,
+-- weighted by enemy count, in basis points) and how well the student fits the terrain.
+CREATE VIEW v_student_vs_stage AS
+SELECT s.id AS stage_id,
+       st.id AS student_id,
+       CAST(ROUND(1.0 * SUM(a.enemies * te.multiplier_bp) / SUM(a.enemies)) AS INTEGER) AS effectiveness_bp,
+       CASE s.terrain WHEN 'Street' THEN st.street_adapt
+                      WHEN 'Outdoor' THEN st.outdoor_adapt
+                      WHEN 'Indoor' THEN st.indoor_adapt END AS terrain_adapt
+FROM stage s
+JOIN v_stage_armor a ON a.stage_id = s.id
+JOIN student st ON st.released_global = 1
+JOIN type_effectiveness te ON te.bullet_type = st.bullet_type AND te.armor_type = a.armor_type
+GROUP BY s.id, st.id;
+
+INSERT INTO meta (key, value) VALUES ('schema_version', '1');
