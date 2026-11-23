@@ -24,9 +24,33 @@ pub enum Tone {
     Unarmed,
     ElasticArmor,
     CompositeArmor,
+    /// Outcome ladder, best to worst: deep green, green, neutral slate, orange, red.
+    Excellent,
     Good,
-    Mid,
+    Even,
+    Poor,
     Bad,
+}
+
+/// How well a student suits the battle: the one scale behind the card's badges and the
+/// marks over the portraits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Grade {
+    Excellent,
+    Good,
+    Average,
+    Poor,
+}
+
+impl Grade {
+    pub fn tone(self) -> Tone {
+        match self {
+            Grade::Excellent => Tone::Excellent,
+            Grade::Good => Tone::Good,
+            Grade::Average => Tone::Even,
+            Grade::Poor => Tone::Bad,
+        }
+    }
 }
 
 impl Tone {
@@ -55,9 +79,20 @@ impl Tone {
             Tone::Mystic | Tone::Unarmed => [36, 108, 186],
             Tone::Sonic | Tone::ElasticArmor => [124, 74, 176],
             Tone::CompositeArmor => [52, 138, 98],
-            Tone::Good => [34, 134, 82],
-            Tone::Mid => [184, 130, 14],
+            Tone::Excellent => [10, 98, 58],
+            Tone::Good => [46, 150, 90],
+            Tone::Even => [226, 231, 241],
+            Tone::Poor => [214, 110, 44],
             Tone::Bad => [196, 58, 58],
+        }
+    }
+
+    /// Text colour on a badge of this tone.
+    pub(crate) fn ink(self) -> [u8; 3] {
+        if self == Tone::Even {
+            [64, 76, 100]
+        } else {
+            WHITE
         }
     }
 }
@@ -69,6 +104,25 @@ pub struct Chip {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MatrixRow {
+    pub label: Chip,
+    /// One per column of the matrix.
+    pub cells: Vec<Chip>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FitEntry {
+    /// None for a student who is not rated (a special judged by its skill).
+    pub grade: Option<Grade>,
+    /// The badge text: the grade's name, or "SP".
+    pub badge: String,
+    pub name: String,
+    pub tags: Vec<Chip>,
+    /// Muted text at the right instead of tags.
+    pub note: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Row {
     /// "지형   야외"
     Info { label: String, value: String },
@@ -76,9 +130,13 @@ pub enum Row {
     Chips { label: String, chips: Vec<Chip> },
     /// A plain line (wrapped), e.g. a hint or a warning.
     Note(String),
-    /// A bar around the average: `permille` is 1000 at average, above is better. Drawn on
-    /// a scale of 500..1500; `text` is shown beside the bar.
-    Meter { label: String, permille: i32, text: String },
+    /// A small table of outcomes: `cols` across, one `MatrixRow` per line, each cell a badge
+    /// whose tone says whether the outcome is good for the player.
+    Matrix { heading: String, cols: Vec<Chip>, rows: Vec<MatrixRow> },
+    /// A scale of badges with a line of explanation under it.
+    Legend { chips: Vec<Chip>, text: String },
+    /// One line per student: a grade badge, the name, the type tags.
+    Fits(Vec<FitEntry>),
     /// The verdict as a wide badge.
     Verdict { label: String, text: String, tone: Tone },
     /// A clickable row; clicking it reports `id` through the overlay's events.
@@ -169,6 +227,81 @@ fn wrap(font: &ab_glyph::FontVec, px: f32, max_w: f32, s: &str) -> Vec<String> {
     lines
 }
 
+/// `s` cut to `max_w` px at text size `px`, with an ellipsis when it had to be cut.
+fn clip(font: &ab_glyph::FontVec, px: f32, max_w: f32, s: &str) -> String {
+    if text_width(font, px, s) <= max_w {
+        return s.to_string();
+    }
+    let mut out: String = s.to_string();
+    while out.pop().is_some() {
+        let cut = format!("{out}…");
+        if text_width(font, px, &cut) <= max_w {
+            return cut;
+        }
+    }
+    String::new()
+}
+
+const BADGE_H: f32 = 19.0;
+const MATRIX_STEP: f32 = 23.0;
+const FIT_STEP: f32 = 26.0;
+const LEGEND_TEXT_PX: f32 = 10.5;
+
+/// A flat badge `w` wide with `text` centred in it, shrunk to fit when it is too long.
+#[allow(clippy::too_many_arguments)]
+fn badge(img: &mut RgbaImage, fonts: &Fonts, x: f32, y: f32, w: f32, h: f32, px: f32, text: &str, tone: Tone, alpha: f32) {
+    let (rgb, ink) = (tone.rgb(), tone.ink());
+    fill_rrect(img, x, y, w, h, 3.0 * h / BADGE_H, |_, _| (rgb, alpha));
+    let px = px.min(px * (w - 4.0) / text_width(&fonts.bold, px, text).max(1.0));
+    let tw = text_width(&fonts.bold, px, text);
+    draw_text(img, &fonts.bold, px, x + (w - tw) / 2.0, y + (h - px * 1.2) / 2.0, ink, alpha, text);
+}
+
+/// Matrix layout: the width of the label column and of each value column.
+fn matrix_columns(fonts: &Fonts, s: f32, inner_w: f32, cols: usize, rows: &[MatrixRow]) -> (f32, f32) {
+    let px = 11.0 * s;
+    let label_w = rows.iter().map(|r| text_width(&fonts.bold, px, &r.label.text) + 12.0 * s).fold(40.0 * s, f32::max).min(inner_w * 0.34);
+    let col_w = ((inner_w - label_w) / cols.max(1) as f32).min(72.0 * s);
+    (label_w, col_w)
+}
+
+/// One student's line: the better the grade, the stronger the line (tinted band and bar for
+/// the best, plain for average, faded for poor, a neutral badge for the unrated).
+fn draw_fit_entry(img: &mut RgbaImage, fonts: &Fonts, s: f32, pad: f32, wf: f32, y: f32, e: &FitEntry) {
+    let alpha = if e.grade == Some(Grade::Poor) { 0.55 } else { 1.0 };
+    let (band, bar) = match e.grade {
+        Some(Grade::Excellent) => (Some([212, 238, 221]), Tone::Excellent),
+        Some(Grade::Good) => (Some([234, 246, 238]), Tone::Good),
+        _ => (None, Tone::Even),
+    };
+    let h = 23.0 * s;
+    if let Some(rgb) = band {
+        fill_rrect(img, pad - 6.0 * s, y, wf - pad * 2.0 + 12.0 * s, h, 3.0 * s, |_, _| (rgb, 1.0));
+        fill_rrect(img, pad - 6.0 * s, y, 3.5 * s, h, 1.5 * s, |_, _| (bar.rgb(), 1.0));
+    }
+    let tone = e.grade.map_or(Tone::Even, Grade::tone);
+    let badge_w = 44.0 * s;
+    badge(img, fonts, pad, y + 2.0 * s, badge_w, 19.0 * s, 11.5 * s, &e.badge, tone, alpha);
+    let right = wf - pad;
+    let mut x = right;
+    for t in e.tags.iter().rev() {
+        let w = text_width(&fonts.bold, 10.5 * s, &t.text) + 10.0 * s;
+        x -= w;
+        badge(img, fonts, x, y + 3.5 * s, w, 16.0 * s, 10.5 * s, &t.text, t.tone, alpha);
+        x -= 3.0 * s;
+    }
+    if !e.note.is_empty() {
+        let nw = text_width(&fonts.regular, 10.5 * s, &e.note);
+        draw_text(img, &fonts.regular, 10.5 * s, right - nw, y + (h - 10.5 * s * 1.2) / 2.0, MUTED, 1.0, &e.note);
+        x = right - nw - 4.0 * s;
+    }
+    let name_x = pad + badge_w + 8.0 * s;
+    let name = clip(&fonts.semibold, 13.0 * s, (x - name_x - 4.0 * s).max(10.0 * s), &e.name);
+    let ink = if e.grade == Some(Grade::Poor) { MUTED } else { INK };
+    let font = if matches!(e.grade, Some(Grade::Excellent)) { &fonts.bold } else { &fonts.semibold };
+    draw_text(img, font, 13.0 * s, name_x, y + (h - 13.0 * s * 1.2) / 2.0, ink, 1.0, &name);
+}
+
 /// Chip rows: how many lines the chips take at `max_w`, and each chip's (line, x offset, width).
 fn chip_layout(fonts: &Fonts, px: f32, s: f32, max_w: f32, chips: &[Chip]) -> (usize, Vec<(usize, f32, f32)>) {
     let (pad, gap) = (8.0 * s, 5.0 * s);
@@ -216,7 +349,9 @@ pub fn render_panel_hits(width: u32, state: &PanelState, fonts: &Fonts) -> (Rgba
             Row::Info { value, .. } => wrap(&fonts.regular, 14.0 * s, value_w, value).len() as f32 * 21.0 * s + 5.0 * s,
             Row::Chips { chips, .. } => chip_layout(fonts, 12.0 * s, s, value_w, chips).0 as f32 * 25.0 * s + 5.0 * s,
             Row::Note(t) => wrap(&fonts.regular, 12.5 * s, wf - pad * 2.0, t).len() as f32 * 18.0 * s + 5.0 * s,
-            Row::Meter { .. } => 22.0 * s + 5.0 * s,
+            Row::Matrix { rows, .. } => 24.0 * s + (rows.len() + 1) as f32 * MATRIX_STEP * s + 5.0 * s,
+            Row::Legend { text, .. } => 22.0 * s + wrap(&fonts.regular, LEGEND_TEXT_PX * s, wf - pad * 2.0, text).len() as f32 * 15.0 * s + 4.0 * s,
+            Row::Fits(entries) => entries.len() as f32 * FIT_STEP * s + 5.0 * s,
             Row::Verdict { .. } => 28.0 * s + 7.0 * s,
             Row::Button { .. } => 24.0 * s + 5.0 * s,
             Row::Hint { value, .. } => wrap(&fonts.regular, 14.0 * s, value_w, value).len() as f32 * 21.0 * s + 5.0 * s,
@@ -313,7 +448,7 @@ pub fn render_panel_hits(width: u32, state: &PanelState, fonts: &Fonts) -> (Rgba
                     let (cx, cy) = (pad + label_w + x, y + line as f32 * 25.0 * s);
                     let rgb = chip.tone.rgb();
                     fill_rrect(&mut img, cx, cy, w, 21.0 * s, 3.0 * s, |_, _| (rgb, 1.0));
-                    draw_text(&mut img, &fonts.bold, 12.0 * s, cx + 8.0 * s, cy + (21.0 - 12.0 * 1.2) * 0.5 * s, WHITE, 1.0, &chip.text);
+                    draw_text(&mut img, &fonts.bold, 12.0 * s, cx + 8.0 * s, cy + (21.0 - 12.0 * 1.2) * 0.5 * s, chip.tone.ink(), 1.0, &chip.text);
                 }
                 y += lines as f32 * 25.0 * s + 5.0 * s;
                 if more {
@@ -327,26 +462,45 @@ pub fn render_panel_hits(width: u32, state: &PanelState, fonts: &Fonts) -> (Rgba
                 }
                 y += 5.0 * s;
             }
-            Row::Meter { label, permille, text } => {
-                draw_text(&mut img, &fonts.regular, 12.5 * s, pad, y + 2.0 * s, MUTED, 1.0, label);
-                let (bx, bw, bh) = (pad + label_w, value_w - 50.0 * s, 6.0 * s);
-                let by = y + 7.0 * s;
-                fill_rrect(&mut img, bx, by, bw, bh, 1.0 * s, |_, _| (TRACK, 1.0));
-                let frac = ((*permille).clamp(500, 1500) as f32 - 500.0) / 1000.0;
-                let (mid, pos) = (bx + bw / 2.0, bx + bw * frac);
-                let (from, to) = if pos >= mid { (mid, pos) } else { (pos, mid) };
-                let rgb = if (*permille - 1000).abs() < 30 { MUTED } else if *permille > 1000 { Tone::Good.rgb() } else { Tone::Bad.rgb() };
-                if to - from > 1.0 {
-                    fill_rrect(&mut img, from, by, to - from, bh, 1.0 * s, |_, _| (rgb, 1.0));
+            Row::Matrix { heading, cols, rows } => {
+                draw_text(&mut img, &fonts.bold, 11.5 * s, pad, y, NAVY, 1.0, heading);
+                fill_rrect(&mut img, pad, y + 17.0 * s, wf - pad * 2.0, (1.0 * s).max(1.0), 0.0, |_, _| (BORDER, 1.0));
+                y += 24.0 * s;
+                let (label_w, col_w) = matrix_columns(fonts, s, wf - pad * 2.0, cols.len(), rows);
+                let (bh, gap) = (BADGE_H * s, 4.0 * s);
+                for (i, c) in cols.iter().enumerate() {
+                    badge(&mut img, fonts, pad + label_w + i as f32 * col_w, y, col_w - gap, bh, 11.0 * s, &c.text, c.tone, 1.0);
                 }
-                // the average mark stands taller than the bar
-                fill_rrect(&mut img, mid - 0.75 * s, by - 3.0 * s, 1.5 * s, bh + 6.0 * s, 0.0, |_, _| (NAVY, 1.0));
-                let tw = text_width(&fonts.semibold, 12.5 * s, text);
-                draw_text(&mut img, &fonts.semibold, 12.5 * s, wf - pad - tw, y + 2.0 * s, INK, 1.0, text);
-                y += 22.0 * s + 5.0 * s;
-                if more {
-                    rule(&mut img, y - 3.0 * s);
+                y += MATRIX_STEP * s;
+                for r in rows {
+                    badge(&mut img, fonts, pad, y, label_w - 6.0 * s, bh, 11.0 * s, &r.label.text, r.label.tone, 1.0);
+                    for (i, c) in r.cells.iter().enumerate() {
+                        badge(&mut img, fonts, pad + label_w + i as f32 * col_w, y, col_w - gap, bh, 11.5 * s, &c.text, c.tone, 1.0);
+                    }
+                    y += MATRIX_STEP * s;
                 }
+                y += 5.0 * s;
+            }
+            Row::Legend { chips, text } => {
+                let (mut x, bh) = (pad, 17.0 * s);
+                for c in chips {
+                    let w = text_width(&fonts.bold, 10.5 * s, &c.text) + 12.0 * s;
+                    badge(&mut img, fonts, x, y, w, bh, 10.5 * s, &c.text, c.tone, 1.0);
+                    x += w + 4.0 * s;
+                }
+                y += 22.0 * s;
+                for line in wrap(&fonts.regular, LEGEND_TEXT_PX * s, wf - pad * 2.0, text) {
+                    draw_text(&mut img, &fonts.regular, LEGEND_TEXT_PX * s, pad, y, MUTED, 1.0, &line);
+                    y += 15.0 * s;
+                }
+                y += 4.0 * s;
+            }
+            Row::Fits(entries) => {
+                for e in entries {
+                    draw_fit_entry(&mut img, fonts, s, pad, wf, y, e);
+                    y += FIT_STEP * s;
+                }
+                y += 5.0 * s;
             }
             Row::Button { id, label, value, on } => {
                 let (bx, bw, bh) = (pad, wf - pad * 2.0, 24.0 * s);
@@ -367,9 +521,9 @@ pub fn render_panel_hits(width: u32, state: &PanelState, fonts: &Fonts) -> (Rgba
                 let (bx, bw, bh) = (pad, wf - pad * 2.0, 28.0 * s);
                 let rgb = tone.rgb();
                 fill_rrect(&mut img, bx, y, bw, bh, 3.0 * s, |_, _| (rgb, 1.0));
-                draw_text(&mut img, &fonts.regular, 12.5 * s, bx + 10.0 * s, y + (28.0 - 12.5 * 1.2) * 0.5 * s, WHITE, 0.9, label);
+                draw_text(&mut img, &fonts.regular, 12.5 * s, bx + 10.0 * s, y + (28.0 - 12.5 * 1.2) * 0.5 * s, tone.ink(), 0.9, label);
                 let tw = text_width(&fonts.bold, 15.0 * s, text);
-                draw_text(&mut img, &fonts.bold, 15.0 * s, bx + bw - 10.0 * s - tw, y + (28.0 - 15.0 * 1.2) * 0.5 * s, WHITE, 1.0, text);
+                draw_text(&mut img, &fonts.bold, 15.0 * s, bx + bw - 10.0 * s - tw, y + (28.0 - 15.0 * 1.2) * 0.5 * s, tone.ink(), 1.0, text);
                 y += 28.0 * s + 7.0 * s;
             }
         }
@@ -433,11 +587,8 @@ mod tests {
                 },
                 Row::Note("Hard 난이도는 적 구성이 다를 수 있습니다. 편성 전에 각 지역의 적 장갑과 지형을 다시 확인하세요".into()),
                 Row::Verdict { label: "편성 판정".into(), text: "유리".into(), tone: Tone::Good },
-                Row::Meter { label: "공격 상성".into(), permille: 1420, text: "+42%".into() },
-                Row::Meter { label: "방어 상성".into(), permille: 870, text: "-13%".into() },
-                Row::Meter { label: "지형 적응".into(), permille: 1000, text: "평균".into() },
                 Row::Verdict { label: "방어 판정".into(), text: "불리".into(), tone: Tone::Bad },
-                Row::Verdict { label: "지형 판정".into(), text: "보통".into(), tone: Tone::Mid },
+                Row::Verdict { label: "지형 판정".into(), text: "평균".into(), tone: Tone::Even },
                 Row::Button { id: "ingame".into(), label: "인게임 표시".into(), value: "켜짐".into(), on: true },
                 Row::Button { id: "place".into(), label: "임무 카드".into(), value: "게임 밖 · 100%".into(), on: false },
             ],
