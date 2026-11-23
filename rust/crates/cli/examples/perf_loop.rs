@@ -9,7 +9,7 @@ use baocr_core::ocr_api::Ocr;
 use baocr_extract::scene::{MissionRef, Scene};
 use baocr_hcu::{detect_region, game_capture, screen_kind, Hcu};
 use baocr_overlay::{load_fonts, render_panel_hits, Dock, Mark, Overlay, PanelState};
-use baocr_pixels::{frame_distance, frame_key};
+use baocr_pixels::{battle_hud, frame_distance, frame_key};
 use baocr_wikidb::Wiki;
 use std::cell::Cell;
 use std::path::PathBuf;
@@ -118,6 +118,8 @@ fn main() -> anyhow::Result<()> {
         let key = frame_key(&img);
         let t_key = time(RUNS, || frame_distance(&frame_key(&img), &key));
         let t_kind = time(RUNS, || screen_kind(&img));
+        let t_hud = time(RUNS, || battle_hud(&img));
+        println!("{:<26} battle HUD {:?} -> battle={} ({t_hud:.3} ms)", path.file_name().unwrap().to_string_lossy(), battle_hud(&img), battle_hud(&img).is_battle());
         let t_ocr = time(3, || ocr.boxes(&img).unwrap_or_default());
         let boxes = ocr.boxes(&img).unwrap_or_default();
         let mut observer = Observer::new(&ocr, &students);
@@ -160,6 +162,7 @@ fn main() -> anyhow::Result<()> {
         let first = game_capture(&h, region)?;
         let t_cap = time(10, || game_capture(&h, region).unwrap());
         let t_key = time(RUNS, || frame_key(&first));
+        println!("live: battle HUD {:?}", battle_hud(&first));
         println!("live: game_capture {t_cap:.0} ms (median of 10), frame_key {t_key:.2} ms");
     }
 

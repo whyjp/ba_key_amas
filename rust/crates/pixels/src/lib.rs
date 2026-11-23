@@ -18,7 +18,9 @@ use baocr_core::model::{Badges, Locks, SkillLocked, Terrain};
 use image::{imageops, GrayImage, Luma, RgbImage};
 use once_cell::sync::Lazy;
 
+mod battle;
 mod ink;
+pub use battle::*;
 pub use ink::*;
 
 /// `(x0, y0, x1, y1)`, half-open.

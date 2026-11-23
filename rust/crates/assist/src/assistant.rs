@@ -128,6 +128,11 @@ impl<'a, S: Surface> Assistant<'a, S> {
         }
     }
 
+    /// Whether the player asked for something the main loop has to carry out.
+    pub fn has_commands(&self) -> bool {
+        !self.commands.is_empty()
+    }
+
     /// Requests made through the card since the last call.
     pub fn take_commands(&mut self) -> Vec<Command> {
         std::mem::take(&mut self.commands)
@@ -260,6 +265,22 @@ impl<'a, S: Surface> Assistant<'a, S> {
         rows
     }
 
+    /// In a battle the add-on keeps out of the way: no in-game card, no icons, only the status and
+    /// the two things the player may still need (the in-game switch, closing).
+    fn present_battle(&self) {
+        let on_off = |on: bool| if on { "켜짐" } else { "꺼짐" }.to_string();
+        let rows = vec![
+            Row::Info { label: "게임".into(), value: if self.game_present { "연결됨" } else { "대기 중" }.into() },
+            Row::Heading("표시".into()),
+            Row::Button { id: BUTTON_INGAME.into(), label: "인게임 표시".into(), value: on_off(self.settings.ingame_visible), on: self.settings.ingame_visible },
+            Row::Heading("애드온".into()),
+            Row::Button { id: BUTTON_QUIT.into(), label: "애드온 종료".into(), value: "종료".into(), on: false },
+        ];
+        self.surface.main_card(PanelState { scene: Scene::Battle.label().to_string(), title: String::new(), rows });
+        self.surface.ingame_card(None);
+        self.surface.marks(Vec::new());
+    }
+
     fn present(&self) {
         if self.scanning {
             // the card is the scan: how far it is, and that the player's input is locked
@@ -267,6 +288,10 @@ impl<'a, S: Surface> Assistant<'a, S> {
             self.surface.main_card(PanelState { scene: "학생 스캔".into(), title, rows });
             self.surface.ingame_card(None);
             self.surface.marks(Vec::new());
+            return;
+        }
+        if self.last.scene == Scene::Battle {
+            self.present_battle();
             return;
         }
         let obs = &self.last;
@@ -637,6 +662,38 @@ mod tests {
         let shown = r.fake.0.borrow();
         assert_eq!(shown.locks, vec![true, false], "released once, not twice");
         assert!(rows_of(shown.main.as_ref().unwrap()).contains("scan:start"), "the main card is back with the new state of the list");
+    }
+
+    #[test]
+    fn in_a_battle_only_the_status_the_switch_and_closing_are_left() {
+        let (r, ocr) = (rig(), NoOcr);
+        let mut a = assistant(&r, &ocr);
+        a.set_game_present(true);
+        click(&r, "place:formation");
+        a.show(squad_obs(Scene::QuickFormation));
+        a.poll();
+        assert!(r.fake.0.borrow().ingame.is_some() && !r.fake.0.borrow().marks.is_empty());
+        a.show(Observation::new(Scene::Battle));
+        {
+            let shown = r.fake.0.borrow();
+            let main = shown.main.as_ref().unwrap();
+            assert_eq!(main.scene, "전투 중");
+            let text = rows_of(main);
+            assert!(text.contains("quit") && text.contains("ingame") && text.contains("연결됨"), "{text}");
+            assert!(!text.contains("scan:start") && !text.contains("place:"), "nothing that reads or drives the game: {text}");
+            assert!(shown.ingame.is_none() && shown.marks.is_empty(), "no stale cards or icons");
+        }
+        click(&r, "quit");
+        a.poll();
+        assert_eq!(a.take_commands(), vec![Command::Quit], "closing works in a battle");
+        click(&r, "ingame");
+        a.poll();
+        assert!(!a.settings().ingame_visible, "and so does the switch");
+        // leaving the battle: the next screen starts clean, nothing of the old one comes back
+        a.show(Observation::new(Scene::Unknown));
+        let shown = r.fake.0.borrow();
+        assert!(rows_of(shown.main.as_ref().unwrap()).contains("scan:start"));
+        assert!(shown.ingame.is_none() && shown.marks.is_empty());
     }
 
     #[test]

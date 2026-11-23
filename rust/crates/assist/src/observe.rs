@@ -103,3 +103,66 @@ impl<'a> Observer<'a> {
         obs
     }
 }
+
+/// Decides when the add-on is in a battle from one reading per frame, so a single odd frame
+/// (a flash, a cut-in) does not flip it: two readings in a row are needed either way.
+#[derive(Debug, Default)]
+pub struct BattleGate {
+    in_battle: bool,
+    streak: u32,
+}
+
+const BATTLE_READINGS: u32 = 2;
+
+impl BattleGate {
+    pub fn in_battle(&self) -> bool {
+        self.in_battle
+    }
+
+    /// Feed whether the latest frame looks like a battle. Returns the new state when it flipped.
+    pub fn feed(&mut self, looks_like_battle: bool) -> Option<bool> {
+        if looks_like_battle == self.in_battle {
+            self.streak = 0;
+            return None;
+        }
+        self.streak += 1;
+        if self.streak < BATTLE_READINGS {
+            return None;
+        }
+        self.streak = 0;
+        self.in_battle = looks_like_battle;
+        Some(looks_like_battle)
+    }
+
+    /// The game went away: whatever was happening is over.
+    pub fn reset(&mut self) {
+        *self = BattleGate::default();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn two_readings_in_a_row_enter_and_leave() {
+        let mut g = BattleGate::default();
+        let seq = [false, true, false, true, true, true, false, true, false, false, false];
+        let flips: Vec<Option<bool>> = seq.iter().map(|b| g.feed(*b)).collect();
+        assert_eq!(flips, vec![None, None, None, None, Some(true), None, None, None, None, Some(false), None]);
+        assert!(!g.in_battle());
+    }
+
+    #[test]
+    fn a_lone_odd_frame_does_not_flip_it() {
+        let mut g = BattleGate::default();
+        g.feed(true);
+        g.feed(true);
+        assert!(g.in_battle());
+        assert_eq!(g.feed(false), None);
+        assert_eq!(g.feed(true), None);
+        assert!(g.in_battle());
+        g.reset();
+        assert!(!g.in_battle());
+    }
+}
