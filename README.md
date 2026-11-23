@@ -86,6 +86,16 @@ everything drawn inside the game and, per widget (임무 카드, 편성 판정, 
 슬롯 스탯), where it goes: beside the game, inside it, or off. The choice is saved in
 `%APPDATA%\baocr\overlay.json`.
 
+**Battle.** In a live battle the add-on goes quiet: it recognises the combat HUD from pixels alone
+(stage tag top left, cost gauge and AUTO button bottom right; two of the three must show, two frames
+in a row to enter or leave), removes the in-game card and icons, shows only 전투 중 with the
+in-game switch and 애드온 종료 on the card, runs no OCR and looks at the game about every 0.5 s.
+Limits: 4:3 only (the add-on refuses other aspects anyway), checked against one real frame (Normal
+campaign stage), so other battle types (raids, other HUD scales) are untested; a pause dialog or a
+skill cut-in that hides the HUD reads as not battle; leaving a battle is noticed in about one second.
+`BAOCR_PROFILE=1` prints stage timings (loop every 10 s, overlay thread every 5 s) and
+`cargo run --release -p baocr --example perf_loop` repeats the offline measurements.
+
 **Structure** (`baocr-assist`): `observe` (frame in, `Observation` out), `widgets` (each a
 `Widget`: observation in, rows or icons out), `settings`, `surface` (the output trait the
 overlay implements; tests use a fake), `assistant` (connects them). A widget can be added
