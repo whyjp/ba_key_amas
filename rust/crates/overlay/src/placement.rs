@@ -196,7 +196,7 @@ mod tests {
         Frame { client: (0, 31, 1920, 1040), outer: (0, 0, 1920, 1040), work: (0, 0, 1920, 1040) }
     }
     const CARD: (i32, i32) = (360, 500);
-    const TAB: (i32, i32) = (28, 72);
+    const TAB: (i32, i32) = (30, 88);
 
     #[test]
     fn a_roomy_qhd_window_keeps_the_card_beside_the_game_level_with_its_top() {
