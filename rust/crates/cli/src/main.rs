@@ -184,11 +184,11 @@ fn real_main() -> Result<()> {
     // The add-on (the default): it finds the game window itself, whenever that appears.
     if chosen == 0 || args.assist {
         let ocr: Arc<dyn Ocr> = Arc::new(load_ocr(&args)?);
-        return assist::run(ocr, &Hcu::from_env(), &args.region, &wiki_path(&args), &args.out_dir(), args.workers);
+        return assist::run(ocr, &Hcu::default_backend(), &args.region, &wiki_path(&args), &args.out_dir(), args.workers);
     }
 
     // Everything below drives or watches the game.
-    let hcu = Hcu::from_env();
+    let hcu = Hcu::default_backend();
     let region = if args.region == "auto" {
         let r = detect_region(&hcu)?;
         println!("game window found: --region {:.2},{:.2},{:.2},{:.2}", r[0], r[1], r[2], r[3]);

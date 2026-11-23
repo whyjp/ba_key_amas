@@ -10,6 +10,7 @@
 mod capture;
 mod deep;
 mod hcu;
+mod native;
 mod roster;
 mod scan;
 mod watch;
@@ -20,6 +21,9 @@ mod fake;
 
 pub use capture::{check_aspect, game_capture, layout_looks_calibrated, new_capture, parse_frame_region, to_frame};
 pub use deep::{capture_deep, click_game, settle, settle_quiet};
+pub use native::{delivered_size, to_absolute, to_native, zoom_geometry, Desktop, NativeRunner};
+#[cfg(windows)]
+pub use native::WinDesktop;
 pub use hcu::{find_bin, window_active, window_ref, Hcu, ProcessRunner, Record, Runner, GAME_TITLE};
 pub use roster::{count_roster, ensure_profile, go_to_roster, merge_new_cards, open_first_student, prepare_scan, screen_kind, scroll_to_top, Screen};
 pub use scan::{scan_arrows, wait_stable_next, ScanOutcome};

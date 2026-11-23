@@ -128,6 +128,22 @@ impl Hcu {
         Self { runner, no_sleep: false, stats: Default::default(), frame: Default::default(), retrying: Default::default(), cancel: Default::default() }
     }
 
+    /// Control the desktop in-process (no helper program).
+    #[cfg(windows)]
+    pub fn native() -> Self {
+        Self::with_runner(Box::new(crate::native::NativeRunner::new(crate::native::WinDesktop::new())))
+    }
+
+    /// The in-process desktop on Windows; the `computer-use` helper (`$HCU_BIN`, `vendor/hcu`, PATH)
+    /// when `BAOCR_HCU=process` is set or on other systems.
+    pub fn default_backend() -> Self {
+        #[cfg(windows)]
+        if std::env::var("BAOCR_HCU").map_or(true, |v| v != "process") {
+            return Self::native();
+        }
+        Self::from_env()
+    }
+
     /// Binary from `$HCU_BIN`, else `vendor/hcu/computer-use[.exe]` beside the
     /// executable (or under the working directory), else on PATH.
     pub fn from_env() -> Self {
