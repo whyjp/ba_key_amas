@@ -53,9 +53,26 @@ compares the squad's attack and armor types and terrain adaptation with the miss
 enemies, relative to the average released student (adaptation grades are approximated as
 80/90/100/110/120 %; it is not a battle simulation). The squad is read from the 편성
 screen's name labels and the lime-outlined cards of the popup.
+Icons also go on the squad strip at the bottom of the popup, and cards are found by colour
+and read closed-set against the student dictionary (cross-checked with free OCR), so
+scrolling the grid works.
+
+**Settings menu.** The add-on's main card sits beside the game window and is clickable
+(it never takes focus from the game): "설정" opens a menu with a master switch for
+everything drawn inside the game and, per widget (임무 카드, 편성 판정, 초상화 아이콘,
+슬롯 스탯), where it goes: beside the game, inside it, or off. The choice is saved in
+`%APPDATA%\baocr\overlay.json`.
+
+**Structure** (`baocr-assist`): `observe` (frame in, `Observation` out), `widgets` (each a
+`Widget`: observation in, rows or icons out), `settings`, `surface` (the output trait the
+overlay implements; tests use a fake), `assistant` (connects them). A widget can be added
+without touching the observer, and the overlay can be replaced without touching widgets.
+
 Limits: students are identified by the name written on the card, so the popup must be in
 its list view (the compact view shows no names; the card says so); the mission is known
-only if `--assist` was running when its 임무 정보 popup was opened.
+only if `--assist` was running when its 임무 정보 popup was opened; the squad is known
+from the 편성 screen or from the cards outlined in the popup (a squad edited while
+`--assist` was not running is read from the visible cards and the specials' names).
 
 Workspace crates: `core` (schema, OCR trait), `names`, `pixels`, `equipment`,
 `export` (CSV/HTML/store/index), `ocr` (engine), `extract` (profile + menu pass),
