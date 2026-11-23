@@ -60,3 +60,31 @@ fn a_live_frame_where_the_closed_set_reader_stops_short_is_corrected_by_the_free
     assert!(!n.iter().any(|x| x == "시로코" || x == "토키"), "{n:?}");
     assert_eq!(n.len(), 12, "{n:?}");
 }
+
+/// A smaller game window gives a blurrier capture. The reading may then drop cards but must not
+/// name a wrong student: a missing icon is a nuisance, an icon of someone else is a lie.
+#[test]
+fn a_blurred_capture_gives_fewer_names_but_never_a_wrong_one() {
+    use baocr_core::ocr_api::Ocr;
+    use image::imageops::{resize, FilterType};
+    let Some(ocr) = engine() else { return };
+    let read = |img: &image::RgbImage| -> Vec<(i32, i32, String)> {
+        let free = ocr.boxes(img).unwrap();
+        read_card_names(&ocr, img, &free).into_iter().map(|c| (c.x as i32, c.y0 as i32, c.text)).collect()
+    };
+    for name in ["quick-formation.png", "quick-formation-scrolled-a.png", "quick-formation-scrolled-b.png"] {
+        let img = frame(name);
+        let truth = read(&img);
+        assert_eq!(truth.len(), 12, "{name}");
+        for factor in [0.7f32, 0.5] {
+            let small = resize(&img, (1280.0 * factor) as u32, (960.0 * factor) as u32, FilterType::CatmullRom);
+            let blurred = resize(&small, 1280, 960, FilterType::CatmullRom);
+            let got = read(&blurred);
+            let wrong: Vec<_> = got.iter().filter(|g| truth.iter().any(|t| t.0 == g.0 && (t.1 - g.1).abs() <= 3 && t.2 != g.2)).collect();
+            assert!(wrong.is_empty(), "{name} at {factor}: {wrong:?}");
+            if factor >= 0.7 {
+                assert!(got.len() >= 9, "{name} at {factor}: only {} of 12 read", got.len());
+            }
+        }
+    }
+}
