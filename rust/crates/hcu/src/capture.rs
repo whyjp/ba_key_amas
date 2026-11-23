@@ -3,60 +3,11 @@ use anyhow::{anyhow, bail, Result};
 use baocr_core::model::{Capture, Student};
 use image::{imageops, RgbImage};
 
-/// The two screen ratios the game offers. Both are read as a frame 1280 pixels wide.
-const ASPECT_43: f64 = 4.0 / 3.0;
-const ASPECT_169: f64 = 16.0 / 9.0;
-const ASPECT_TOL: f64 = 0.03;
-
-/// The game's screen ratio setting, told from the shape of its client area.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Layout {
-    /// 4:3, a 1280x960 frame: the layout every pixel constant was first calibrated on.
-    Ratio43,
-    /// 16:9, a 1280x720 frame.
-    Ratio169,
-}
-
-impl Layout {
-    /// Height of the frame (its width is always 1280).
-    pub fn frame_height(self) -> u32 {
-        match self {
-            Layout::Ratio43 => 960,
-            Layout::Ratio169 => 720,
-        }
-    }
-
-    /// The layout of a frame of this height, if it is one of the two.
-    pub fn from_frame_height(height: u32) -> Option<Layout> {
-        [Layout::Ratio43, Layout::Ratio169].into_iter().find(|l| l.frame_height() == height)
-    }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Layout::Ratio43 => "4:3",
-            Layout::Ratio169 => "16:9",
-        }
-    }
-}
+pub use baocr_core::layout::Layout;
 
 /// The layout a capture region has, or `None` when it is neither 4:3 nor 16:9.
 pub fn detect_layout(region: [f64; 4]) -> Option<Layout> {
-    let (w, h) = (region[2] - region[0], region[3] - region[1]);
-    if w <= 0.0 || h <= 0.0 {
-        return None;
-    }
-    let r = w / h;
-    [(ASPECT_43, Layout::Ratio43), (ASPECT_169, Layout::Ratio169)].into_iter().find(|(a, _)| (r - a).abs() <= ASPECT_TOL * a / ASPECT_43).map(|(_, l)| l)
-}
-
-/// Records the conditions a result was collected under.
-pub fn new_capture(region: [f64; 4]) -> Capture {
-    Capture {
-        aspect_ratio: "4:3".into(),
-        frame_region: region,
-        window_mode: "windowed".into(),
-        note: "calibrated for the game's 4:3 setting in windowed mode; 16:9 and fullscreen are not supported/verified".into(),
-    }
+    Layout::detect(region)
 }
 
 /// Rejects capture regions that are neither 4:3 nor 16:9.

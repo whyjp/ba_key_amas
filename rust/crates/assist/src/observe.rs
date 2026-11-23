@@ -6,7 +6,7 @@
 //! nothing about how any of that is shown.
 use baocr_core::ocr_api::{Ocr, TextBox};
 use baocr_extract::raid::{RaidRef, RaidTracker};
-use baocr_extract::scene::{classify, squad_names, MissionRef, MissionTracker, Scene};
+use baocr_extract::scene::{classify_in, squad_names, Layout, MissionRef, MissionTracker, Scene};
 use baocr_extract::{read_card_names, CardName};
 use baocr_pixels::{quick_card_selected, quick_tab_is_striker};
 use baocr_wikidb::{StudentBrief, Wiki};
@@ -68,7 +68,7 @@ impl<'a> Observer<'a> {
     /// `boxes`: the frame's free-text OCR. `fallback`: the screen to assume when the text
     /// names none (the student list and profile are told apart by pixels, not text).
     pub fn observe(&mut self, img: &RgbImage, boxes: &[TextBox], fallback: Scene) -> Observation {
-        let mut scene = classify(boxes, None);
+        let mut scene = classify_in(boxes, None, Layout::of_frame(img.width(), img.height()));
         if scene == Scene::Unknown {
             scene = fallback;
         }

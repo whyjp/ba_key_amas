@@ -6,6 +6,7 @@
 //! popup (and the enemy popup) name the mission, while the hex map and the squad
 //! formation that follow show no name. `MissionTracker` remembers the mission
 //! from the popup so the later screens know it.
+pub use baocr_core::layout::Layout;
 use baocr_core::ocr_api::TextBox;
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -167,9 +168,19 @@ fn header(boxes: &[TextBox]) -> String {
     boxes.iter().filter(|b| b.y1 < 60.0 && b.x0 > 80.0 && b.x0 < 300.0).map(|b| norm(&b.text)).next().unwrap_or_default()
 }
 
-/// A popup's title: centred near the top of the popup, around y 200..260.
-fn popup_title_is(boxes: &[TextBox], word: &str) -> bool {
-    boxes.iter().any(|b| norm(&b.text) == word && b.y0 > 170.0 && b.y1 < 300.0 && (b.x0 + b.x1) / 2.0 > 450.0 && (b.x0 + b.x1) / 2.0 < 830.0)
+/// Where a popup's title sits (y range). The popup keeps its width in both layouts but is squeezed
+/// vertically in 16:9, so its title rises from about y 200..260 to about y 90..140.
+fn popup_title_band(layout: Layout) -> (f32, f32) {
+    match layout {
+        Layout::Ratio43 => (170.0, 300.0),
+        Layout::Ratio169 => (60.0, 200.0),
+    }
+}
+
+/// A popup's title: centred near the top of the popup.
+fn popup_title_is(boxes: &[TextBox], word: &str, layout: Layout) -> bool {
+    let (top, bottom) = popup_title_band(layout);
+    boxes.iter().any(|b| norm(&b.text) == word && b.y0 > top && b.y1 < bottom && (b.x0 + b.x1) / 2.0 > 450.0 && (b.x0 + b.x1) / 2.0 < 830.0)
 }
 
 /// Headers of the screens that hold place-based missions.
@@ -179,29 +190,40 @@ const DUNGEON_HEADERS: [&str; 3] = ["현상수배", "특별의뢰", "학원교�
 const LOBBY_LABELS: [&str; 8] = ["카페", "스케줄", "학생", "편성", "소설", "제조", "상점", "모집"];
 
 pub fn is_lobby(boxes: &[TextBox]) -> bool {
-    let found = LOBBY_LABELS.iter().filter(|l| boxes.iter().any(|b| b.y0 > 880.0 && b.y1 < 958.0 && b.text.trim() == **l)).count();
+    is_lobby_in(boxes, Layout::Ratio43)
+}
+
+/// The bar hugs the bottom edge of the frame, so its y follows the frame height.
+pub fn is_lobby_in(boxes: &[TextBox], layout: Layout) -> bool {
+    let bottom = layout.frame_height() as f32;
+    let found = LOBBY_LABELS.iter().filter(|l| boxes.iter().any(|b| b.y0 > bottom - 80.0 && b.y1 < bottom - 2.0 && b.text.trim() == **l)).count();
     found >= 4
 }
 
 /// Classify a frame from its OCR text. Student list / profile are decided by the
 /// caller from pixels and passed in `pixel_scene`.
 pub fn classify(boxes: &[TextBox], pixel_scene: Option<Scene>) -> Scene {
+    classify_in(boxes, pixel_scene, Layout::Ratio43)
+}
+
+/// [`classify`] for a frame of the given layout.
+pub fn classify_in(boxes: &[TextBox], pixel_scene: Option<Scene>, layout: Layout) -> Scene {
     if let Some(s) = pixel_scene {
         return s;
     }
     if has(boxes, "적정보") && has(boxes, "상성정보") {
         return Scene::EnemyInfo;
     }
-    if popup_title_is(boxes, "빠른편성") {
+    if popup_title_is(boxes, "빠른편성", layout) {
         return Scene::QuickFormation;
     }
-    if popup_title_is(boxes, "임무정보") {
+    if popup_title_is(boxes, "임무정보", layout) {
         return Scene::MissionInfo;
     }
-    if popup_title_is(boxes, "방정보") {
+    if popup_title_is(boxes, "방정보", layout) {
         return Scene::RaidRoomInfo;
     }
-    if popup_title_is(boxes, "다음시즌정보") {
+    if popup_title_is(boxes, "다음시즌정보", layout) {
         return Scene::TimeAttackNextSeason;
     }
     // popups over the main menu show its bottom bar too, so they are told before the menu itself
@@ -230,7 +252,7 @@ pub fn classify(boxes: &[TextBox], pixel_scene: Option<Scene>) -> Scene {
         "업무" => Scene::WorkHub,
         h if DUNGEON_HEADERS.contains(&h) && has(boxes, "스테이지목록") => Scene::DungeonList,
         h if DUNGEON_HEADERS.contains(&h) && has(boxes, "Select") => Scene::DungeonSelect,
-        _ if is_lobby(boxes) => Scene::Lobby,
+        _ if is_lobby_in(boxes, layout) => Scene::Lobby,
         _ => Scene::Unknown,
     }
 }
