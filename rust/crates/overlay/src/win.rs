@@ -5,10 +5,10 @@
 //! WS_EX_TOOLWINDOW (no taskbar button). WDA_EXCLUDEFROMCAPTURE keeps it out of
 //! screenshots where the OS supports it.
 use crate::cache::{Memo, Tracker};
-use crate::dock::{Dock, Presentation};
+use crate::dock::{Anchor, Corner, Dock, Presentation};
 use crate::fold::{Fold, Intent};
 use crate::panel::{ingame_origin, ingame_panel_width, inside_card_width, panel_width, render_panel, render_panel_hits, render_tooltip, Hit, PanelState, PANEL_BASE_W, PIN_BUTTON};
-use crate::placement::{available, contains, effective_anchor, resolve, slot, snap, strip, Frame, Unfold};
+use crate::placement::{available, contains, dropped, effective_anchor, resolve, slot, snap, strip, Frame, Unfold};
 use crate::tab::{pick, render_snap_hint, render_tab, tab_size, Press};
 use crate::render::{load_fonts, Fonts, Ltrb};
 use crate::marks::{render_marks, Mark};
@@ -450,6 +450,8 @@ impl Layer {
 struct Drag {
     grab: (i32, i32),
     open: bool,
+    /// Where the pointer was when it was pressed.
+    from: (i32, i32),
 }
 
 /// What the card layer shows, which decides what a press on it means.
@@ -519,6 +521,8 @@ fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, stop: Arc<Atom
         let mut user_pres = Presentation::Pinned;
         let (mut fold, mut slide) = (Fold::default(), 0.0f32);
         let epoch = Instant::now();
+        // the click-through card inside the game sits at the same top right corner as the tab: it makes room
+        let mut ingame_shift: i32;
         let (mut card_track, mut ingame_track, mut marks_track) = (Tracker::<Card>::new(), Tracker::<Option<PanelState>>::new(), Tracker::<Vec<Mark>>::new());
         let (mut card_gen, mut ingame_gen, mut marks_gen, mut dock_now, mut locked) = (0u64, 0u64, 0u64, Dock::default(), false);
         let mut card_memo: Memo<(u64, u32, u8), (image::RgbaImage, Vec<Hit>)> = Memo::new();
@@ -550,7 +554,7 @@ fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, stop: Arc<Atom
                 }
                 match shown_view {
                     View::Card => match pick(false, &card_hits, x, y) {
-                        Some(Press::Drag) if left_button_down() && game_present_now => drag = Some(Drag { grab: (x, y), open: true }),
+                        Some(Press::Drag) if left_button_down() && game_present_now => drag = Some(Drag { grab: (x, y), open: true, from: cursor() }),
                         Some(Press::Button(PIN_BUTTON)) => {
                             let now = user_pres.toggled();
                             if let Ok(mut g) = state.lock() {
@@ -569,7 +573,7 @@ fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, stop: Arc<Atom
                         _ => {}
                     },
                     // the tab is all handle; a press that does not move it does nothing
-                    View::Tab if left_button_down() && game_present_now => drag = Some(Drag { grab: (x, y), open: false }),
+                    View::Tab if left_button_down() && game_present_now => drag = Some(Drag { grab: (x, y), open: false, from: cursor() }),
                     _ => {}
                 }
             }
@@ -607,10 +611,9 @@ fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, stop: Arc<Atom
             let (out_w, in_w) = (panel_width(cw), inside_card_width(cw));
             let avail = if game_present { available(frame, out_w) } else { Vec::new() };
             // let go of a drag: snap to the nearest anchor and report it
-            if drag.is_some() && !left_button_down() {
+            if let (Some(d), false) = (drag, left_button_down()) {
                 drag = None;
-                if let Some(size) = drag_size.take() {
-                    let a = snap(frame, size, cursor(), &avail);
+                if let Some(a) = drag_size.take().and_then(|size| dropped(frame, size, d.from, cursor(), &avail)) {
                     dock_now.anchor = a;
                     if let Ok(mut g) = state.lock() {
                         g.dock.anchor = a;
@@ -621,6 +624,7 @@ fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, stop: Arc<Atom
                 }
             }
             let mut card_rect: Option<((i32, i32), (i32, i32))> = None;
+            ingame_shift = 0;
             let mut card_scale = out_w as f32 / PANEL_BASE_W;
             let mut hint: Option<(Ltrb, (i32, i32))> = None;
             match card_track.current() {
@@ -647,6 +651,9 @@ fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, stop: Arc<Atom
                     }
                     let size = (img.width() as i32, img.height() as i32);
                     let tab = tab_size(card_scale);
+                    if anchor == Anchor::Inside(Corner::TopRight) {
+                        ingame_shift = tab.0 + 6;
+                    }
                     let r = resolve(frame, anchor, size, tab);
                     let tab_dim = (r.tab.2 - r.tab.0, r.tab.3 - r.tab.1);
                     // (with no game there is no frame to keep it in: it is shown whole)
@@ -736,7 +743,8 @@ fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, stop: Arc<Atom
                     Some(Some(p)) => {
                         let width = ingame_panel_width(cw) as u32;
                         let (img, render_gen) = ingame_memo.get((ingame_gen, width), || prof::time(prof::Part::RenderIngame, || render_panel(width, p, &fonts)));
-                        let at = ingame_origin(client, (img.width() as i32, img.height() as i32));
+                        let mut at = ingame_origin(client, (img.width() as i32, img.height() as i32));
+                        at.0 = (at.0 - ingame_shift).max(client.0);
                         ingame.show(screen_dc, img, at, hash_of(&(render_gen, at)));
                     }
                     _ => ingame.hide(),

@@ -166,6 +166,18 @@ pub fn strip(r: &Resolved, p: f32) -> (Ltrb, i32) {
     }
 }
 
+/// How far the pointer must travel between press and release for it to be a move; a press that
+/// stays put (a click on the tab) must not change where the card lives.
+pub const DRAG_SLOP: i32 = 6;
+
+/// The anchor a finished drag chooses, or None when it chose nothing: the pointer hardly moved
+/// (a click), or there was nothing to snap to (the game went away mid-drag). In both cases the
+/// stored preference is left alone.
+pub fn dropped(f: Frame, size: (i32, i32), pressed_at: (i32, i32), released_at: (i32, i32), available: &[Anchor]) -> Option<Anchor> {
+    let moved = (released_at.0 - pressed_at.0).abs().max((released_at.1 - pressed_at.1).abs()) >= DRAG_SLOP;
+    (moved && !available.is_empty()).then(|| snap(f, size, released_at, available))
+}
+
 pub fn contains(r: Ltrb, p: (i32, i32)) -> bool {
     p.0 >= r.0 && p.0 < r.2 && p.1 >= r.1 && p.1 < r.3
 }
@@ -277,6 +289,18 @@ mod tests {
         let full = full_1080();
         assert_eq!(snap(full, CARD, (1800, 100), &available(full, 360)), Anchor::Inside(Corner::TopRight));
         assert_eq!(snap(full, CARD, (100, 100), &available(full, 360)), Anchor::Inside(Corner::TopLeft));
+    }
+
+    #[test]
+    fn a_click_or_a_lost_game_does_not_change_the_stored_place() {
+        let f = full_1080();
+        let avail = available(f, 360);
+        assert_eq!(dropped(f, TAB, (1900, 100), (1902, 101), &avail), None, "a press that stays put");
+        assert_eq!(dropped(f, TAB, (1900, 100), (100, 100), &avail), Some(Anchor::Inside(Corner::TopLeft)), "a real move");
+        assert_eq!(dropped(f, TAB, (1900, 100), (100, 100), &[]), None, "no game, nothing to snap to");
+        // a move that ends where the card already is still counts: it is a choice (beside the game -> inside)
+        assert_eq!(effective_anchor(f, 360, Anchor::Outside(Side::Right)), Anchor::Inside(Corner::TopRight));
+        assert_eq!(dropped(f, TAB, (1900, 100), (1800, 150), &avail), Some(Anchor::Inside(Corner::TopRight)));
     }
 
     #[test]

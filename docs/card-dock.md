@@ -67,10 +67,22 @@ A tooltip needs the pointer on the card, so a showing tooltip keeps it open alre
   under the pointer.
 * Covered or hidden window: the state is reset to folded, nothing is animated unseen.
 * Pinned (or no game): open, no animation.
-* **Scan (input locked).** The scan sends its clicks to screen positions, and the card layer is
-  not click-through. An open card inside the game could swallow them, so while the input is
-  locked an inside card is a folded tab, never unfolds, and shows a green dot. Beside the game
-  nothing changes (the progress stays visible on the open card).
+* **Scan (input locked).** The scan sends real clicks to screen positions (`hcu` `SendInput`), and
+  the card layer is not click-through, so an open card inside the game could swallow them. While
+  the input is locked an inside card is therefore a folded tab, never unfolds, and shows a green
+  dot. Read in `crates/hcu/src/{roster,deep,scan}.rs` (1280 x 960 frame): the scan clicks and
+  scrolls at back (50, 40), the arrow (1250, 505), the list scroll point (1150, 750), the student
+  cards, and in the stat popup (755 to 1138, 258 to 320). The folded tab is about 28 x 72 px at
+  the card's design scale, starts 7.5% down (72 px), and sits at x 15 to 43 or 1237 to 1265 at that
+  size, so none of those points lie under it. A narrower window shrinks the tab with the card;
+  the 7.5% rule keeps it clear of the back button. Beside the game nothing changes (the progress
+  stays visible on the open card). If the input block fails to start, `locked` stays false and an
+  inside card opens on hover during the scan: the same as no protection, so the unfolded card could
+  then cover targets.
+* **The click-through in-game card** (widgets set to 게임 안) sits at the same top right corner. When
+  the main card is anchored at the inside top right, the in-game card is moved left by the tab's
+  width plus 6 px so the tab does not hide it. An unfolded card still covers it while the pointer
+  is on it.
 
 The overlay thread ticks every 90 ms normally, 40 ms while the card is a tab (hover), 16 ms while
 it slides or is dragged. Redraws are skipped when what is shown (content, place, shape) is unchanged.
@@ -81,12 +93,25 @@ Dragging the open card by its header, or the tab anywhere on it, follows the poi
 `snap(frame, size, pointer, available)` picks the available anchor whose rectangle (for the size
 of what is dragged) has its middle nearest the pointer. Available: both inside corners always, each
 side beside the game only if it has room for the card. While dragging, the nearest anchor's
-rectangle is drawn as a faint outline (in the tooltip layer). The result is reported as an event
+rectangle is drawn as a faint outline (in the tooltip layer). A press that moves the pointer less
+than 6 px (a click) chooses nothing, and neither does a release with nothing to snap to (the game
+vanished mid-drag): the stored preference is only replaced by a real move. A real move ends as a
+choice even if it lands where the card already was (beside the game with no room, then dropped on
+the inside corner, makes the inside corner the preference). The result is reported as an event
 and saved:
 
 * `dock:l`, `dock:r` (beside the game; the first version's events, unchanged), `dock:il`, `dock:ir`
   (inside the top left / top right corner);
 * `present:pinned`, `present:bookmark` (the pin button).
+
+## Differences from the first brief, on purpose
+
+* The inside anchors sit 7.5% down the client (constant `INSIDE_TOP` in `placement.rs`), not at the
+  client top, to stay below the game's currency and menu bar like the in-game card already did.
+* The tab opens after a 100 ms dwell, so sweeping the pointer across the corner does not open it.
+* The settings fields are `dock_anchor` and `presentation` (`placements` already means the widgets).
+* `resolve(..)` takes the anchor from `effective_anchor(..)`, because the card's width (and so its
+  height) depends on whether it is beside or inside the game.
 
 ## Settings (`%APPDATA%\baocr\overlay.json`)
 
