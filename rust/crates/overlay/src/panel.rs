@@ -1,7 +1,7 @@
 //! The guide panel: a card with the current screen and, on mission screens, what the
 //! mission holds. It sits beside the game window (right, else left), never on it.
 //! Pure pixels in, pixels out, like the banner, so the look is checked without a game.
-use crate::render::{draw_text, fill_rrect, lerp, text_width, Fonts, Ltrb, ACCENT, ACCENT_LIGHT, NAVY_BOTTOM, NAVY_TOP, TEXT, TEXT_SOFT, WARN};
+use crate::render::{card, draw_text, fill_rrect, text_width, Fonts, Ltrb, AMBER, BODY, BORDER, INK, MUTED, NAVY, NAVY_SOFT, RULE, TRACK, WHITE};
 use image::{Rgba, RgbaImage};
 
 /// Design width; the panel is scaled to the game window.
@@ -46,17 +46,18 @@ impl Tone {
         }
     }
 
+    /// Flat, solid colours of the game's attack and armor tags (white text on all of them).
     pub(crate) fn rgb(self) -> [u8; 3] {
         match self {
-            Tone::Neutral => [96, 112, 140],
-            Tone::Explosion | Tone::LightArmor => [178, 58, 62],
-            Tone::Pierce | Tone::HeavyArmor => [196, 146, 48],
-            Tone::Mystic | Tone::Unarmed => [48, 120, 184],
-            Tone::Sonic | Tone::ElasticArmor => [132, 84, 184],
-            Tone::CompositeArmor => [78, 150, 110],
-            Tone::Good => [46, 150, 96],
-            Tone::Mid => [196, 166, 56],
-            Tone::Bad => [190, 70, 70],
+            Tone::Neutral => [106, 118, 140],
+            Tone::Explosion | Tone::LightArmor => [188, 52, 56],
+            Tone::Pierce | Tone::HeavyArmor => [184, 130, 14],
+            Tone::Mystic | Tone::Unarmed => [36, 108, 186],
+            Tone::Sonic | Tone::ElasticArmor => [124, 74, 176],
+            Tone::CompositeArmor => [52, 138, 98],
+            Tone::Good => [34, 134, 82],
+            Tone::Mid => [184, 130, 14],
+            Tone::Bad => [196, 58, 58],
         }
     }
 }
@@ -188,7 +189,13 @@ pub fn render_panel(width: u32, state: &PanelState, fonts: &Fonts) -> RgbaImage 
     render_panel_hits(width, state, fonts).0
 }
 
+const HEAD_H: f32 = 26.0;
+
 /// Like `render_panel`, also returning where its buttons are.
+///
+/// Look: one flat opaque card (pale body, 1px border, 5px corners) under a navy header bar
+/// with a single cut corner, like the game's own panels. Type carries the hierarchy; colour
+/// appears only on type tags, the verdict, meter fills and the active button.
 pub fn render_panel_hits(width: u32, state: &PanelState, fonts: &Fonts) -> (RgbaImage, Vec<Hit>) {
     let mut hits: Vec<Hit> = Vec::new();
     let s = width as f32 / PANEL_BASE_W;
@@ -197,11 +204,11 @@ pub fn render_panel_hits(width: u32, state: &PanelState, fonts: &Fonts) -> (Rgba
     let value_w = wf - pad * 2.0 - label_w;
 
     // first pass: height
-    let mut h = 14.0 * s + 16.0 * s; // top pad + scene line
+    let mut h = HEAD_H * s + 10.0 * s;
     if !state.title.is_empty() {
-        h += 6.0 * s + wrap(&fonts.bold, 17.0 * s, wf - pad * 2.0, &state.title).len() as f32 * 23.0 * s;
+        h += wrap(&fonts.bold, 17.0 * s, wf - pad * 2.0, &state.title).len() as f32 * 23.0 * s + 6.0 * s;
     }
-    h += 10.0 * s;
+    h += 6.0 * s;
     for row in &state.rows {
         h += match row {
             Row::Info { value, .. } => wrap(&fonts.regular, 14.0 * s, value_w, value).len() as f32 * 21.0 * s + 5.0 * s,
@@ -212,94 +219,112 @@ pub fn render_panel_hits(width: u32, state: &PanelState, fonts: &Fonts) -> (Rgba
             Row::Button { .. } => 24.0 * s + 5.0 * s,
         };
     }
-    h += 12.0 * s;
+    h += 8.0 * s;
     let hi = h.ceil() as u32;
     let hf = hi as f32;
 
     let mut img = RgbaImage::from_pixel(width, hi, Rgba([0, 0, 0, 0]));
-    fill_rrect(&mut img, 0.0, 0.0, wf, hf, 14.0 * s, |_, y| (lerp(NAVY_TOP, NAVY_BOTTOM, y / hf), 0.93));
-    fill_rrect(&mut img, 0.0, 0.0, wf, hf, 14.0 * s, |x, y| {
-        let edge = x < 1.2 * s || y < 1.2 * s || x > wf - 1.2 * s || y > hf - 1.2 * s;
-        (TEXT, if edge { 0.16 } else { 0.0 })
-    });
-    fill_rrect(&mut img, 8.0 * s, 14.0 * s, 4.0 * s, hf - 28.0 * s, 2.0 * s, |_, _| (ACCENT, 1.0));
+    let head = HEAD_H * s;
+    card(&mut img, wf, hf, s, head, 12.0 * s, BODY);
 
-    let mut y = 14.0 * s;
-    draw_text(&mut img, &fonts.bold, 12.5 * s, pad, y, ACCENT_LIGHT, 1.0, &if state.scene.is_empty() { "ba-scanner".to_string() } else { format!("ba-scanner · {}", state.scene) });
-    y += 16.0 * s;
+    // header bar: screen name left, tool name right (before the cut corner)
+    let scene = if state.scene.is_empty() { "ba-scanner" } else { state.scene.as_str() };
+    draw_text(&mut img, &fonts.bold, 12.5 * s, pad, (head - 12.5 * s * 1.2) / 2.0, WHITE, 1.0, scene);
+    if !state.scene.is_empty() {
+        let name = "ba-scanner";
+        let nw = text_width(&fonts.regular, 10.5 * s, name);
+        draw_text(&mut img, &fonts.regular, 10.5 * s, wf - 20.0 * s - nw, (head - 10.5 * s * 1.2) / 2.0, NAVY_SOFT, 1.0, name);
+    }
+
+    let mut y = head + 10.0 * s;
     if !state.title.is_empty() {
-        y += 6.0 * s;
         for line in wrap(&fonts.bold, 17.0 * s, wf - pad * 2.0, &state.title) {
-            draw_text(&mut img, &fonts.bold, 17.0 * s, pad, y, TEXT, 1.0, &line);
+            draw_text(&mut img, &fonts.bold, 17.0 * s, pad, y, INK, 1.0, &line);
             y += 23.0 * s;
         }
+        y += 6.0 * s;
     }
-    y += 10.0 * s;
-    for row in &state.rows {
+    y += 6.0 * s;
+    let rule = |img: &mut RgbaImage, y: f32| fill_rrect(img, pad, y, wf - pad * 2.0, (1.0 * s).max(1.0), 0.0, |_, _| (RULE, 1.0));
+    let n = state.rows.len();
+    for (i, row) in state.rows.iter().enumerate() {
+        let more = i + 1 < n;
         match row {
             Row::Info { label, value } => {
-                draw_text(&mut img, &fonts.regular, 12.5 * s, pad, y + 1.5 * s, TEXT_SOFT, 0.9, label);
+                draw_text(&mut img, &fonts.regular, 12.5 * s, pad, y + 2.0 * s, MUTED, 1.0, label);
                 for line in wrap(&fonts.regular, 14.0 * s, value_w, value) {
-                    draw_text(&mut img, &fonts.bold, 14.0 * s, pad + label_w, y, TEXT, 1.0, &line);
+                    draw_text(&mut img, &fonts.semibold, 14.0 * s, pad + label_w, y, INK, 1.0, &line);
                     y += 21.0 * s;
                 }
                 y += 5.0 * s;
+                if more {
+                    rule(&mut img, y - 3.0 * s);
+                }
             }
             Row::Chips { label, chips } => {
-                draw_text(&mut img, &fonts.regular, 12.5 * s, pad, y + 4.0 * s, TEXT_SOFT, 0.9, label);
+                draw_text(&mut img, &fonts.regular, 12.5 * s, pad, y + 4.0 * s, MUTED, 1.0, label);
                 let (lines, places) = chip_layout(fonts, 12.0 * s, s, value_w, chips);
                 for (chip, (line, x, w)) in chips.iter().zip(places) {
                     let (cx, cy) = (pad + label_w + x, y + line as f32 * 25.0 * s);
                     let rgb = chip.tone.rgb();
-                    fill_rrect(&mut img, cx, cy, w, 21.0 * s, 6.0 * s, |_, py| (lerp(rgb, [0, 0, 0], py / (21.0 * s) * 0.25), 0.95));
-                    draw_text(&mut img, &fonts.bold, 12.0 * s, cx + 8.0 * s, cy + 3.0 * s, TEXT, 1.0, &chip.text);
+                    fill_rrect(&mut img, cx, cy, w, 21.0 * s, 3.0 * s, |_, _| (rgb, 1.0));
+                    draw_text(&mut img, &fonts.bold, 12.0 * s, cx + 8.0 * s, cy + (21.0 - 12.0 * 1.2) * 0.5 * s, WHITE, 1.0, &chip.text);
                 }
                 y += lines as f32 * 25.0 * s + 5.0 * s;
+                if more {
+                    rule(&mut img, y - 3.0 * s);
+                }
             }
             Row::Note(t) => {
                 for line in wrap(&fonts.regular, 12.5 * s, wf - pad * 2.0, t) {
-                    draw_text(&mut img, &fonts.regular, 12.5 * s, pad, y, WARN, 0.95, &line);
+                    draw_text(&mut img, &fonts.regular, 12.5 * s, pad, y, AMBER, 1.0, &line);
                     y += 18.0 * s;
                 }
                 y += 5.0 * s;
             }
             Row::Meter { label, permille, text } => {
-                draw_text(&mut img, &fonts.regular, 12.5 * s, pad, y + 2.0 * s, TEXT_SOFT, 0.9, label);
-                let (bx, bw, bh) = (pad + label_w, value_w - 52.0 * s, 10.0 * s);
-                let by = y + 6.0 * s;
-                fill_rrect(&mut img, bx, by, bw, bh, bh / 2.0, |_, _| ([14, 28, 52], 0.9));
+                draw_text(&mut img, &fonts.regular, 12.5 * s, pad, y + 2.0 * s, MUTED, 1.0, label);
+                let (bx, bw, bh) = (pad + label_w, value_w - 50.0 * s, 6.0 * s);
+                let by = y + 7.0 * s;
+                fill_rrect(&mut img, bx, by, bw, bh, 1.0 * s, |_, _| (TRACK, 1.0));
                 let frac = ((*permille).clamp(500, 1500) as f32 - 500.0) / 1000.0;
                 let (mid, pos) = (bx + bw / 2.0, bx + bw * frac);
                 let (from, to) = if pos >= mid { (mid, pos) } else { (pos, mid) };
-                let rgb = if (*permille - 1000).abs() < 30 { [150, 160, 180] } else if *permille > 1000 { [64, 196, 110] } else { [226, 96, 88] };
+                let rgb = if (*permille - 1000).abs() < 30 { MUTED } else if *permille > 1000 { Tone::Good.rgb() } else { Tone::Bad.rgb() };
                 if to - from > 1.0 {
-                    fill_rrect(&mut img, from, by, to - from, bh, bh / 2.0, |_, _| (rgb, 1.0));
+                    fill_rrect(&mut img, from, by, to - from, bh, 1.0 * s, |_, _| (rgb, 1.0));
                 }
-                fill_rrect(&mut img, mid - 1.0 * s, by - 2.0 * s, 2.0 * s, bh + 4.0 * s, 1.0 * s, |_, _| ([255, 255, 255], 0.85));
-                draw_text(&mut img, &fonts.bold, 12.5 * s, bx + bw + 8.0 * s, y + 2.0 * s, TEXT, 1.0, text);
+                // the average mark stands taller than the bar
+                fill_rrect(&mut img, mid - 0.75 * s, by - 3.0 * s, 1.5 * s, bh + 6.0 * s, 0.0, |_, _| (NAVY, 1.0));
+                let tw = text_width(&fonts.semibold, 12.5 * s, text);
+                draw_text(&mut img, &fonts.semibold, 12.5 * s, wf - pad - tw, y + 2.0 * s, INK, 1.0, text);
                 y += 22.0 * s + 5.0 * s;
+                if more {
+                    rule(&mut img, y - 3.0 * s);
+                }
             }
             Row::Button { id, label, value, on } => {
                 let (bx, bw, bh) = (pad, wf - pad * 2.0, 24.0 * s);
-                let fill = if *on { [38, 92, 146] } else { [30, 46, 74] };
-                fill_rrect(&mut img, bx, y, bw, bh, 7.0 * s, |_, _| (fill, 0.97));
-                fill_rrect(&mut img, bx, y, bw, bh, 7.0 * s, |x, py| {
-                    let edge = x < 1.0 * s || py < 1.0 * s || x > bw - 1.0 * s || py > bh - 1.0 * s;
-                    (TEXT, if edge { 0.22 } else { 0.0 })
+                let (fill, ink, vink) = if *on { (NAVY, WHITE, WHITE) } else { (WHITE, INK, MUTED) };
+                let b = (1.0 * s).max(1.0);
+                fill_rrect(&mut img, bx, y, bw, bh, 4.0 * s, |x, py| {
+                    let edge = x < b || py < b || x > bw - b - 0.5 || py > bh - b - 0.5;
+                    (if edge && !*on { BORDER } else { fill }, 1.0)
                 });
-                draw_text(&mut img, &fonts.regular, 12.5 * s, bx + 9.0 * s, y + 4.5 * s, TEXT, 1.0, label);
+                let ty = y + (24.0 - 12.5 * 1.2) * 0.5 * s;
+                draw_text(&mut img, &fonts.regular, 12.5 * s, bx + 9.0 * s, ty, ink, 1.0, label);
                 let vw = text_width(&fonts.bold, 12.5 * s, value);
-                draw_text(&mut img, &fonts.bold, 12.5 * s, bx + bw - 9.0 * s - vw, y + 4.5 * s, if *on { ACCENT_LIGHT } else { TEXT_SOFT }, 1.0, value);
+                draw_text(&mut img, &fonts.bold, 12.5 * s, bx + bw - 9.0 * s - vw, ty, vink, 1.0, value);
                 hits.push(Hit { id: id.clone(), x: bx, y, w: bw, h: bh });
                 y += 24.0 * s + 5.0 * s;
             }
             Row::Verdict { label, text, tone } => {
-                draw_text(&mut img, &fonts.regular, 12.5 * s, pad, y + 6.0 * s, TEXT_SOFT, 0.9, label);
-                let (bx, bw, bh) = (pad + label_w, value_w, 28.0 * s);
+                let (bx, bw, bh) = (pad, wf - pad * 2.0, 28.0 * s);
                 let rgb = tone.rgb();
-                fill_rrect(&mut img, bx, y, bw, bh, 8.0 * s, |_, py| (lerp(rgb, [0, 0, 0], py / bh * 0.25), 0.97));
+                fill_rrect(&mut img, bx, y, bw, bh, 3.0 * s, |_, _| (rgb, 1.0));
+                draw_text(&mut img, &fonts.regular, 12.5 * s, bx + 10.0 * s, y + (28.0 - 12.5 * 1.2) * 0.5 * s, WHITE, 0.9, label);
                 let tw = text_width(&fonts.bold, 15.0 * s, text);
-                draw_text(&mut img, &fonts.bold, 15.0 * s, bx + (bw - tw) / 2.0, y + 5.0 * s, TEXT, 1.0, text);
+                draw_text(&mut img, &fonts.bold, 15.0 * s, bx + bw - 10.0 * s - tw, y + (28.0 - 15.0 * 1.2) * 0.5 * s, WHITE, 1.0, text);
                 y += 28.0 * s + 7.0 * s;
             }
         }
@@ -329,11 +354,26 @@ mod tests {
                     ],
                 },
                 Row::Chips { label: "추천 공격".into(), chips: vec![Chip { text: "신비 135%".into(), tone: Tone::Mystic }, Chip { text: "관통 120%".into(), tone: Tone::Pierce }] },
-                Row::Note("Hard 난이도는 적 구성이 다를 수 있습니다".into()),
+                Row::Chips {
+                    label: "속성".into(),
+                    chips: vec![
+                        Chip { text: "폭발".into(), tone: Tone::Explosion },
+                        Chip { text: "관통".into(), tone: Tone::Pierce },
+                        Chip { text: "신비".into(), tone: Tone::Mystic },
+                        Chip { text: "진동".into(), tone: Tone::Sonic },
+                        Chip { text: "복합장갑".into(), tone: Tone::CompositeArmor },
+                        Chip { text: "일반".into(), tone: Tone::Neutral },
+                    ],
+                },
+                Row::Note("Hard 난이도는 적 구성이 다를 수 있습니다. 편성 전에 각 지역의 적 장갑과 지형을 다시 확인하세요".into()),
                 Row::Verdict { label: "편성 판정".into(), text: "유리".into(), tone: Tone::Good },
                 Row::Meter { label: "공격 상성".into(), permille: 1420, text: "+42%".into() },
                 Row::Meter { label: "방어 상성".into(), permille: 870, text: "-13%".into() },
                 Row::Meter { label: "지형 적응".into(), permille: 1000, text: "평균".into() },
+                Row::Verdict { label: "방어 판정".into(), text: "불리".into(), tone: Tone::Bad },
+                Row::Verdict { label: "지형 판정".into(), text: "보통".into(), tone: Tone::Mid },
+                Row::Button { id: "ingame".into(), label: "인게임 표시".into(), value: "켜짐".into(), on: true },
+                Row::Button { id: "place".into(), label: "임무 카드".into(), value: "게임 밖 · 100%".into(), on: false },
             ],
         }
     }

@@ -1,6 +1,5 @@
 //! Banner rendering: pure pixels in, pixels out, so the design can be checked
-//! without a game window. Colours follow the game UI: navy header band, light
-//! cyan accent, white text.
+//! without a game window. Flat light card with a navy header bar, like the game's own panels.
 use ab_glyph::{point, Font, FontVec, PxScale, ScaleFont};
 use image::{Rgba, RgbaImage};
 
@@ -50,15 +49,39 @@ pub fn banner_origin(client: Ltrb, outer: Ltrb, work: Ltrb, size: (i32, i32)) ->
     (x, client.1 + (ch as f32 * TOP_SHARE).round() as i32)
 }
 
-// Palette (Blue Archive UI): header navy, panel navy, cyan accent, light text.
-pub(crate) const NAVY_TOP: [u8; 3] = [44, 74, 116];
-pub(crate) const NAVY_BOTTOM: [u8; 3] = [27, 47, 80];
-pub(crate) const ACCENT: [u8; 3] = [76, 195, 255];
-pub(crate) const ACCENT_LIGHT: [u8; 3] = [150, 224, 255];
-pub(crate) const TRACK: [u8; 3] = [14, 28, 52];
+// Palette: flat surfaces in the game's own navy and pale blue.
+pub(crate) const NAVY: [u8; 3] = [31, 49, 84];
+pub(crate) const NAVY_SOFT: [u8; 3] = [150, 168, 200];
+pub(crate) const BODY: [u8; 3] = [245, 247, 251];
+pub(crate) const WHITE: [u8; 3] = [255, 255, 255];
+pub(crate) const BORDER: [u8; 3] = [188, 198, 214];
+pub(crate) const RULE: [u8; 3] = [221, 227, 237];
+pub(crate) const TRACK: [u8; 3] = [218, 225, 236];
+pub(crate) const INK: [u8; 3] = [24, 33, 52];
+pub(crate) const MUTED: [u8; 3] = [98, 112, 136];
+pub(crate) const BLUE: [u8; 3] = [38, 112, 196];
+pub(crate) const AMBER: [u8; 3] = [150, 96, 8];
+pub(crate) const RED: [u8; 3] = [196, 62, 60];
 pub(crate) const TEXT: [u8; 3] = [255, 255, 255];
-pub(crate) const TEXT_SOFT: [u8; 3] = [196, 214, 236];
-pub(crate) const WARN: [u8; 3] = [255, 196, 92];
+
+/// A flat card: opaque `body` with a 1px `border`, rounded corners, and a navy header of
+/// height `head` whose top-right corner is cut at 45 degrees (the one game-like detail).
+pub(crate) fn card(img: &mut RgbaImage, w: f32, h: f32, s: f32, head: f32, cut: f32, body: [u8; 3]) {
+    let b = (1.0 * s).max(1.0);
+    fill_rrect(img, 0.0, 0.0, w, h, 5.0 * s, |x, y| {
+        // inside the cut triangle: transparent, anti-aliased along the diagonal
+        let d = (w - cut + y) - x;
+        let a = (0.5 + d * 0.7071).clamp(0.0, 1.0);
+        let rgb = if y < head {
+            NAVY
+        } else if x < b || x > w - b - 0.5 || y > h - b - 0.5 {
+            BORDER
+        } else {
+            body
+        };
+        (rgb, a)
+    });
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Phase {
@@ -87,11 +110,26 @@ impl Default for BannerState {
 
 pub struct Fonts {
     pub regular: FontVec,
+    pub semibold: FontVec,
     pub bold: FontVec,
 }
 
-/// System Korean fonts (Malgun Gothic ships with Windows).
+/// Pretendard (SIL OFL 1.1, see assets/fonts/OFL.txt), embedded so no system font is needed.
+/// Falls back to the system Korean fonts only if the embedded data fails to parse.
 pub fn load_fonts() -> Option<Fonts> {
+    let embedded = |b: &'static [u8]| FontVec::try_from_vec(b.to_vec()).ok();
+    if let (Some(regular), Some(semibold), Some(bold)) = (
+        embedded(include_bytes!("../../../../assets/fonts/Pretendard-Regular.otf")),
+        embedded(include_bytes!("../../../../assets/fonts/Pretendard-SemiBold.otf")),
+        embedded(include_bytes!("../../../../assets/fonts/Pretendard-Bold.otf")),
+    ) {
+        return Some(Fonts { regular, semibold, bold });
+    }
+    load_system_fonts()
+}
+
+/// System Korean fonts (Malgun Gothic ships with Windows).
+fn load_system_fonts() -> Option<Fonts> {
     let dir = std::env::var("WINDIR").unwrap_or_else(|_| "C:\\Windows".into());
     let read = |names: &[&str]| -> Option<FontVec> {
         names.iter().find_map(|n| {
@@ -101,7 +139,8 @@ pub fn load_fonts() -> Option<Fonts> {
     };
     let regular = read(&["malgun.ttf", "NanumGothic.ttf", "segoeui.ttf"])?;
     let bold = read(&["malgunbd.ttf", "NanumGothicBold.ttf", "segoeuib.ttf"]).unwrap_or_else(|| read(&["malgun.ttf"]).unwrap());
-    Some(Fonts { regular, bold })
+    let semibold = read(&["malgunbd.ttf", "malgun.ttf"])?;
+    Some(Fonts { regular, semibold, bold })
 }
 
 pub(crate) fn over(dst: &mut Rgba<u8>, rgb: [u8; 3], alpha: f32) {
@@ -140,6 +179,7 @@ pub(crate) fn fill_rrect(img: &mut RgbaImage, x: f32, y: f32, w: f32, h: f32, r:
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn lerp(a: [u8; 3], b: [u8; 3], t: f32) -> [u8; 3] {
     let t = t.clamp(0.0, 1.0);
     [0, 1, 2].map(|i| (a[i] as f32 + (b[i] as f32 - a[i] as f32) * t).round() as u8)
@@ -183,31 +223,22 @@ pub fn render(width: u32, state: &BannerState, tick: u32, fonts: &Fonts) -> Rgba
     let mut img = RgbaImage::from_pixel(w, h, Rgba([0, 0, 0, 0]));
     let (wf, hf) = (w as f32, h as f32);
 
-    // card: navy gradient, soft border, cyan accent strip on the left
-    fill_rrect(&mut img, 0.0, 0.0, wf, hf, 16.0 * s, |_, y| (lerp(NAVY_TOP, NAVY_BOTTOM, y / hf), 0.94));
-    fill_rrect(&mut img, 0.0, 0.0, wf, hf, 16.0 * s, |x, y| {
-        let edge = x < 1.2 * s || y < 1.2 * s || x > wf - 1.2 * s || y > hf - 1.2 * s;
-        (TEXT, if edge { 0.16 } else { 0.0 })
-    });
-    let accent = match state.phase {
-        Phase::Failed => WARN,
-        _ => ACCENT,
-    };
-    fill_rrect(&mut img, 12.0 * s, 14.0 * s, 5.0 * s, hf - 28.0 * s, 2.5 * s, |_, _| (accent, 1.0));
+    let head = 30.0 * s;
+    card(&mut img, wf, hf, s, head, 12.0 * s, BODY);
+    let pad = 18.0 * s;
 
-    let pad = 30.0 * s;
-    // row 1: title + count
-    draw_text(&mut img, &fonts.bold, 21.0 * s, pad, 10.0 * s, ACCENT_LIGHT, 1.0, "ba-scanner");
+    // header bar: name left, count right
+    draw_text(&mut img, &fonts.bold, 14.0 * s, pad, 6.5 * s, WHITE, 1.0, "ba-scanner");
     let count = match (&state.phase, state.total) {
         (Phase::Counting, _) if state.done > 0 => format!("{}명 확인", state.done),
         (Phase::Counting, _) => "집계 중".to_string(),
         (_, Some(t)) => format!("{}/{}", state.done, t),
         (_, None) => format!("{}", state.done),
     };
-    let cw = text_width(&fonts.bold, 22.0 * s, &count);
-    draw_text(&mut img, &fonts.bold, 22.0 * s, wf - 22.0 * s - cw, 9.0 * s, TEXT, 1.0, &count);
+    let cw = text_width(&fonts.semibold, 14.0 * s, &count);
+    draw_text(&mut img, &fonts.semibold, 14.0 * s, wf - 22.0 * s - cw, 6.5 * s, NAVY_SOFT.map(|c| c.saturating_add(70)), 1.0, &count);
 
-    // row 2: what is happening, with animated dots
+    // what is happening, with animated dots
     let dots = ".".repeat(1 + ((tick / 6) % 3) as usize);
     let (line, dotted) = match state.phase {
         Phase::Counting => ("학생 수를 확인하고 있습니다", true),
@@ -215,45 +246,43 @@ pub fn render(width: u32, state: &BannerState, tick: u32, fonts: &Fonts) -> Rgba
         Phase::Done => ("스캔이 완료되었습니다", false),
         Phase::Failed => ("스캔이 중단되었습니다", false),
     };
-    draw_text(&mut img, &fonts.regular, 15.0 * s, pad, 40.0 * s, TEXT, 0.96, line);
+    draw_text(&mut img, &fonts.bold, 16.0 * s, pad, 38.0 * s, INK, 1.0, line);
     if dotted {
-        let lw = text_width(&fonts.regular, 15.0 * s, line);
-        draw_text(&mut img, &fonts.regular, 15.0 * s, pad + lw, 40.0 * s, ACCENT_LIGHT, 1.0, &dots);
+        let lw = text_width(&fonts.bold, 16.0 * s, line);
+        draw_text(&mut img, &fonts.bold, 16.0 * s, pad + lw, 38.0 * s, BLUE, 1.0, &dots);
     }
 
-    // progress bar
-    let (bx, by, bw, bh) = (pad, 68.0 * s, wf - pad - 22.0 * s, 8.0 * s);
-    fill_rrect(&mut img, bx, by, bw, bh, bh / 2.0, |_, _| (TRACK, 0.85));
+    // progress bar: thin, flat, square-ish
+    let fill = if state.phase == Phase::Failed { RED } else { BLUE };
+    let (bx, by, bw, bh) = (pad, 67.0 * s, wf - pad * 2.0, 6.0 * s);
+    fill_rrect(&mut img, bx, by, bw, bh, 1.5 * s, |_, _| (TRACK, 1.0));
     match (percent(state), &state.phase) {
         (Some(p), _) if p > 0.0 => {
             let fw = (bw * p).max(bh);
-            fill_rrect(&mut img, bx, by, fw, bh, bh / 2.0, |x, _| (lerp(ACCENT, ACCENT_LIGHT, x / fw.max(1.0)), 1.0));
+            fill_rrect(&mut img, bx, by, fw, bh, 1.5 * s, |_, _| (fill, 1.0));
         }
         (None, Phase::Counting | Phase::Scanning) => {
             // indeterminate: a segment sweeps back and forth so the wait is visibly alive
             let seg = bw * 0.28;
             let t = (tick % 60) as f32 / 60.0;
             let pos = (1.0 - (2.0 * t - 1.0).abs()) * (bw - seg);
-            fill_rrect(&mut img, bx, by, bw, bh, bh / 2.0, |x, _| {
-                let inside = x >= pos && x <= pos + seg;
-                (lerp(ACCENT, ACCENT_LIGHT, (x - pos) / seg), if inside { 1.0 } else { 0.0 })
-            });
+            fill_rrect(&mut img, bx, by, bw, bh, 1.5 * s, |x, _| (fill, if x >= pos && x <= pos + seg { 1.0 } else { 0.0 }));
         }
         _ => {}
     }
 
-    // row 4: hint (+ percent)
+    // hint (+ percent)
     let hint = match state.phase {
         Phase::Failed if !state.note.is_empty() => state.note.as_str(),
         Phase::Done => "잠시 후 이 안내는 사라집니다",
         _ => "작업 중입니다 · 완료될 때까지 게임을 조작하지 마세요",
     };
-    let hint_color = if state.phase == Phase::Failed { WARN } else { TEXT_SOFT };
-    draw_text(&mut img, &fonts.regular, 12.0 * s, pad, 84.0 * s, hint_color, 0.9, hint);
+    let hint_color = if state.phase == Phase::Failed { RED } else { MUTED };
+    draw_text(&mut img, &fonts.regular, 12.0 * s, pad, 84.0 * s, hint_color, 1.0, hint);
     if let Some(p) = percent(state) {
         let t = format!("{:.0}%", p * 100.0);
-        let tw = text_width(&fonts.regular, 12.0 * s, &t);
-        draw_text(&mut img, &fonts.regular, 12.0 * s, wf - 22.0 * s - tw, 84.0 * s, TEXT_SOFT, 0.9, &t);
+        let tw = text_width(&fonts.semibold, 12.0 * s, &t);
+        draw_text(&mut img, &fonts.semibold, 12.0 * s, wf - pad - tw, 84.0 * s, INK, 1.0, &t);
     }
     img
 }
@@ -337,13 +366,10 @@ mod tests {
         let mut half = BannerState { phase: Phase::Scanning, done: 53, total: Some(106), note: String::new() };
         let w = 520u32;
         let img = render(w, &half, 0, &f);
-        let y = (72.0 * w as f32 / BASE_W) as u32;
-        let cyan = |x: u32| {
-            let p = img.get_pixel(x, y);
-            p[2] > 200 && p[0] < 200
-        };
-        let mid = (30.0 + (w as f32 - 52.0) * 0.5) as u32;
-        assert!(cyan(mid - 20) && !cyan(mid + 40), "fill should end near the middle");
+        let y = (70.0 * w as f32 / BASE_W) as u32;
+        let filled = |x: u32| img.get_pixel(x, y)[0] < 120;
+        let mid = (18.0 + (w as f32 - 36.0) * 0.5) as u32;
+        assert!(filled(mid - 20) && !filled(mid + 40), "fill should end near the middle");
         half.done = 0;
         assert!(percent(&half) == Some(0.0));
     }
