@@ -9,6 +9,7 @@ use crate::dock::{dock_from_drop, dock_origin, Dock};
 use crate::panel::{ingame_origin, ingame_panel_width, panel_width, render_panel, render_panel_hits, render_tooltip, Hit, PanelState, DRAG_HANDLE, PANEL_BASE_W};
 use crate::render::{load_fonts, Fonts, Ltrb};
 use crate::marks::{render_marks, Mark};
+use crate::wake::Wake;
 use crate::{Card, Shown};
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
@@ -354,7 +355,7 @@ pub struct Worker {
 }
 
 impl Worker {
-    pub fn start(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>) -> Option<Worker> {
+    pub fn start(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, wake: Arc<Wake>) -> Option<Worker> {
         let fonts = match load_fonts() {
             Some(f) => f,
             None => {
@@ -364,7 +365,7 @@ impl Worker {
         };
         let stop = Arc::new(AtomicBool::new(false));
         let flag = stop.clone();
-        let handle = std::thread::spawn(move || run(state, events, flag, fonts));
+        let handle = std::thread::spawn(move || run(state, events, wake, flag, fonts));
         Some(Worker { stop, handle })
     }
 
@@ -443,7 +444,7 @@ fn hash_of<T: std::hash::Hash>(v: &T) -> u64 {
     h.finish()
 }
 
-fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, stop: Arc<AtomicBool>, fonts: Fonts) {
+fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, wake: Arc<Wake>, stop: Arc<AtomicBool>, fonts: Fonts) {
     unsafe {
         SetProcessDPIAware();
         let inst = GetModuleHandleW(std::ptr::null());
@@ -529,7 +530,7 @@ fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, stop: Arc<Atom
                 tip.hide();
                 tick = tick.wrapping_add(1);
                 prof::add(prof::Part::Busy, tick_start.elapsed());
-                std::thread::sleep(Duration::from_millis(90));
+                wake.wait(Duration::from_millis(90));
                 continue;
             }
             let (cw, ch) = (client.2 - client.0, client.3 - client.1);
@@ -629,7 +630,7 @@ fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, stop: Arc<Atom
             tick = tick.wrapping_add(1);
             prof::add(prof::Part::Busy, tick_start.elapsed());
             // a drag needs the card to follow the cursor smoothly
-            std::thread::sleep(Duration::from_millis(if drag.is_some() { 16 } else { 90 }));
+            wake.wait(Duration::from_millis(if drag.is_some() { 16 } else { 90 }));
         }
         drop(card);
         drop(ingame);
