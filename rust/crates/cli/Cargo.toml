@@ -7,6 +7,10 @@ version.workspace = true
 name = "baocr"
 path = "src/main.rs"
 
+[features]
+# OCR on the GPU through DirectML (about 2.7x faster on the fixtures; ships DirectML.dll beside the exe)
+directml = ["baocr-ocr/directml"]
+
 [dependencies]
 baocr-core.workspace = true
 baocr-extract = { path = "../extract" }
@@ -27,3 +31,4 @@ clap = { version = "4", features = ["derive"] }
 
 [dev-dependencies]
 rusqlite = { version = "0.32", features = ["bundled"] }
+baocr-names = { path = "../names" }
