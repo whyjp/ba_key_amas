@@ -234,3 +234,24 @@ test("only the creation path spends the creation allowance", async () => {
   for (let i = 0; i < 5; i++) assert.equal((await s.upload(A, "a", ["아루"])).status, 200);
   assert.equal((await s.upload(B, "b", ["아루"])).status, 429, "the one allowance went to the first creation");
 });
+
+test("a new account is created whole or not at all: a failing students insert leaves no empty account behind", async () => {
+  const s = new Server();
+  s.d1.db.exec("CREATE TRIGGER boom BEFORE INSERT ON students BEGIN SELECT RAISE(ABORT, 'injected'); END");
+  const failed = await s.upload(A, "a", ["아루"]);
+  assert.equal(failed.status, 500);
+  assert.equal(s.users().length, 0, "the user row was rolled back with the students");
+  s.d1.db.exec("DROP TRIGGER boom");
+  const retry = await s.upload(A, "a", ["아루"]);
+  assert.equal(retry.status, 201, "the retry creates the account, it does not find an empty one");
+  assert.equal(s.d1.rows("SELECT * FROM students").length, 1);
+});
+
+test("a failing update keeps the previous students", async () => {
+  const s = new Server();
+  await s.upload(A, "a", ["아루", "하루"]);
+  s.d1.db.exec("CREATE TRIGGER boom BEFORE INSERT ON students BEGIN SELECT RAISE(ABORT, 'injected'); END");
+  assert.equal((await s.upload(A, "b", ["카린"])).status, 500);
+  assert.deepEqual(s.d1.rows("SELECT name FROM students ORDER BY name").map((r) => r.name), ["아루", "하루"]);
+  assert.equal(s.users()[0]?.nickname, "a");
+});

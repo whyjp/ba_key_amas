@@ -79,13 +79,14 @@ function randomBackground(): CardBackground | null {
   return { bg: BACKGROUNDS[(n[0] ?? 0) % BACKGROUNDS.length] as string, third: (n[1] ?? 0) % 3 };
 }
 
-function studentStatements(env: Env, userId: number, students: StudentRow[], kept: Map<string, CardBackground> = new Map()): D1PreparedStatement[] {
+/** The rows are tied to their user by the account hash, so they can sit in the same batch as the insert of that user. */
+function studentStatements(env: Env, hash: string, students: StudentRow[], kept: Map<string, CardBackground> = new Map()): D1PreparedStatement[] {
   const ins = env.DB.prepare(
-    "INSERT INTO students (user_id, name, student_id, level, stars, ex_skill, normal_skill, passive_skill, sub_skill, bond, uw_stars, uw_level, role, pinned, memorial, detail_json, bg, bg_third) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)",
+    "INSERT INTO students (user_id, name, student_id, level, stars, ex_skill, normal_skill, passive_skill, sub_skill, bond, uw_stars, uw_level, role, pinned, memorial, detail_json, bg, bg_third) VALUES ((SELECT id FROM users WHERE account_hash = ?1),?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)",
   );
   return students.map((s) => {
     const card = kept.get(s.name) ?? randomBackground();
-    return ins.bind(userId, s.name, studentEntry(s.name, s.student_id)?.id ?? null, s.level, s.stars, s.ex_skill, s.normal_skill, s.passive_skill, s.sub_skill, s.bond, s.uw_stars, s.uw_level, s.role, flag(s.pinned), flag(s.memorial), s.detail ? JSON.stringify(s.detail) : null, card?.bg ?? null, card?.third ?? null);
+    return ins.bind(hash, s.name, studentEntry(s.name, s.student_id)?.id ?? null, s.level, s.stars, s.ex_skill, s.normal_skill, s.passive_skill, s.sub_skill, s.bond, s.uw_stars, s.uw_level, s.role, flag(s.pinned), flag(s.memorial), s.detail ? JSON.stringify(s.detail) : null, card?.bg ?? null, card?.third ?? null);
   });
 }
 
@@ -108,15 +109,17 @@ async function upload(env: Env, up: Upload, accountId: string, client: Client, i
       await env.DB.batch([
         env.DB.prepare("UPDATE users SET nickname = ?1, nick_search = ?2, account_json = ?3, progress_json = ?4, updated_at = ?5, public = COALESCE(?6, public), score = ?7, stats_json = ?8, top_json = ?9, score_version = ?10, addon_version = ?11, protocol = ?12, chars_json = ?13 WHERE id = ?14").bind(nickname, search, accountJson, progressJson, now(), up.public === null ? null : Number(up.public), board.score, board.stats, board.top, SCORE_VERSION, client.addon, client.protocol, board.chars, existing.id),
         env.DB.prepare("DELETE FROM students WHERE user_id = ?1").bind(existing.id),
-        ...studentStatements(env, existing.id, up.students, kept),
+        ...studentStatements(env, hash, up.students, kept),
       ]);
       return json(200, { created: false, public_id: pub, students: up.students.length, public: up.public ?? Boolean(existing.public), score: board.score });
     }
-    if (env.CREATE_LIMITER && !(await env.CREATE_LIMITER.limit({ key: ip })).success) return json(429, { error: "새 계정을 너무 많이 만들었습니다. 잠시 뒤에 다시 시도해 주세요" }, { "retry-after": "60" });
+    if (attempt === 0 && env.CREATE_LIMITER && !(await env.CREATE_LIMITER.limit({ key: ip })).success) return json(429, { error: "새 계정을 너무 많이 만들었습니다. 잠시 뒤에 다시 시도해 주세요" }, { "retry-after": "60" });
     try {
       const t = now();
-      const res = await env.DB.prepare("INSERT INTO users (account_hash, public_id, nickname, nick_search, account_json, progress_json, created_at, updated_at, public, score, stats_json, top_json, score_version, addon_version, protocol, chars_json) VALUES (?1,?2,?3,?4,?5,?6,?7,?7,?8,?9,?10,?11,?12,?13,?14,?15)").bind(hash, pub, nickname, search, accountJson, progressJson, t, Number(up.public ?? false), board.score, board.stats, board.top, SCORE_VERSION, client.addon, client.protocol, board.chars).run();
-      await env.DB.batch(studentStatements(env, res.meta.last_row_id, up.students));
+      await env.DB.batch([
+        env.DB.prepare("INSERT INTO users (account_hash, public_id, nickname, nick_search, account_json, progress_json, created_at, updated_at, public, score, stats_json, top_json, score_version, addon_version, protocol, chars_json) VALUES (?1,?2,?3,?4,?5,?6,?7,?7,?8,?9,?10,?11,?12,?13,?14,?15)").bind(hash, pub, nickname, search, accountJson, progressJson, t, Number(up.public ?? false), board.score, board.stats, board.top, SCORE_VERSION, client.addon, client.protocol, board.chars),
+        ...studentStatements(env, hash, up.students),
+      ]);
       return json(201, { created: true, public_id: pub, students: up.students.length, public: up.public ?? false, score: board.score });
     } catch (e) {
       if (attempt >= 1) throw e;
