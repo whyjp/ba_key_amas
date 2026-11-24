@@ -19,7 +19,7 @@ main 푸시 (web/ 변경)
 | `scripts/release-check.ps1`, `release-contract.json` | 릴리즈와 웹 서버 사이의 계약, 에셋 존재, 이미지 크기 예산 검사 |
 | `scripts/check_wikidb.py` | 방금 만든 `wiki.db`의 스키마 버전과 표 내용을 검사한다 |
 | `scripts/package-portable.ps1` | 포터블 폴더와 zip, `SHA256SUMS`를 만든다. 로컬과 CI가 같은 스크립트를 쓴다 |
-| `web/wrangler.jsonc` | 자리 표시자에 `TODO(user)`를 달았고, `KEY_PEPPER`가 없으면 배포가 실패하게 `secrets.required`를 넣었다 |
+| `web/wrangler.jsonc` | D1 id가 들어 있고, `KEY_PEPPER`와 `ADDON_SIGNING_KEY`가 없으면 배포가 실패하게 `secrets.required`를 넣었다 |
 | `docs/ASSETS.md` | 이미지 정책, 다시 만들기, 권리자 삭제 요청 절차 |
 
 ### 에셋: 저장소에 커밋하고 Cloudflare 빌드는 `npm ci`만
@@ -45,7 +45,7 @@ wrangler가 올릴 정적 에셋은 `wrangler deploy --dry-run`에서 1445개로
 순서대로 한다.
 
 1. **GitHub Actions 켜기.** 저장소 Settings, Actions, General에서 Actions를 허용하고 Workflow permissions는 기본(Read repository contents)으로 둔다. 쓰기는 `release.yml`의 `publish` 작업이 자기 `permissions`로 올린다.
-2. **D1 데이터베이스 만들기.** `web/`에서 `npx wrangler login`, `npx wrangler d1 create ba-key-amas`를 실행하고 출력된 `database_id`를 `web/wrangler.jsonc`의 `REPLACE_WITH_wrangler_d1_create_ID` 자리에 붙여 커밋한다. 이 값은 식별자이지 비밀이 아니다.
+2. **D1 데이터베이스.** 이미 콘솔에서 `ba-key-amas`를 만들었고 그 id가 `web/wrangler.jsonc`의 `database_id`에 들어 있다(식별자이지 비밀이 아니다). 할 일은 없다.
 3. **비밀값 두 개.** Cloudflare 대시보드 Workers & Pages, 해당 Worker, Settings, Variables and Secrets에 Secret으로 `KEY_PEPPER`를 넣는다(또는 `npx wrangler secret put KEY_PEPPER`). 길고 무작위인 값 하나를 정해 계속 쓴다. 바꾸면 기존 계정이 모두 끊긴다. 둘째로 `ADDON_SIGNING_KEY`(아래 서명 키 절)가 Worker와 GitHub Actions에 같은 값으로 있어야 한다. 이미 넣어 두었다고 들었지만 이 저장소에서 확인하지는 못했다. 둘 중 하나라도 Worker에 없으면 `secrets.required` 때문에 배포가 실패한다.
 4. **Cloudflare에 저장소 연결.** Workers & Pages, Create application, GitHub에서 `whyjp/ba_key_amas`를 고르고 아래처럼 설정한다. Worker 이름은 `wrangler.jsonc`의 `name`(`ba-key-amas`)과 같아야 한다. 다르면 빌드가 실패한다.
    - Root directory: `web`
