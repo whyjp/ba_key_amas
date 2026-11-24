@@ -101,15 +101,38 @@ pub struct Match {
     pub score: f32,
     /// The best score minus the best score of any other allowed student.
     pub margin: f32,
+    /// The student with the best score among those who are not the same student as `id` (None when there is no other).
+    pub runner_up: Option<i64>,
 }
 
 /// What a match must reach to be believed (measured on the recorded screens, see `tests/portrait.rs`).
 pub const MIN_SCORE: f32 = 0.55;
 pub const MIN_MARGIN: f32 = 0.10;
 
+/// A clear picture (this score) is believed with a smaller lead: over another student, `LOOSE_MARGIN`; over another
+/// costume of the same character, which looks alike by nature, `KIN_MARGIN`.
+pub const STRONG_SCORE: f32 = 0.70;
+pub const LOOSE_MARGIN: f32 = 0.03;
+pub const KIN_MARGIN: f32 = 0.08;
+
+/// The character a student name stands for, without the costume: "아루(드레스)" and "시로코*테러" are "아루" and "시로코".
+pub fn base_name(name: &str) -> &str {
+    name.split(['(', '*']).next().unwrap_or(name).trim()
+}
+
 impl Match {
+    /// Believed on score and lead alone (the safe rule).
     pub fn trusted(&self) -> bool {
         self.score >= MIN_SCORE && self.margin >= MIN_MARGIN
+    }
+
+    /// [`Match::trusted`], or a clear picture with a small lead. `kin(a, b)` says two students are costumes of one character.
+    pub fn trusted_with(&self, kin: &dyn Fn(i64, i64) -> bool) -> bool {
+        if self.trusted() {
+            return true;
+        }
+        let near_kin = self.runner_up.is_some_and(|r| kin(self.id, r));
+        self.score >= STRONG_SCORE && self.margin >= if near_kin { KIN_MARGIN } else { LOOSE_MARGIN }
     }
 }
 
@@ -178,6 +201,6 @@ impl Book {
         scores.sort_by(|a, b| b.0.total_cmp(&a.0));
         let first = scores.first()?;
         let other = scores.iter().find(|(_, id)| !same(first.1, *id));
-        Some(Match { id: first.1, score: first.0, margin: other.map_or(1.0, |o| first.0 - o.0) })
+        Some(Match { id: first.1, score: first.0, margin: other.map_or(1.0, |o| first.0 - o.0), runner_up: other.map(|o| o.1) })
     }
 }

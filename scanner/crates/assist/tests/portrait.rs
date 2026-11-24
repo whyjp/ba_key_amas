@@ -41,6 +41,7 @@ fn the_slots_and_the_grid_cards_are_told_from_the_shipped_templates() {
     let kind: HashMap<i64, bool> = students.iter().map(|s| (s.id, s.squad_type == "Main")).collect();
     let name_of: HashMap<i64, String> = students.iter().map(|s| (s.id, s.name.clone())).collect();
     let same = |a: i64, b: i64| name_of.get(&a) == name_of.get(&b);
+    let kin = |a: i64, b: i64| matches!((name_of.get(&a), name_of.get(&b)), (Some(x), Some(y)) if baocr_assist::portrait::base_name(x) == baocr_assist::portrait::base_name(y));
     let by_name: HashMap<String, i64> = students.iter().map(|s| (s.name.replace('*', ""), s.id)).collect();
     let book = Book::bundled();
     assert!(book.len() >= 260, "the shipped templates cover the roster: {}", book.len());
@@ -65,14 +66,14 @@ fn the_slots_and_the_grid_cards_are_told_from_the_shipped_templates() {
     }
     let report = |rows: &[(String, i64, baocr_assist::portrait::Match)]| {
         let hit = rows.iter().filter(|(_, t, m)| *t == m.id || name_of.get(t) == name_of.get(&m.id)).count();
-        let sure = rows.iter().filter(|(_, _, m)| m.trusted()).count();
-        let sure_wrong = rows.iter().filter(|(_, t, m)| m.trusted() && name_of.get(t) != name_of.get(&m.id)).count();
+        let sure = rows.iter().filter(|(_, _, m)| m.trusted_with(&kin)).count();
+        let sure_wrong = rows.iter().filter(|(_, t, m)| m.trusted_with(&kin) && name_of.get(t) != name_of.get(&m.id)).count();
         (hit, rows.len(), sure, sure_wrong)
     };
     let (sh, sn, ss, sw) = report(&slot_rows);
     let (ch, cn, cs, cw) = report(&card_rows);
     for (what, truth, m) in slot_rows.iter().chain(card_rows.iter()) {
-        eprintln!("{what:<44} {} score {:.2} margin {:.2} {}", if name_of.get(truth) == name_of.get(&m.id) { "ok   " } else { "WRONG" }, m.score, m.margin, if m.trusted() { "trusted" } else { "held" });
+        eprintln!("{what:<44} {} score {:.2} margin {:.2} {}", if name_of.get(truth) == name_of.get(&m.id) { "ok   " } else { "WRONG" }, m.score, m.margin, if m.trusted_with(&kin) { "trusted" } else { "held" });
     }
     eprintln!("slots: {sh}/{sn} right, {ss} trusted, {sw} trusted and wrong | cards: {ch}/{cn} right, {cs} trusted, {cw} trusted and wrong (min score {MIN_SCORE}, min margin {MIN_MARGIN})");
     // a wrong guess shown as a student is worse than none: nothing trusted may be wrong
@@ -93,6 +94,7 @@ fn the_thumbnail_view_is_told_by_pictures() {
     let kind: HashMap<i64, bool> = students.iter().map(|s| (s.id, s.squad_type == "Main")).collect();
     let name_of: HashMap<i64, String> = students.iter().map(|s| (s.id, s.name.clone())).collect();
     let same = |a: i64, b: i64| name_of.get(&a) == name_of.get(&b);
+    let kin = |a: i64, b: i64| matches!((name_of.get(&a), name_of.get(&b)), (Some(x), Some(y)) if baocr_assist::portrait::base_name(x) == baocr_assist::portrait::base_name(y));
     let img = image::open(fixture("quick-thumbs.png")).unwrap().to_rgb8();
     let cards = baocr_pixels::quick_thumb_cards(&img);
     let book = Book::bundled();
@@ -103,9 +105,9 @@ fn the_thumbnail_view_is_told_by_pictures() {
     let mut first_row = Vec::new();
     for c in &cards {
         let m = book.identify(&probe(&img, c.cx as f32, c.picture_y() as f32), &|id| kind.get(&id) == Some(&true), &same).unwrap();
-        eprintln!("card x={} bar={} -> {} {:?} score {:.2} margin {:.2} {}", c.cx, c.bar_top, m.id, name_of.get(&m.id), m.score, m.margin, if m.trusted() { "trusted" } else { "held" });
-        trusted += usize::from(m.trusted());
-        if c.bar_top < 450 && m.trusted() {
+        eprintln!("card x={} bar={} -> {} {:?} score {:.2} margin {:.2} vs {:?} {}", c.cx, c.bar_top, m.id, name_of.get(&m.id), m.score, m.margin, m.runner_up.and_then(|r| name_of.get(&r)), if m.trusted_with(&kin) { "trusted" } else { "held" });
+        trusted += usize::from(m.trusted_with(&kin));
+        if c.bar_top < 450 && m.trusted_with(&kin) {
             first_row.push(m.id);
         }
     }

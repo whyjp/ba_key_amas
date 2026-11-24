@@ -244,6 +244,8 @@ const CARD_FRAME: (i32, i32, i32, i32) = (-55, -106, 55, 41);
 /// does in the named view (where the label is 106 px under the card's top), and the card is this tall.
 const THUMB_LABEL_BELOW_TOP: i32 = 106;
 const THUMB_CARD_HEIGHT: i32 = 98;
+/// The icon column of a bare card starts this far under its top: a full column (verdict, the two types, face) is 83 px tall.
+const THUMB_COLUMN_BELOW_TOP: i32 = 12;
 /// The grid's viewport: a card whose portrait is mostly scrolled out of it gets no icons.
 const GRID_ICONS_TOP: i32 = 322;
 const GRID_ICONS_BOTTOM: i32 = 600;
@@ -342,12 +344,18 @@ pub fn card_marks_in(cards: &[CardName], students: &[StudentBrief], brief: Optio
                 return None;
             }
             let s = Wiki::match_student_as(students, &c.text, kind)?;
-            let (icons, grade) = marks_of(&s, brief, terrain, types, false);
+            // pictures only: the card is short, so lay the icons out as on the squad strip (the two types side by side,
+            // the column on the card's right edge and inside its height); the named view has room for them stacked
+            let (icons, grade) = marks_of(&s, brief, terrain, types, c.bare);
             if icons.is_empty() {
                 return None;
             }
             let cx = c.x.round() as i32;
-            let mark = Mark::column_from_top(cx + CARD_HALF_WIDTH, top, icons);
+            let mark = if c.bare {
+                Mark::column_from_top(cx + CARD_FRAME.2, c.y0.round() as i32 + THUMB_COLUMN_BELOW_TOP, icons)
+            } else {
+                Mark::column_from_top(cx + CARD_HALF_WIDTH, top, icons)
+            };
             let (frame_top, frame_bottom) = if c.bare { (y0 - THUMB_LABEL_BELOW_TOP, y0 - THUMB_LABEL_BELOW_TOP + THUMB_CARD_HEIGHT) } else { (y0 + CARD_FRAME.1, y0 + CARD_FRAME.3) };
             Some(match grade {
                 Some(grade) => mark.framed(Frame { left: cx + CARD_FRAME.0, top: frame_top, right: cx + CARD_FRAME.2, bottom: frame_bottom, grade }),

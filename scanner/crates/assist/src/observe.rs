@@ -186,6 +186,14 @@ impl<'a> Observer<'a> {
     }
 
     /// The cards of the grid's thumbnail view, each told by its picture (only what is believed is named).
+    /// Two students are costumes of one character.
+    fn kin(&self, a: i64, b: i64) -> bool {
+        match (self.names.get(&a), self.names.get(&b)) {
+            (Some(x), Some(y)) => portrait::base_name(x) == portrait::base_name(y),
+            _ => false,
+        }
+    }
+
     fn thumb_cards(&self, img: &RgbImage, kind: Option<&'static str>) -> Vec<CardName> {
         let Some(kind) = kind else { return Vec::new() };
         let striker = kind == "Main";
@@ -195,7 +203,7 @@ impl<'a> Observer<'a> {
             .into_iter()
             .filter_map(|card| {
                 let m = book.identify(&portrait::probe(img, card.cx as f32, card.picture_y() as f32), &|id| self.strikers.get(&id) == Some(&striker), &same)?;
-                let name = self.names.get(&m.id).filter(|_| m.trusted())?;
+                let name = self.names.get(&m.id).filter(|_| m.trusted_with(&|a, b| self.kin(a, b)))?;
                 Some(CardName { text: name.clone(), x: card.cx as f32, y0: card.top() as f32, bare: true })
             })
             .collect()
@@ -213,7 +221,7 @@ impl<'a> Observer<'a> {
             let same = |a: i64, b: i64| self.names.get(&a) == self.names.get(&b);
             for (k, slot) in slots.iter_mut().enumerate().take(4) {
                 let (cx, cy) = portrait::slot_centre(k, layout);
-                *slot = book.identify(&portrait::probe(img, cx, cy), &|id| self.strikers.get(&id) == Some(&true), &same).filter(|m| m.trusted()).map(|m| m.id);
+                *slot = book.identify(&portrait::probe(img, cx, cy), &|id| self.strikers.get(&id) == Some(&true), &same).filter(|m| m.trusted_with(&|a, b| self.kin(a, b))).map(|m| m.id);
             }
         }
         let seen: Vec<i64> = slots.iter().flatten().copied().collect();
