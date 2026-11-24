@@ -13,7 +13,8 @@ use baocr_hcu::{detect_layout, game_capture, settle, settle_quiet, to_frame, Exc
 use baocr_overlay::BannerState;
 use baocr_progress::schema::{Events, PastEvent, ProgressSnapshot, Region};
 use baocr_progress::schema::StoryVolume;
-use baocr_progress::{account, bareceipt, event_past, schedule, scroll, story, Rect};
+use baocr_progress::schema::{Duty, DutyStudent, UnreadStudent};
+use baocr_progress::{account, bareceipt, duty, event_past, momotalk, schedule, scroll, story, Rect};
 use image::RgbImage;
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -34,6 +35,7 @@ enum Target {
     /// The button that switches the volume map between its two parts.
     PartSwitch,
     FinalVolume,
+    Momotalk,
 }
 
 impl Target {
@@ -60,6 +62,7 @@ impl Target {
             Target::MainStory => (b.x1 < 600.0 && b.y0 > 200.0 && t.contains("메인스토리")).then_some(centre),
             Target::ToVolumeMap => (b.y1 < 130.0 && b.x1 < 330.0 && t.ends_with("메인스토리로이동")).then_some(centre),
             Target::PartSwitch => (b.y1 < 130.0 && b.x1 < 330.0 && t.ends_with("부로이동")).then_some(centre),
+            Target::Momotalk => (b.x1 < 250.0 && b.y0 > 140.0 && b.y1 < 220.0 && t == "모모톡").then_some(centre),
             Target::FinalVolume => (b.x0 > 700.0 && b.x1 < 950.0 && b.y0 > frame_h * 0.6 && t == "최종편").then_some(centre),
         }
     }
@@ -178,8 +181,14 @@ impl Nav<'_> {
         self.hcu.scroll_n(fx, fy, if down { 6 } else { -12 }, moves)
     }
 
+    /// The screen once it holds still. Behind a popup the lobby keeps animating and never does: after the wait
+    /// runs out, the latest look is taken as it is.
     fn settled(&self) -> Result<Look> {
-        self.read(settle_quiet(self.hcu, self.region)?)
+        match settle_quiet(self.hcu, self.region) {
+            Ok(img) => self.read(img),
+            Err(e) if format!("{e:#}").contains("did not settle") => self.look(),
+            Err(e) => Err(e),
+        }
     }
 }
 
@@ -194,7 +203,7 @@ pub struct ProgressSummary {
 type Section = fn(&Nav, &Look, &mut ProgressSnapshot) -> Result<()>;
 
 /// The lobby read counts as the first section.
-const SECTIONS: usize = 4;
+const SECTIONS: usize = 6;
 
 pub fn scan_progress(ocr: Arc<dyn Ocr>, hcu: &Exclusive, region: [f64; 4], out: &Path, report: &dyn Fn(BannerState)) -> Result<ProgressSummary> {
     let layout = detect_layout(region).ok_or_else(|| anyhow!("게임 창의 비율을 알 수 없습니다"))?;
@@ -208,7 +217,7 @@ pub fn scan_progress(ocr: Arc<dyn Ocr>, hcu: &Exclusive, region: [f64; 4], out: 
     snap.warnings.extend(acct.warnings);
 
     let mut read = 1;
-    let steps: [(&str, Section); 3] = [("스케줄", schedule_section), ("이벤트 스토리", past_events_section), ("메인 스토리", main_story_section)];
+    let steps: [(&str, Section); 5] = [("스케줄", schedule_section), ("이벤트 스토리", past_events_section), ("모모톡 안 읽음", momotalk_unread_section), ("당번 선택", duty_section), ("메인 스토리", main_story_section)];
     for (name, step) in steps {
         report(BannerState::scanning(read, Some(SECTIONS)));
         let lobby = nav.to_lobby()?;
@@ -411,6 +420,131 @@ fn main_story_section(nav: &Nav, lobby: &Look, snap: &mut ProgressSnapshot) -> R
     }
     snap.story.main = volumes;
     snap.warnings.extend(warnings);
+    Ok(())
+}
+
+/// The × of a popup: the box at the right end of the popup's title row.
+fn close_button(look: &Look, title: &TextBox) -> Option<(f32, f32)> {
+    look.boxes
+        .iter()
+        .find(|b| {
+            let t = b.text.trim();
+            (t == "×" || t == "X" || t == "x") && (((b.y0 + b.y1) / 2.0) - ((title.y0 + title.y1) / 2.0)).abs() < 30.0 && b.x0 > title.x1 + 100.0
+        })
+        .map(|b| ((b.x0 + b.x1) / 2.0, (b.y0 + b.y1) / 2.0))
+}
+
+/// 모모톡, messages tab: the students with unread messages and how many each. The tab already lists only the
+/// unread ones, sorted by 안읽음; its header carries the total, which the rows must add up to.
+fn momotalk_unread_section(nav: &Nav, lobby: &Look, snap: &mut ProgressSnapshot) -> Result<()> {
+    let popup = nav.press(lobby, Target::Momotalk)?.ok_or_else(|| anyhow!("로비에서 모모톡 버튼을 찾지 못했습니다"))?;
+    let title = popup.boxes.iter().find(|b| b.text.contains("MomoTalk")).cloned().ok_or_else(|| anyhow!("모모톡 창이 열리지 않았습니다"))?;
+    // the messages tab is the second icon of the left rail, under the students tab
+    nav.click_at(title.x0 + 22.0, title.y1 + 138.0)?;
+    std::thread::sleep(Duration::from_millis(900));
+    // the list keeps the place it was left at: start from its top
+    nav.scroll_list(title.x0 + 290.0, title.y1 + 260.0, false, 6)?;
+    std::thread::sleep(Duration::from_millis(700));
+    let mut look = nav.settled()?;
+    let mut rows: Vec<UnreadStudent> = Vec::new();
+    let mut total = None;
+    // a read that does not add up to the header's total is repeated from the top of the list
+    for pass in 0..3 {
+        if pass > 0 {
+            nav.scroll_list(title.x0 + 290.0, title.y1 + 260.0, false, 6)?;
+            std::thread::sleep(Duration::from_millis(900));
+            look = nav.settled()?;
+        }
+        let mut quiet = 0;
+        for _ in 0..16 {
+            let page = momotalk::parse_unread(&look.boxes);
+            if page.value.total.is_none() && total.is_none() {
+                bail!("안 읽은 메시지 목록이 열리지 않았습니다");
+            }
+            total = total.or(page.value.total);
+            let before = rows.len();
+            for r in page.value.rows {
+                if !rows.iter().any(|k| k.name == r.name) {
+                    rows.push(r);
+                }
+            }
+            quiet = if rows.len() == before { quiet + 1 } else { 0 };
+            if quiet >= 2 {
+                break;
+            }
+            nav.scroll_list(title.x0 + 290.0, title.y1 + 260.0, true, 1)?;
+            std::thread::sleep(Duration::from_millis(700));
+            look = nav.settled()?;
+        }
+        if total.is_some_and(|t| t == rows.iter().map(|r| r.count).sum::<u32>()) {
+            break;
+        }
+    }
+    if let Some((x, y)) = close_button(&look, &title) {
+        nav.click_at(x, y)?;
+        std::thread::sleep(Duration::from_millis(800));
+    }
+    let sum: u32 = rows.iter().map(|r| r.count).sum();
+    if total.is_some_and(|t| t != sum) {
+        snap.warnings.push(format!("모모톡: 안 읽은 메시지 합계 {} 와 읽은 줄의 합 {} 가 다릅니다", total.unwrap_or(0), sum));
+    }
+    snap.momotalk.unread_total = total;
+    snap.momotalk.unread = rows;
+    Ok(())
+}
+
+/// The duty student menu (the icon at the top right of the lobby): who is picked and each student's memorial
+/// lobby. It is closed with its ×, never with 취소 or 확인, so nothing is changed.
+fn duty_section(nav: &Nav, lobby: &Look, snap: &mut ProgressSnapshot) -> Result<()> {
+    // the one unlabelled icon this scan presses: the top bar is laid out the same in both screen layouts
+    let _ = lobby;
+    let mut opened = None;
+    for _ in 0..3 {
+        nav.click_at(1075.0, 37.0)?;
+        std::thread::sleep(Duration::from_millis(1800));
+        let look = nav.look()?;
+        if let Some(title) = look.boxes.iter().find(|b| b.text.replace(' ', "") == "당번선택").cloned() {
+            opened = Some((look, title));
+            break;
+        }
+    }
+    let Some((mut look, title)) = opened else {
+        bail!("당번 선택 창이 열리지 않았습니다");
+    };
+    let first = duty::parse_duty(&look.boxes, &look.img);
+    let (gx, gy) = (title.x0 + 150.0, title.y1 + 260.0);
+    nav.scroll_list(gx, gy, false, 8)?;
+    std::thread::sleep(Duration::from_millis(800));
+    look = nav.settled()?;
+    let mut cards: BTreeMap<String, DutyStudent> = BTreeMap::new();
+    let (mut counted, mut limit) = (first.value.selected_count, first.value.limit);
+    let mut quiet = 0;
+    for _ in 0..30 {
+        let page = duty::parse_duty(&look.boxes, &look.img);
+        counted = page.value.selected_count.or(counted);
+        limit = page.value.limit.or(limit);
+        let before = cards.len();
+        for c in page.value.cards {
+            cards.insert(squash(&c.name), c);
+        }
+        quiet = if cards.len() == before { quiet + 1 } else { 0 };
+        if quiet >= 2 {
+            break;
+        }
+        nav.scroll_list(gx, gy, true, 1)?;
+        std::thread::sleep(Duration::from_millis(700));
+        look = nav.settled()?;
+    }
+    if let Some((x, y)) = close_button(&look, &title) {
+        nav.click_at(x, y)?;
+        std::thread::sleep(Duration::from_millis(800));
+    }
+    let students: Vec<DutyStudent> = cards.into_values().collect();
+    let picked = students.iter().filter(|s| s.selected == Some(true)).count() as u32;
+    if counted.is_some_and(|c| c != picked) {
+        snap.warnings.push(format!("당번 선택: 화면의 선택 수 {} 와 표시가 보인 학생 수 {} 가 다릅니다", counted.unwrap_or(0), picked));
+    }
+    snap.duty = Duty { selected_count: counted, limit, students };
     Ok(())
 }
 
