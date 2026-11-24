@@ -8,6 +8,8 @@
 param(
     [string]$Exe = "D:\scan-run\member-key\ba-key-AMAS.exe",
     [string]$SigningKey = "e2e-signing-key-0123456789abcdef",
+    # the exe carries the key from its build (BAOCR_ADDON_SIGNING_KEY at compile time): do not hand it over at run time
+    [switch]$KeyCompiledIn,
     [int]$Port = 8799,
     [string]$Work = "D:\scan-run\member-key\e2e"
 )
@@ -38,7 +40,7 @@ function Api([string]$method, [string]$path, $body = $null, [hashtable]$headers 
 
 function Upload([string]$code, [string[]]$more, [string]$key = $SigningKey) {
     $env:BAOCR_MEMBER_CODE = $code
-    if ($key) { $env:BAOCR_ADDON_SIGNING_KEY = $key }
+    if ($key -and -not $KeyCompiledIn) { $env:BAOCR_ADDON_SIGNING_KEY = $key }
     $realAppData = $env:APPDATA
     $env:APPDATA = Join-Path $Work "appdata"
     $out = Join-Path $Work "upload.out"
@@ -136,8 +138,12 @@ try {
     Check "a signature made with another key gets 401" ($wrong.Status -eq 401) $wrong.Text
     $stillListed = Api GET ("/api/search?q=" + [uri]::EscapeDataString("새이"))
     Check "the refused requests changed nothing: both accounts are still public and listed" (@($stillListed.Json.matches).Count -eq 2) $stillListed.Text
-    $unsignedBuild = Upload $codeA @() ""
-    Check "an add-on build without the signing key cannot upload (exit code is not 0, the message says why)" ($unsignedBuild.Exit -ne 0 -and $unsignedBuild.Text -match "signing key") $unsignedBuild.Text
+    if ($KeyCompiledIn) {
+        $unsignedBuild = [pscustomobject]@{ Text = "" }
+    } else {
+        $unsignedBuild = Upload $codeA @() ""
+        Check "an add-on build without the signing key cannot upload (exit code is not 0, the message says why)" ($unsignedBuild.Exit -ne 0 -and $unsignedBuild.Text -match "signing key") $unsignedBuild.Text
+    }
     $h = SignedApi "/api/visibility" @{ account_id = $idA; public = $false }
     Check "visibility by account_id (signed like the add-on)" ($h.Status -eq 200 -and $h.Json.public -eq $false) $h.Text
     $s2 = Api GET ("/api/search?q=" + [uri]::EscapeDataString("새이"))
