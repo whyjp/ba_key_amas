@@ -121,11 +121,7 @@ def check_diagram(problems):
     current = (DOCS / "diagrams" / "crates.svg").read_bytes()
     # the file is written with the line endings of the platform that made it (CRLF on Windows, LF on the CI runner):
     # the picture is the same, so the endings are not compared
-    if fresh.replace(b"
-", b"
-") != current.replace(b"
-", b"
-"):
+    if fresh.replace(b"\r\n", b"\n") != current.replace(b"\r\n", b"\n"):
         problems.append("docs/diagrams/crates.svg is out of date: run `python -I scripts/gen_arch.py`")
 
 
