@@ -129,4 +129,4 @@ BAReceipt의 "파일로 저장"은 JSON 객체 하나를 쓴다. 키는 `basic, 
 * **열린 이벤트는 배너를 직접 고른다.** 로비의 돌아가는 배너를 돌려 가며 모든 배너를 하나씩 인식하고, 이벤트 배너일 때 그것을 연다. 누르는 순간 어떤 배너인지 보장되지 않는 문제는 이 방식으로 푼다.
 * 이 결정에 따라 지금의 메인 스토리 볼륨 지도 순회(`main_story_section`)는 대체 대상이다.
 
-아직 정해지지 않은 것은 스토리와 이벤트 목록의 출처다. 현재 DB에는 스토리나 이벤트 테이블이 없다.
+목록의 출처는 [arisu-archive/bluearchive-data](https://github.com/arisu-archive/bluearchive-data)의 `global` 브랜치다(게임 클라이언트 테이블을 푼 JSON). 그 저장소에는 LICENSE 파일이 없고 데이터는 게임사 것이므로 서브모듈로 넣거나 원본을 이 저장소에 두지 않는다. DB 수집기(`wikidb`)가 `ScenarioModeExcel`, `EventContentSeasonExcel`, `EventContentScenarioExcel` 세 표를 그 시점의 커밋에서 내려받아 숫자(번호, 개최·종료 시각)만 `wiki.db`의 `story_episode`, `event`, `event_scenario`에 넣고 커밋 해시를 `source.version`에 남긴다. DB 파일은 배포하지 않는다. 이 표의 `mode_type`, `sub_type` 값이 메인, 미니, 그룹 중 무엇인지는 아직 풀지 않았다.

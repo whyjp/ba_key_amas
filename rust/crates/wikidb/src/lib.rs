@@ -4,6 +4,7 @@
 pub mod formation;
 pub mod raid;
 pub mod schaledb;
+pub mod story;
 pub mod weight;
 pub mod wiki;
 pub use formation::{
@@ -21,7 +22,7 @@ pub const SCHEMA: &str = include_str!("../../../../wikidb/schema.sql");
 
 /// The schema version this build reads and writes (meta.schema_version). `Wiki::open` refuses
 /// a database of another version: rebuild it with the collector.
-pub const SCHEMA_VERSION: u32 = 4;
+pub const SCHEMA_VERSION: u32 = 5;
 
 /// A fresh database with the schema applied.
 pub fn create(conn: &Connection) -> Result<()> {
@@ -31,12 +32,19 @@ pub fn create(conn: &Connection) -> Result<()> {
 /// Builds the database at `path`: written beside it first and renamed over it, so a
 /// failed run never leaves a half-built file, and running twice gives the same file content.
 pub fn build(path: &Path, dataset: &schaledb::Dataset, fetched_at: &str) -> Result<schaledb::Counts> {
+    build_with(path, dataset, None, fetched_at).map(|(counts, _)| counts)
+}
+
+/// `build` plus the story and event lists when they were fetched.
+pub fn build_with(path: &Path, dataset: &schaledb::Dataset, story: Option<&story::StoryData>, fetched_at: &str) -> Result<(schaledb::Counts, Option<story::StoryCounts>)> {
     let tmp = path.with_extension("db.tmp");
     let _ = std::fs::remove_file(&tmp);
     let counts = {
         let mut conn = Connection::open(&tmp)?;
         create(&conn)?;
-        schaledb::load(&mut conn, dataset, fetched_at)?
+        let counts = schaledb::load(&mut conn, dataset, fetched_at)?;
+        let story_counts = story.map(|s| story::load(&mut conn, s, fetched_at)).transpose()?;
+        (counts, story_counts)
     };
     std::fs::rename(&tmp, path).with_context(|| format!("replacing {}", path.display()))?;
     Ok(counts)

@@ -2,7 +2,7 @@
 -- Reference data only, rebuilt from sources by the collectors. The user's own roster stays
 -- in the scan output (index.json) and joins to this DB by student.id.
 -- Local assist use only: the DB file is not distributed (see source.note).
--- Version 4 (3 plus the enemy weight tables and share views). Bump meta.schema_version on every incompatible change.
+-- Version 5 (4 plus the story and event lists). Bump meta.schema_version on every incompatible change.
 
 PRAGMA foreign_keys = ON;
 
@@ -294,4 +294,41 @@ CREATE VIEW v_raid_attack_share AS
 SELECT raid_kind, raid_id, idx, bullet_type, COUNT(*) AS enemies, SUM(weight) AS weight, SUM(weight) / SUM(SUM(weight)) OVER (PARTITION BY raid_kind, raid_id, idx) AS share
 FROM v_raid_enemy WHERE weight > 0 AND bullet_type IS NOT NULL GROUP BY raid_kind, raid_id, idx, bullet_type;
 
-INSERT INTO meta (key, value) VALUES ('schema_version', '4');
+-- Story and event lists (static facts; the add-on's progress scan only records which of these the user has
+-- cleared). Numbers as the client tables give them: the meaning of mode_type / sub_type is not decoded here.
+CREATE TABLE story_episode (
+    mode_id    INTEGER PRIMARY KEY,
+    mode_type  INTEGER NOT NULL,
+    sub_type   INTEGER NOT NULL,
+    volume_id  INTEGER NOT NULL,
+    chapter_id INTEGER NOT NULL,
+    episode_id INTEGER NOT NULL,
+    open_at    TEXT,                        -- 'YYYY-MM-DD HH:MM:SS', server time; null when the table gives none
+    source_id  INTEGER NOT NULL REFERENCES source(id)
+);
+CREATE INDEX story_episode_chapter ON story_episode (mode_type, volume_id, chapter_id, episode_id);
+
+-- An event has one row per content type it contains (type 0 is the story event, 133 of them; others are its
+-- minigames and shops), all with the same id and times.
+CREATE TABLE event (
+    event_content_id INTEGER NOT NULL,
+    event_type       INTEGER NOT NULL,
+    name_key         TEXT,                  -- a localisation key ('Event_Name_701'), not a name
+    display          INTEGER NOT NULL CHECK (display IN (0, 1)),
+    open_at          TEXT,
+    close_at         TEXT,
+    source_id        INTEGER NOT NULL REFERENCES source(id),
+    PRIMARY KEY (event_content_id, event_type)
+);
+CREATE INDEX event_open ON event (event_type, open_at);
+
+CREATE TABLE event_scenario (
+    id               INTEGER PRIMARY KEY,
+    event_content_id INTEGER NOT NULL,
+    ordinal          INTEGER NOT NULL,
+    is_recollection  INTEGER NOT NULL CHECK (is_recollection IN (0, 1)),
+    source_id        INTEGER NOT NULL REFERENCES source(id)
+);
+CREATE INDEX event_scenario_event ON event_scenario (event_content_id, ordinal);
+
+INSERT INTO meta (key, value) VALUES ('schema_version', '5');
