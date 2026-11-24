@@ -26,3 +26,4 @@ scanner/Cargo.lock.bak
 wikidb/wiki.db
 wikidb/wiki.db.tmp
 web/node_modules/
+wikidb/*.bak

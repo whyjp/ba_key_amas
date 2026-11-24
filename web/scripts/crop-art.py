@@ -2,7 +2,8 @@
 
 The card shows its artwork in a 6:5 window. Standing art (tall) and memorial lobby art (mostly wide) are cut to
 that shape here, so the page never crops at runtime and a face is never cut in half.
-  public/standing/<id>.webp -> public/card/<id>.webp         (614x512, head and shoulders)
+  public/standing/<id>.webp -> public/card/<id>.webp         (720x600, the face side of the figure)
+  public/standing/<id>.webp -> public/tile/<id>.webp         (540x600, the face side for the student tile)
   public/lobby/<id>.webp    -> public/card-lobby/<id>.webp   (480x400, upscaled and lightly sharpened)
 
 Faces are found with OpenCV's YuNet detector (the model is downloaded once to scripts/.cache). It finds about
@@ -25,6 +26,9 @@ MODEL = CACHE / "yunet.onnx"
 MODEL_URL = "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx"
 RATIO = 6 / 5
 FACE_AT = 0.36  # where the face centre sits inside a standing crop, from the top
+TILE_RATIO = 0.9
+TILE_W, TILE_H = 540, 600
+CARD_W, CARD_H = 720, 600  # size of every standing crop: the card shows the same picture size for every student
 
 
 def detector():
@@ -48,12 +52,41 @@ def clamp(v, lo, hi):
     return max(lo, min(hi, v))
 
 
-def crop_standing(img, face):
+def standing_window(img, face, ratio, height_share, face_at, size):
+    """The face side of the vertical portrait, cut to a window of `ratio` (width over height).
+
+    The standing art is a tall cut-out with transparent margins, and the figure often fills only the middle of its
+    width, so a full-width window shows empty sides. The window here is sized from the figure instead: its height is
+    `height_share` of the figure (head and shoulders), its width follows from the ratio, it is centred on the face and
+    the face sits `face_at` of the way down. The result is scaled to a fixed size, so every student's picture is
+    cut the same way and shown at the same size."""
     w, h = img.size
-    ch = round(w / RATIO)
-    cy = face[1] if face else 0.2 * h
-    top = clamp(round(cy - FACE_AT * ch), 0, max(h - ch, 0))
-    return img.crop((0, top, w, top + ch)), (w, ch)
+    alpha = np.array(img.getchannel("A")) > 24
+    rows = np.where(alpha.any(axis=1))[0]
+    y0, y1 = (int(rows[0]), int(rows[-1])) if rows.size else (0, h - 1)
+    fig_h = max(y1 - y0, 1)
+    head = alpha[y0:y0 + max(int(fig_h * 0.22), 1)]
+    cols = np.where(head.any(axis=0))[0]
+    cx = face[0] if face else (float(cols.mean()) if cols.size else w / 2)
+    cy = face[1] if face else y0 + 0.14 * fig_h
+    wh = fig_h * height_share
+    if face:
+        wh = max(wh, face[2] * 2.8)
+    wh = min(wh, h, w / ratio)
+    ww = wh * ratio
+    top = clamp(round(cy - face_at * wh), 0, max(round(h - wh), 0))
+    left = clamp(round(cx - ww / 2), 0, max(round(w - ww), 0))
+    return img.crop((left, top, left + round(ww), top + round(wh))), size
+
+
+def crop_standing(img, face):
+    """The card's 6:5 picture window."""
+    return standing_window(img, face, RATIO, 0.34, FACE_AT, (CARD_W, CARD_H))
+
+
+def crop_tile(img, face):
+    """The student tile: taller than wide, so more of the shoulders and less of the sides."""
+    return standing_window(img, face, TILE_RATIO, 0.25, 0.34, (TILE_W, TILE_H))
 
 
 def crop_lobby(img, face):
@@ -118,7 +151,7 @@ def write_faces(det) -> int:
 
 def main() -> int:
     det = detector()
-    jobs = (("standing", "card", crop_standing, 88), ("lobby", "card-lobby", crop_lobby, 90))
+    jobs = (("standing", "card", crop_standing, 88), ("standing", "tile", crop_tile, 88), ("lobby", "card-lobby", crop_lobby, 90))
     done = found = 0
     for src, dst, fn, quality in jobs:
         out = ROOT / "public" / dst

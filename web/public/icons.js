@@ -47,3 +47,10 @@ export function positionGlyph(position, size = 16) {
   });
   return svg;
 }
+
+/** A push pin, the sign of a pinned (고정) student. A word alone does not say what "고정" means. */
+export function pinGlyph(size = 16) {
+  const svg = node("svg", { viewBox: "0 0 24 24", width: String(size), height: String(size), "aria-hidden": "true" });
+  svg.append(node("path", { d: "M15.5 2.5l6 6-1.7 1.7-2-.6-3.6 3.6.6 4.6-1.6 1.6-4-4-5.3 5.3-1.4-1.4 5.3-5.3-4-4 1.6-1.6 4.6.6 3.6-3.6-.6-2z", fill: "currentColor" }));
+  return svg;
+}

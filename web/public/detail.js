@@ -1,5 +1,5 @@
 // The detail sheet of one owned student: opens over the tiles, closes with its button, Esc or a click outside.
-import { ARMOR_HUE, armorColor, ATTACK_HUE, attackColor, bondBadge, EQUIP_KO, halo, icon, meter, name, POSITION_KO, ROLE, schoolLogo, stars } from "./domain.js";
+import { ARMOR_HUE, armorColor, ATTACK_HUE, attackColor, bondBadge, EQUIP_KO, halo, icon, meter, name, pinBadge, POSITION_KO, ROLE, schoolLogo, stars } from "./domain.js";
 import { glyph, positionGlyph } from "./icons.js";
 import { el, num, portrait } from "./ui.js";
 
@@ -48,7 +48,20 @@ const PLAIN = { key: "n", label: "", art: "standing", full: false };
 const CARD_W = 380;
 const CARD_H = 640;
 
-/** A card uploaded before backgrounds were assigned still gets one: picked from the name, so it never changes. */
+/** The background of a student's card, as chosen at upload time; a student uploaded before backgrounds existed gets
+ *  one picked from the name, so it never changes. Used by the card and by the student tile, so they match. */
+export function cardBackground(s, meta) {
+  return s.bg ? { bg: s.bg, third: s.bg_third ?? 1 } : fallbackBackground(s.name, meta.backgrounds);
+}
+
+/** Puts a background (and the third of it that shows) on an element: the picture is enlarged, one third is visible. */
+export function paintBackground(node, pick) {
+  if (!pick) return;
+  node.style.backgroundImage = `url("/backgrounds/${encodeURIComponent(pick.bg)}.jpg")`;
+  node.style.backgroundSize = "170% auto";
+  node.style.backgroundPosition = ["0% 50%", "50% 50%", "100% 50%"][pick.third] ?? "50% 50%";
+}
+
 function fallbackBackground(name, list) {
   if (!list?.length) return null;
   let h = 0;
@@ -242,13 +255,7 @@ function buildCard(s, meta, ctx, rank, animate) {
   if (!tier.full) {
     // mid-grade cards: a background picked at upload time under the cut-out portrait
     const bg = el("div", "pc-bg");
-    const pick = s.bg ? { bg: s.bg, third: s.bg_third ?? 1 } : fallbackBackground(s.name, meta.backgrounds);
-    if (pick) {
-      // the picture is enlarged and one third of it (left, centre or right, fixed at upload) is shown
-      bg.style.backgroundImage = `url("/backgrounds/${encodeURIComponent(pick.bg)}.jpg")`;
-      bg.style.backgroundSize = "170% auto";
-      bg.style.backgroundPosition = ["0% 50%", "50% 50%", "100% 50%"][pick.third] ?? "50% 50%";
-    }
+    paintBackground(bg, cardBackground(s, meta));
     art.prepend(bg);
   }
   if (tier.key !== "n") {
@@ -288,7 +295,12 @@ function buildCard(s, meta, ctx, rank, animate) {
   foot.append(bond, nums);
 
   const marks = el("div", "tags pc-marks");
-  if (s.pinned) marks.append(tag("고정", "#c8a020"));
+  if (s.pinned) {
+    const pin = tag("", "#c8a020");
+    pin.classList.add("pin-tag");
+    pin.append(pinBadge("pin-in"));
+    marks.append(pin);
+  }
   if (s.memorial) marks.append(tag("메모리얼 로비", "#d65aaa"));
   if (ctx.duty.has(s.name)) marks.append(tag("당번", "#2c6fd0"));
   const unread = ctx.unread.get(s.name);
@@ -458,7 +470,7 @@ export function openDetail(s, meta, ctx) {
   close.type = "button";
 
   // the card is laid out at one size and scaled to whatever window it is shown in
-  const fit = () => stage.style.setProperty("--fit", Math.min(1, (innerWidth - 24) / CARD_W, (innerHeight - (outfits.length > 1 ? 150 : 100)) / CARD_H).toFixed(3));
+  const fit = () => stage.style.setProperty("--fit", Math.min(1, (innerWidth - 24) / CARD_W, (innerHeight - 150) / CARD_H).toFixed(3));
   fit();
   addEventListener("resize", fit);
 

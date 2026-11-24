@@ -1,5 +1,5 @@
 import { communityHeatmap } from "./heatmap.js";
-import { loadMeta } from "./domain.js";
+import { loadMeta, pinHeader } from "./domain.js";
 import { card, el, empty, get, mount, num, outfitStack } from "./ui.js";
 
 const COLS = [
@@ -63,6 +63,7 @@ async function showRanking(holder) {
     const head = el("tr");
     for (const [col, label, flag] of COLS) {
       const th = el("th", col === "nickname" || col === "top" ? "l" : "", label);
+      if (col === "pinned") pinHeader(th);
       if (!flag) {
         th.tabIndex = 0;
         if (sort.col === col) th.setAttribute("aria-sort", sort.dir > 0 ? "ascending" : "descending");

@@ -1,5 +1,6 @@
 // Game-domain names and the small visual parts shared by the views. `meta.json` is generated from the
 // public SchaleDB data by `npm run assets`; if it is missing the keys are shown as they are.
+import { pinGlyph } from "./icons.js";
 import { el } from "./ui.js";
 
 let metaPromise;
@@ -84,3 +85,21 @@ export const ATTACK_HUE = { Explosion: 4, Pierce: 42, Mystic: 214, Sonic: 272, C
 export const ARMOR_HUE = { LightArmor: 4, HeavyArmor: 42, Unarmed: 214, ElasticArmor: 272, CompositeArmor: 150, Normal: 220, Structure: 30 };
 export const POSITION_KO = { FRONT: "전열", MIDDLE: "중열", BACK: "후열" };
 export const EQUIP_KO = { Hat: "모자", Gloves: "장갑", Shoes: "신발", Bag: "가방", Badge: "배지", Hairpin: "헤어핀", Charm: "부적", Watch: "시계", Necklace: "목걸이" };
+
+/** The pin icon with the word "고정" on hover and for screen readers. */
+export function pinBadge(cls = "pin-badge", size = 14) {
+  const b = el("span", cls);
+  b.tabIndex = 0;
+  b.dataset.tip = "고정";
+  b.setAttribute("aria-label", "고정");
+  b.append(pinGlyph(size));
+  return b;
+}
+
+/** A table header that shows the pin instead of the word (the word stays as its title). */
+export function pinHeader(th) {
+  th.textContent = "";
+  th.append(pinGlyph(15));
+  th.title = "고정";
+  th.setAttribute("aria-label", "고정");
+}

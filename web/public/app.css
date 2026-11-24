@@ -401,3 +401,18 @@ a.button.ghost-link:hover { background: var(--sky); }
   .layout.fit .side, .layout.fit .tabbody { min-width: 0; }
   .layout.fit .tabs { min-width: 0; overflow-x: auto; flex-wrap: nowrap; }
 }
+
+/* the tile picture: a card background with the face side of the standing portrait on it */
+.tiles .tile .tile-bg { position: absolute; left: 0; top: 0; width: 100%; height: calc(100% - 24px); background: linear-gradient(160deg, #2c3d63, #1a2440) center / cover no-repeat; filter: saturate(.85) brightness(.85); }
+.tiles .tile .tile-img.standing { object-fit: cover; object-position: center top; }
+
+/* the pin icon for a pinned student */
+.pin-badge { position: relative; display: inline-grid; place-items: center; color: var(--navy); outline-offset: 2px; vertical-align: middle; }
+.pin-badge.dark { color: var(--navy); }
+.pin-badge svg { display: block; filter: drop-shadow(0 0 1px rgba(0, 0, 0, .3)); }
+.tile .chip.pin { display: inline-grid; place-items: center; width: 20px; height: 18px; padding: 0; }
+th svg { vertical-align: middle; }
+.sumbar .pin-badge { margin-top: 2px; }
+.tag.pin-tag { display: inline-grid; place-items: center; padding: 2px 6px; }
+.tag.pin-tag .pin-in { color: #fff; display: inline-grid; position: relative; }
+.pc-marks .pin-tag { border-bottom: 0; }

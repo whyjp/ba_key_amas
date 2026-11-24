@@ -1,6 +1,6 @@
-import { openDetail } from "./detail.js";
+import { cardBackground, openDetail, paintBackground } from "./detail.js";
 import { heatmapView } from "./heatmap.js";
-import { armorColor, attackColor, bondBadge, halo, icon, loadMeta, name, ROLE, schoolLogo, stars } from "./domain.js";
+import { armorColor, attackColor, bondBadge, halo, icon, loadMeta, name, pinBadge, pinHeader, ROLE, schoolLogo, stars } from "./domain.js";
 import { card, el, empty, mount, num, outfitStack, portrait, post, session } from "./ui.js";
 
 const NOT_SCANNED = "아직 스캔한 기록이 없습니다.";
@@ -37,14 +37,28 @@ function tile(s, ctx, meta, showInfo) {
   t.setAttribute("role", "button");
   t.tabIndex = 0;
   t.title = s.name;
-  t.append(portrait(s.student_id, "tile-img"));
+  // a background picked for the student, the face side of the standing portrait on it; the same back as the card
+  const back = el("div", "tile-bg");
+  paintBackground(back, cardBackground(s, meta));
+  const face = el("img", "tile-img standing");
+  face.src = `/tile/${encodeURIComponent(s.student_id)}.webp`;
+  face.alt = "";
+  face.loading = "lazy";
+  face.addEventListener("error", () => { face.src = `/portraits/${encodeURIComponent(s.student_id)}.webp`; face.classList.remove("standing"); }, { once: true });
+  t.append(back, face);
   if (showInfo) {
     if (s.stars) t.append(Object.assign(stars(s.stars, "student"), { className: "stars student tile-stars" }));
     if (s.level !== null) t.append(el("span", "lv", "Lv." + s.level));
     const ft = el("div", "ft");
     if (s.bond !== null) ft.append(bondBadge(s.bond, "bond sm"));
     if (s.uw_stars) ft.append(el("span", "chip uw", "전용 " + s.uw_stars + "성"));
-    if (s.pinned) ft.append(el("span", "chip pin", "고정"));
+    if (s.pinned) {
+      // the tile clips tooltips, so it uses the plain title
+      const pin = pinBadge("chip pin", 12);
+      pin.title = "고정";
+      delete pin.dataset.tip;
+      ft.append(pin);
+    }
     if (s.memorial) ft.append(el("span", "chip mem", "메모리얼"));
     if (ctx.duty.has(s.name)) ft.append(el("span", "chip duty", "당번"));
     t.append(ft);
@@ -62,14 +76,17 @@ function summaryBar(d) {
   const bar = el("div", "sumbar");
   const add = (v, label) => {
     const x = el("div");
-    x.append(el("b", "", String(v)), el("span", "", label));
+    const cap = el("span", "");
+    if (typeof label === "string") cap.textContent = label;
+    else cap.append(label);
+    x.append(el("b", "", String(v)), cap);
     bar.append(x);
   };
   add(a.stats.characters, "보유 캐릭터");
   add(d.students.length, "보유 학생");
   add(a.stats.bond30, "인연 30+");
   add(a.stats.memorial, "메모리얼 로비");
-  add(a.stats.pinned, "고정");
+  add(a.stats.pinned, pinBadge("pin-badge dark"));
   if (acc?.credits !== undefined) add(num(acc.credits), "크레딧");
   if (acc?.pyroxene !== undefined) add(num(acc.pyroxene), "청휘석");
   add(new Date(d.updated_at * 1000).toLocaleDateString("ko-KR"), "마지막 업로드");
@@ -165,6 +182,7 @@ function listView(d, ctx, meta) {
     const head = el("tr");
     for (const [col, label, cls] of LIST_COLS) {
       const th = el("th", cls || "", label);
+      if (col === "pinned") pinHeader(th);
       th.tabIndex = 0;
       if (sort.col === col) th.setAttribute("aria-sort", sort.dir > 0 ? "ascending" : "descending");
       const pick = () => { sort = { col, dir: sort.col === col ? -sort.dir : cls === "l" ? 1 : -1 }; draw(); };
@@ -194,6 +212,11 @@ function listView(d, ctx, meta) {
       else uw.textContent = "-";
       const plain = (v) => el("td", v === null ? "null" : "", v === null ? "-" : String(v));
       const flag = (v) => el("td", v ? "yes" : "null", v ? "●" : "-");
+      const pinCell = (v) => {
+        const td = el("td", v ? "yes" : "null", v ? "" : "-");
+        if (v) td.append(pinBadge("pin-badge", 15));
+        return td;
+      };
       const typeCell = (text, color) => {
         const td = el("td", "l");
         td.append(Object.assign(el("span", "tag", text), {}));
@@ -208,7 +231,7 @@ function listView(d, ctx, meta) {
         who, sc, plain(s.level), starCell, uw, plain(s.ex_skill), plain(s.normal_skill), plain(s.passive_skill), plain(s.sub_skill), bondCell,
         el("td", "l", s.role ? ROLE[s.role] ?? s.role : "-"),
         typeCell(name.attack(meta, s.attack), attackColor(s.attack)), typeCell(name.armor(meta, s.armor), armorColor(s.armor)),
-        flag(s.pinned), flag(s.memorial), flag(ctx.duty.has(s.name)),
+        pinCell(s.pinned), flag(s.memorial), flag(ctx.duty.has(s.name)),
       );
       tb.append(tr);
     }
