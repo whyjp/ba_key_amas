@@ -4,7 +4,7 @@
 
 ```
 태그 v0.2.0 푸시
-  -> release.yml: 모델 내려받기(sha256 검증) -> wiki.db 빌드 -> 빌드 -> 테스트 -> 포터블 zip -> SHA256SUMS -> 실행 스모크 테스트 -> GitHub Release
+  -> release.yml: 커밋된 모델·wiki.db 검증(내려받기 없음) -> 빌드 -> 테스트 -> 포터블 zip -> SHA256SUMS -> 실행 스모크 테스트 -> GitHub Release
 main 푸시 (web/ 변경)
   -> web-ci.yml: npm test, tsc, wrangler 번들 드라이런, 문서 검사, 릴리즈 계약 검사, 이미지 크기 예산
   -> Cloudflare Workers Builds (Root directory web): npm ci -> d1 migrations apply -> wrangler deploy

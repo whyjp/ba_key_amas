@@ -1,6 +1,6 @@
 # Builds the portable add-on folder: one exe with everything it needs beside it, then a zip and SHA256SUMS.
 # Usage: pwsh scripts/package-portable.ps1 [-Out D:\dist\ba-scanner] [-Zip D:\dist\ba-key-AMAS-v0.1.0-windows-x64.zip] [-SkipBuild]
-# Needs models\ (see models\README.md) and wikidb\wiki.db (cargo run -p baocr-wikidb --release) in place.
+# Needs models\ and wikidb\wiki.db, both committed seeds (docs/SEED-DATA.md).
 # CARGO_HOME / CARGO_TARGET_DIR are honoured when set; otherwise cargo's defaults are used.
 param([string]$Out = "D:\dist\ba-scanner", [string]$Zip = "", [switch]$SkipBuild)
 $ErrorActionPreference = "Stop"

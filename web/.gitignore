@@ -1,7 +1,5 @@
 node_modules/
 .wrangler/
 .dev.vars
-# raw inputs of the card crops: regenerable, large, never needed at deploy time
-public/standing/
-public/lobby/
+# download cache of the original images (about 450 MB): too large to commit, not needed once public/ is committed
 scripts/.cache/

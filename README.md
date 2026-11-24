@@ -54,7 +54,7 @@ Blue Archive(글로벌 서버, 한국어 UI, 4:3 창 모드)용 Windows 애드�
 | `ba-key-AMAS --watch --out db` | 수동 관찰 업데이터 |
 | `ba-key-AMAS --learn shots` | 플레이하는 동안 새 화면과 그 텍스트를 모두 저장한다. 입력은 보내지 않는다 |
 | `ba-key-AMAS --image fixtures/detail-shun.png --out out` | 저장한 스크린샷 한 장을 파싱한다 |
-| `cargo run -p baocr-wikidb --release` | SchaleDB에서 `wikidb/wiki.db`를 만든다 |
+| `cargo run -p baocr-wikidb --release` | SchaleDB에서 `wikidb/wiki.db`를 새로 만든다(연구 단계에서만 실행하고 결과를 커밋한다. 빌드는 실행하지 않는다) |
 | `cargo run -p baocr-namedict` | 패치 뒤에 이름 사전을 갱신한다 |
 
 환경 변수는 다음과 같다. `BAOCR_MODELS`(모델 폴더), `BAOCR_OCR_DEVICE=cpu`(GPU를 쓰지 않음),
