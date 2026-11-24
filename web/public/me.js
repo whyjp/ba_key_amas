@@ -19,6 +19,19 @@ function context(d) {
   return { duty, unread, byName, rankOf, siblings };
 }
 
+/** Makes a node open the card of the owned student with this name (nothing when the name is not an owned student). */
+function clickable(node, studentName, ctx) {
+  const s = ctx.byName.get(studentName);
+  if (!s) return node;
+  node.classList.add("clickable");
+  node.tabIndex = 0;
+  node.setAttribute("role", "button");
+  const open = () => ctx.open(s);
+  node.addEventListener("click", open);
+  node.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } });
+  return node;
+}
+
 function tile(s, ctx, meta, showInfo) {
   const t = el("div", "tile");
   t.setAttribute("role", "button");
@@ -64,12 +77,13 @@ function summaryBar(d) {
 }
 
 /** The teacher's three favourites. Closed: portraits and the total. Hover or focus: the name and what it means. */
-function favourites(d) {
+function favourites(d, ctx) {
   const row = el("div", "favs");
   d.analysis.top.forEach((c, i) => {
     const f = el("div", "fav");
     f.tabIndex = 0;
     f.append(el("span", "rank r" + (i + 1), String(i + 1)), outfitStack(c.outfits, "pt md"), el("b", "fav-score", num(c.total)));
+    clickable(f, c.outfits[0]?.name ?? c.base, ctx);
     const tip = el("div", "fav-tip");
     tip.append(el("b", "", c.base), el("small", "", c.outfits.map((o) => o.name).join(" · ")), el("span", "", "선생님이 가장 아끼는 학생"));
     f.append(tip);
@@ -82,7 +96,7 @@ function studentsView(d, ctx, meta) {
   const root = el("div", "main-view");
   const top = el("div", "main-top");
   top.append(summaryBar(d));
-  if (d.analysis.top.length) top.append(favourites(d));
+  if (d.analysis.top.length) top.append(favourites(d, ctx));
 
   const bar = el("div", "bar");
   const filter = el("input");
@@ -274,6 +288,7 @@ function momoView(d, ctx) {
     const text = el("div", "momo-text");
     text.append(el("b", "", u.name), el("span", "", "새 메시지가 도착했어요"));
     row.append(portrait(s?.student_id, "momo-img"), text, bondBadge(s?.bond ?? null, "bond"), el("span", "unread", String(u.count)));
+    clickable(row, u.name, ctx);
     list.append(row);
   }
   wrap.append(card("모모톡", head, (m.unread ?? []).length ? list : empty("읽지 않은 메시지가 있는 학생이 없습니다.")));
@@ -288,7 +303,7 @@ function dutyView(d, ctx) {
     const s = ctx.byName.get(n);
     const t = el("div", "face");
     t.append(portrait(s?.student_id, "face-img"), bondBadge(s?.bond ?? null, "bond sm face-bond"), el("span", "face-name", n));
-    return t;
+    return clickable(t, n, ctx);
   };
   const picked = du.students.filter((s) => s.selected === true);
   const memorial = du.students.filter((s) => s.memorial_lobby === true);
@@ -362,7 +377,7 @@ function teacherPanel(d, root) {
     panel.append(vis, rekey, out);
   } else {
     const back = el("a", "button wide", "리더보드로");
-    back.href = "#/board";
+    back.href = "#/";
     panel.append(back);
   }
   return panel;
@@ -371,6 +386,7 @@ function teacherPanel(d, root) {
 async function board(root, d) {
   const meta = await loadMeta();
   const ctx = context(d);
+  ctx.open = (s) => openDetail(s, meta, ctx);
   const side = el("nav", "side");
   side.setAttribute("aria-label", "정보 보기 탭");
   const body = el("div", "tabbody");

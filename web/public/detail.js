@@ -240,11 +240,11 @@ function buildCard(s, meta, ctx, rank, animate) {
   }
   const lv = el("div", "pc-lv");
   lv.append(el("small", "", "Lv."), el("b", "", s.level === null ? "-" : String(s.level)));
-  art.append(lv);
-  if (s.stars) {
-    const st = stars(s.stars, "student");
-    st.classList.add("pc-stars");
-    art.append(st);
+  const starRow = s.stars ? stars(s.stars, "student") : null;
+  starRow?.classList.add("pc-stars");
+  if (!tier.full) {
+    art.append(lv);
+    if (starRow) art.append(starRow);
   }
   band.append(art);
 
@@ -280,6 +280,13 @@ function buildCard(s, meta, ctx, rank, animate) {
   flip.type = "button";
   const body = el("div", "pc-body");
   body.append(types, moves, foot, marks, flip);
+  if (tier.full) {
+    // full art: level and stars float as the first line of the overlay, not as badges on the picture
+    const line = el("div", "pc-lvline");
+    line.append(lv);
+    if (starRow) line.append(starRow);
+    body.prepend(line);
+  }
   if (tier.label) {
     // the grade and the overall place, at the very bottom of the card
     const grade = el("div", "pc-grade");
@@ -380,10 +387,36 @@ function outfitPicker(list, current, onPick) {
 const INTRO_MS = 1100;
 
 /** The halo spins up over the dark scrim and throws sparkles, then shrinks away as the card turns into view. */
-function intro(s, meta, tier) {
+function genericHalo() {
+  // a plain halo drawn here for students whose own halo is not in the assets: broken rings, so the turn is visible
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", "0 0 200 200");
+  svg.setAttribute("class", "pi-halo pi-generic");
+  const add = (tag, attrs) => {
+    const n = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+    svg.append(n);
+  };
+  add("circle", { cx: 100, cy: 100, r: 74, fill: "none", stroke: "currentColor", "stroke-width": 6, "stroke-dasharray": "64 18 22 18", "stroke-linecap": "round" });
+  add("circle", { cx: 100, cy: 100, r: 48, fill: "none", stroke: "currentColor", "stroke-width": 4, "stroke-dasharray": "40 12" });
+  add("path", { d: "M100 14 L108 40 L92 40 Z M186 100 L160 108 L160 92 Z", fill: "currentColor" });
+  add("circle", { cx: 100, cy: 100, r: 9, fill: "currentColor" });
+  return svg;
+}
+
+/** The student's halo, else the halo of another outfit of the same character, else a plain one. */
+function introHalo(students, meta) {
+  for (const x of students) {
+    const h = halo(meta, x.student_id, "pi-halo");
+    if (h) return h;
+  }
+  return genericHalo();
+}
+
+function intro(s, meta, tier, students) {
   const box = el("div", "pc-intro pi-" + tier.key);
-  const ring = halo(meta, s.student_id, "pi-halo") ?? el("div", "pi-halo pi-ring");
-  box.append(ring);
+  box.append(introHalo(students, meta));
   for (let i = 0; i < 18; i++) {
     const p = el("i", "pi-spark");
     p.style.setProperty("--a", Math.round((360 / 18) * i + Math.random() * 14) + "deg");
@@ -420,7 +453,7 @@ export function openDetail(s, meta, ctx) {
   const picker = outfits.length > 1 ? outfitPicker(outfits, s, (o) => show(o, false)) : null;
 
   show(s, true);
-  scrim.append(intro(s, meta, tier), stage);
+  scrim.append(intro(s, meta, tier, [s, ...outfits.filter((o) => o !== s)]), stage);
   if (picker) scrim.append(picker);
   scrim.append(close);
   document.body.append(scrim);

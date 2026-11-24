@@ -309,3 +309,89 @@
 .pc-flip { padding: 3px 12px; }
 .pc-marks { min-height: 0; }
 .pc-marks:empty { display: none; }
+
+/* the face turned away must not take clicks: hit-testing sees stacked children of a hidden face otherwise */
+.pcard:not(.flipped) .pc-back { pointer-events: none; }
+.pcard.flipped .pc-front { pointer-events: none; }
+
+/* every student thumbnail opens the card */
+.clickable { cursor: pointer; }
+.face.clickable:hover .face-img, .face.clickable:focus-visible .face-img { box-shadow: 0 0 0 2px var(--cyan); }
+.momo.clickable:hover, .momo.clickable:focus-visible { border-color: var(--cyan); background: #f1f7fd; }
+.fav.clickable { cursor: pointer; }
+.pi-generic { color: rgba(255, 255, 255, .92); filter: drop-shadow(0 0 8px rgba(255, 255, 255, .35)); }
+
+
+/* ====================================================================================================
+   Full-art cards: the stats float over the picture. No panel, no border, no fill.
+   Legibility comes from the picture itself (a soft dark gradient built into the art layer) and from
+   layered text shadows. The elements are redrawn for that: icons as outlined rings, the skills as four
+   hairline columns with a large level and a thin tick meter, the bond as a glowing heart, the marks as
+   dotted words, the grade line between two fading rules.
+   ==================================================================================================== */
+.full .pc-art::after { background: linear-gradient(180deg, rgba(6, 10, 24, .62) 0, rgba(6, 10, 24, 0) 17%, rgba(6, 10, 24, 0) 40%, rgba(6, 10, 24, .38) 56%, rgba(6, 10, 24, .72) 76%, rgba(6, 10, 24, .86) 100%); }
+.tier-ur .pc-art::after { background: linear-gradient(180deg, rgba(40, 26, 4, .62) 0, rgba(40, 26, 4, 0) 17%, rgba(40, 26, 4, 0) 40%, rgba(30, 20, 4, .38) 56%, rgba(26, 18, 4, .72) 76%, rgba(20, 14, 2, .86) 100%); }
+
+.full .pc-body {
+  left: 18px; right: 18px; bottom: 14px; padding: 0; gap: 10px;
+  background: none; border: 0; border-radius: 0; backdrop-filter: none; -webkit-backdrop-filter: none;
+  color: #fff; text-shadow: 0 1px 2px rgba(0, 0, 0, .9), 0 0 10px rgba(0, 0, 0, .55);
+  transform: translate(calc(var(--nx) * 3px), calc(var(--ny) * 2px));
+}
+.tier-sar .pc-body::before, .tier-ur .pc-body { border: 0; }
+.tier-ur .pc-body { background: none; }
+.tier-sar .pc-body::before { display: none; }
+
+/* level and stars, the first line */
+.pc-lvline { display: flex; align-items: flex-end; justify-content: space-between; }
+.full .pc-lv { position: static; background: none; backdrop-filter: none; padding: 0; border-radius: 0; color: #fff; align-items: baseline; gap: 3px; }
+.full .pc-lv small { font-size: 12px; font-weight: 700; letter-spacing: 1px; opacity: .85; }
+.full .pc-lv b { font-size: 30px; font-weight: 800; line-height: 1; }
+.full .pc-stars { position: static; background: none; padding: 0; filter: drop-shadow(0 1px 3px rgba(0, 0, 0, .8)); }
+.full .pc-stars i { width: 14px; height: 14px; }
+
+/* type icons: outlined rings, nothing filled */
+.full .pc-chip { background: rgba(0, 0, 0, .12); border: 1px solid rgba(255, 255, 255, .6); color: #fff; box-shadow: 0 0 8px rgba(0, 0, 0, .35); text-shadow: none; }
+.full .pc-chip.role { background: rgba(0, 0, 0, .12); }
+.full .type-pill { border: 1px solid rgba(255, 255, 255, .6); box-shadow: 0 0 8px rgba(0, 0, 0, .35); background: none; }
+.full .type-pill .half.atk { background: hsl(var(--hue) 70% 45% / .42); }
+.full .type-pill .half.arm { background: hsl(var(--hue) 62% 38% / .42); border-left-color: rgba(255, 255, 255, .55); }
+.full .pc-weapon, .full .pc-weapon small { color: rgba(255, 255, 255, .85); }
+
+/* skills: four columns divided by hairlines */
+.full .pc-moves { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0 14px; background: none; border: 0; border-radius: 0; padding: 0; }
+.full .pc-moves .skill { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; grid-template-columns: none; padding-top: 6px; border-top: 1px solid rgba(255, 255, 255, .42); }
+.full .skill-name { order: 1; font-size: 10px; font-weight: 700; letter-spacing: .6px; color: rgba(255, 255, 255, .82); white-space: nowrap; }
+.full .skill b { order: 2; text-align: left; font-size: 19px; font-weight: 800; line-height: 1.05; color: #fff; }
+.full .skill .meter { order: 3; width: 100%; margin-top: 3px; gap: 2px; }
+.full .meter i { height: 3px; min-width: 0; border-radius: 2px; transform: none; background: rgba(255, 255, 255, .3); }
+.full .meter i.on, .full .pcard .meter i.on { background: #fff; box-shadow: 0 0 6px rgba(255, 255, 255, .75); }
+.tier-ur .meter i.on { background: #f6e3a8; box-shadow: 0 0 6px rgba(246, 227, 168, .8); }
+.full .skill.locked { opacity: .6; }
+
+/* bond and the three numbers */
+.full .pc-foot { align-items: flex-end; gap: 14px; }
+.full .pc-bond small { color: rgba(255, 255, 255, .8); }
+.full .pcard .bond, .full .bond { background: none; padding: 0; color: #fff; font-size: 28px; font-weight: 800; gap: 5px; text-shadow: 0 1px 2px rgba(0, 0, 0, .9), 0 0 12px rgba(255, 122, 168, .45); }
+.full .bond .heart { width: 20px; height: 18px; filter: drop-shadow(0 0 6px rgba(255, 122, 168, .8)); }
+.full .pc-stats { gap: 0; }
+.full .pc-stat { padding: 0 10px; border-left: 1px solid rgba(255, 255, 255, .35); }
+.full .pc-stat:first-child { border-left: 0; }
+.full .pc-stat span { color: rgba(255, 255, 255, .8); }
+.full .pc-stat b { font-size: 16px; color: #fff; }
+
+/* marks: dotted words */
+.full .pc-marks { display: flex; flex-wrap: wrap; align-items: center; gap: 0; min-height: 0; }
+.full .pc-marks .tag { background: none; filter: none; box-shadow: none; padding: 0; border-radius: 0; font-size: 11px; font-weight: 700; color: rgba(255, 255, 255, .92); border-bottom: 1px solid var(--tag); }
+.full .pc-marks .tag + .tag { margin-left: 14px; }
+
+/* the way to the back */
+.full .pc-flip { background: none; border: 0; padding: 0; margin: 0 auto; color: rgba(255, 255, 255, .85); font-size: 11px; letter-spacing: 1.2px; text-decoration: underline; text-underline-offset: 4px; text-decoration-color: rgba(255, 255, 255, .45); text-shadow: inherit; }
+.full .pc-flip:hover { color: #fff; text-decoration-color: #fff; background: none; }
+
+/* the grade line: two rules that fade out toward the edges */
+.full .pc-grade { border-top: 0; margin: 0; padding: 0; align-items: center; gap: 10px; }
+.full .pc-grade::before, .full .pc-grade::after { content: ""; flex: 1; height: 1px; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .6)); }
+.full .pc-grade::after { transform: scaleX(-1); }
+.tier-ur .pc-grade::before, .tier-ur .pc-grade::after { background: linear-gradient(90deg, transparent, #e6cf94); }
+.tier-sar .pc-grade::before, .tier-sar .pc-grade::after { background: linear-gradient(90deg, transparent, #ffb6df, #ffe6a0); }

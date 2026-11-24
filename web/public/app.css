@@ -354,3 +354,10 @@ a.nick:hover { background: var(--sky); }
 /* halos next to the portrait */
 .tile-halo { position: absolute; left: 50%; top: -4px; width: 46%; transform: translateX(-50%); pointer-events: none; filter: drop-shadow(0 0 4px rgba(255, 255, 255, .7)); z-index: 1; }
 .ico-halo { width: 30px; height: 30px; object-fit: contain; flex: none; filter: drop-shadow(0 0 2px rgba(30, 58, 110, .5)); }
+
+.lead-strip { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
+.lead-strip h1 { margin: 0 0 2px; }
+.lead-strip .hint { margin: 0; }
+.lead-actions { display: flex; gap: 8px; }
+a.button.ghost-link { background: var(--white); color: var(--navy); }
+a.button.ghost-link:hover { background: var(--sky); }
