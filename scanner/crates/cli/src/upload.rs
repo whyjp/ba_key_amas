@@ -8,6 +8,10 @@ use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+/// The upload contract this add-on speaks. The server accepts a range of contracts (see web/src/version.ts);
+/// raise this when the uploaded data changes shape and the server has learned the new one.
+pub const UPLOAD_PROTOCOL: u32 = 1;
+
 pub struct Request {
     pub server: String,
     pub nickname: Option<String>,
@@ -90,11 +94,20 @@ pub fn run(req: &Request) -> Result<String> {
     let mut store = KeyStore::load(&req.store);
     let body = build_body(&nickname, store.get(&req.server, &nickname), req.public, roster, progress);
     let url = format!("{}/api/upload", req.server.trim_end_matches('/'));
-    let res = match ureq::post(&url).set("content-type", "application/json").send_json(body) {
+    let res = match ureq::post(&url)
+        .set("content-type", "application/json")
+        .set("x-amas-protocol", &UPLOAD_PROTOCOL.to_string())
+        .set("x-amas-addon", env!("CARGO_PKG_VERSION"))
+        .send_json(body) {
         Ok(r) => r,
         Err(ureq::Error::Status(code, r)) => {
-            let msg = r.into_json::<Value>().ok().and_then(|v| v["error"].as_str().map(str::to_string)).unwrap_or_default();
-            bail!("server answered {code}: {msg}");
+            let v = r.into_json::<Value>().unwrap_or(Value::Null);
+            let msg = v["error"].as_str().unwrap_or_default();
+            match v["download"].as_str() {
+                Some(url) if code == 426 => bail!("server answered {code}: {msg}
+update the add-on: {url}"),
+                _ => bail!("server answered {code}: {msg}"),
+            }
         }
         Err(e) => return Err(e.into()),
     };
@@ -135,6 +148,11 @@ mod tests {
         assert_eq!(a["public"], json!(false));
         let b = build_body("a", Some("a#123456"), true, json!({}), Some(json!({"x": 1})));
         assert_eq!((b["key"].as_str(), b["public"].as_bool(), b["progress"]["x"].as_i64()), (Some("a#123456"), Some(true), Some(1)));
+    }
+
+    #[test]
+    fn the_protocol_is_a_positive_number() {
+        assert!(UPLOAD_PROTOCOL >= 1);
     }
 
     #[test]

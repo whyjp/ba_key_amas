@@ -4,6 +4,9 @@ Source: SchaleDB's Korean student table, restricted to students released on the 
 same rule as the scanner's wiki.db). Neither output is committed: this runs in the deploy build
 (`npm run assets`), so the repository holds no game images.
 
+It also writes public/meta.json (Korean names of schools, attack and armor types, and the Global story events in
+release order) and downloads the small student icons and the school logos.
+
 Run from web/:  python -I scripts/extract-assets.py
 """
 import json
@@ -39,15 +42,37 @@ def main() -> int:
     (ROOT / "src").mkdir(exist_ok=True)
     (ROOT / "src" / "catalog.json").write_text(json.dumps(catalog, ensure_ascii=False, sort_keys=True), encoding="utf-8")
 
-    out = ROOT / "public" / "portraits"
-    out.mkdir(parents=True, exist_ok=True)
+    pub = ROOT / "public"
     fetched = 0
-    for entry in catalog.values():
-        dest = out / f"{entry['id']}.webp"
-        if dest.exists():
-            continue
-        dest.write_bytes(get(f"{BASE}/images/student/collection/{entry['id']}.webp"))
-        fetched += 1
+    for folder, url, suffix in (("portraits", "images/student/collection/{id}", "webp"), ("icons", "images/student/icon/{id}", "webp")):
+        out = pub / folder
+        out.mkdir(parents=True, exist_ok=True)
+        for entry in catalog.values():
+            dest = out / f"{entry['id']}.{suffix}"
+            if dest.exists():
+                continue
+            dest.write_bytes(get(f"{BASE}/{url.format(id=entry['id'])}.{suffix}"))
+            fetched += 1
+    schools = sorted({e["school"] for e in catalog.values() if e["school"]})
+    (pub / "schools").mkdir(parents=True, exist_ok=True)
+    for school in schools:
+        dest = pub / "schools" / f"{school}.png"
+        if not dest.exists():
+            dest.write_bytes(get(f"{BASE}/images/schoolicon/{school}.png"))
+            fetched += 1
+
+    loc = json.loads(get(f"{BASE}/data/kr/localization.min.json"))
+    config = json.loads(get(f"{BASE}/data/config.min.json"))
+    event_ids = [e for e in config["Regions"][GLOBAL_FLAG]["Events"] if e < 10000]  # 10000+ are reruns
+    meta = {
+        "schools": loc["School"],
+        "attack": loc["BulletType"],
+        "armor": loc["ArmorType"],
+        "events": [{"id": e, "name": loc["EventName"].get(str(e), str(e))} for e in event_ids],
+        "bond_max": config["Regions"][GLOBAL_FLAG]["BondMaxLevel"],
+        "level_max": config["Regions"][GLOBAL_FLAG]["StudentMaxLevel"],
+    }
+    (pub / "meta.json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
     print(f"{len(catalog)} students, {fetched} portraits downloaded")
     return 0
 

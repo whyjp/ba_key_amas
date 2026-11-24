@@ -2,6 +2,7 @@ import catalog from "./catalog.json";
 import { formatKey, foldNickname, hashKey, keyMatches, newTag, normalizeNickname, parseKey, type ParsedKey } from "./keys.ts";
 import { BadJson, json, readJson, sameOriginJson, TooLarge } from "./security.ts";
 import { analyze, SCORE_VERSION, type Analysis, type OwnedStudent } from "./score.ts";
+import { checkClient, checkSchemas, MIN_PROTOCOL, PROTOCOL, SERVER_VERSION, type Client } from "./version.ts";
 import { Invalid, MAX_BODY_BYTES, parseUpload, type StudentRow, type Upload } from "./validate.ts";
 
 interface Env {
@@ -10,6 +11,8 @@ interface Env {
   /** `wrangler secret put KEY_PEPPER`: keys are stored only as HMACs under this secret. */
   KEY_PEPPER: string;
   LIMITER?: RateLimit;
+  /** Where the add-on is installed from (a GitHub release page). Not decided yet, so it is a variable. */
+  ADDON_URL?: string;
 }
 
 interface UserRow {
@@ -24,6 +27,7 @@ interface UserRow {
   public: number;
 }
 
+const DEFAULT_ADDON_URL = "https://github.com/whyjp/ba_key_amas/releases/latest";
 const MAX_FAILS = 5;
 const LOCK_SECONDS = 15 * 60;
 const CATALOG = catalog as Record<string, { id: number; school: string | null; attack: string | null; armor: string | null; squad: string | null }>;
@@ -69,7 +73,7 @@ function studentStatements(env: Env, userId: number, students: StudentRow[]): D1
   );
 }
 
-async function upload(env: Env, up: Upload): Promise<Response> {
+async function upload(env: Env, up: Upload, client: Client): Promise<Response> {
   const nickname = normalizeNickname(up.nickname);
   if (!nickname) return json(400, { error: "닉네임은 1~16자이며 # 과 제어 문자를 쓸 수 없습니다" });
   const nick = foldNickname(nickname);
@@ -81,7 +85,7 @@ async function upload(env: Env, up: Upload): Promise<Response> {
     const auth = await authenticate(env, up.key);
     if (!auth.ok) return json(409, { error: "이미 쓰이는 닉네임입니다. 올린 적이 있다면 key 를 함께 보내세요" });
     await env.DB.batch([
-      env.DB.prepare("UPDATE users SET account_json = ?1, progress_json = ?2, updated_at = ?3, public = ?4, score = ?5, stats_json = ?6, top_json = ?7, score_version = ?8 WHERE id = ?9").bind(accountJson, progressJson, now(), Number(up.public), board.score, board.stats, board.top, SCORE_VERSION, auth.user.id),
+      env.DB.prepare("UPDATE users SET account_json = ?1, progress_json = ?2, updated_at = ?3, public = ?4, score = ?5, stats_json = ?6, top_json = ?7, score_version = ?8, addon_version = ?9, protocol = ?10 WHERE id = ?11").bind(accountJson, progressJson, now(), Number(up.public), board.score, board.stats, board.top, SCORE_VERSION, client.addon, client.protocol, auth.user.id),
       env.DB.prepare("DELETE FROM students WHERE user_id = ?1").bind(auth.user.id),
       ...studentStatements(env, auth.user.id, up.students),
     ]);
@@ -91,7 +95,7 @@ async function upload(env: Env, up: Upload): Promise<Response> {
   const hash = await hashKey(env.KEY_PEPPER, key);
   const t = now();
   try {
-    const res = await env.DB.prepare("INSERT INTO users (nick_norm, nickname, key_hash, account_json, progress_json, created_at, updated_at, public, score, stats_json, top_json, score_version) VALUES (?1,?2,?3,?4,?5,?6,?6,?7,?8,?9,?10,?11)").bind(nick, nickname, hash, accountJson, progressJson, t, Number(up.public), board.score, board.stats, board.top, SCORE_VERSION).run();
+    const res = await env.DB.prepare("INSERT INTO users (nick_norm, nickname, key_hash, account_json, progress_json, created_at, updated_at, public, score, stats_json, top_json, score_version, addon_version, protocol) VALUES (?1,?2,?3,?4,?5,?6,?6,?7,?8,?9,?10,?11,?12,?13)").bind(nick, nickname, hash, accountJson, progressJson, t, Number(up.public), board.score, board.stats, board.top, SCORE_VERSION, client.addon, client.protocol).run();
     const id = res.meta.last_row_id;
     await env.DB.batch(studentStatements(env, id, up.students));
   } catch {
@@ -100,7 +104,7 @@ async function upload(env: Env, up: Upload): Promise<Response> {
   return json(201, { key: formatKey(key), created: true, students: up.students.length, public: up.public, score: board.score });
 }
 
-async function profile(env: Env, user: UserRow): Promise<Response> {
+async function profile(env: Env, user: UserRow, view: "owner" | "public"): Promise<Response> {
   const rows = await env.DB.prepare("SELECT * FROM students WHERE user_id = ?1").bind(user.id).all();
   const students = rows.results.map((r) => {
     const c = CATALOG[String(r.name)];
@@ -118,11 +122,19 @@ async function profile(env: Env, user: UserRow): Promise<Response> {
     nickname: user.nickname,
     updated_at: user.updated_at,
     public: Boolean(user.public),
-    account: user.account_json ? JSON.parse(user.account_json) : null,
+    view,
+    account: view === "owner" && user.account_json ? JSON.parse(user.account_json) : null,
     progress: user.progress_json ? JSON.parse(user.progress_json) : null,
     students,
-    analysis: { score: analysis.score, stats: analysis.stats, top: analysis.top, characters: analysis.characters },
+    analysis: { score: analysis.score, stats: analysis.stats, top: analysis.top.map((c) => ({ base: c.base, total: c.total, outfits: c.outfits })) },
   });
+}
+
+/** The view a leaderboard row links to: only users who chose to be public, and without the money counters. */
+async function publicProfile(env: Env, nickname: string): Promise<Response> {
+  const nick = normalizeNickname(nickname);
+  const user = nick ? await env.DB.prepare("SELECT * FROM users WHERE nick_norm = ?1 AND public = 1").bind(foldNickname(nick)).first<UserRow>() : null;
+  return user ? profile(env, user, "public") : json(404, { error: "공개된 유저가 아닙니다" });
 }
 
 /** Public users only, best first. Reads columns stored at upload, so it never touches the students table. */
@@ -145,9 +157,19 @@ async function limited(req: Request, env: Env): Promise<Response | null> {
 
 async function handleApi(req: Request, env: Env, path: string): Promise<Response> {
   if (req.method === "GET" && path === "/api/leaderboard") return (await limited(req, env)) ?? leaderboard(env);
+  if (req.method === "GET" && path === "/api/version") return json(200, { server: SERVER_VERSION, protocol: PROTOCOL, min_protocol: MIN_PROTOCOL, download: env.ADDON_URL ?? DEFAULT_ADDON_URL });
+  if (req.method === "GET" && path === "/api/public") return (await limited(req, env)) ?? publicProfile(env, new URL(req.url).searchParams.get("nickname") ?? "");
   if (req.method !== "POST") return json(405, { error: "POST 만 받습니다" }, { allow: "POST, GET" });
-  const refused = sameOriginJson(req);
-  if (refused) return json(400, { error: refused });
+  let client: Client | null = null;
+  if (path === "/api/upload") {
+    const c = checkClient(req.headers);
+    if ("status" in c) return json(c.status, { error: c.error, server: SERVER_VERSION, protocol: PROTOCOL, min_protocol: MIN_PROTOCOL, download: env.ADDON_URL ?? DEFAULT_ADDON_URL });
+    client = c;
+    if (!(req.headers.get("content-type") ?? "").toLowerCase().startsWith("application/json")) return json(400, { error: "Content-Type 은 application/json 이어야 합니다" });
+  } else {
+    const refused = sameOriginJson(req);
+    if (refused) return json(400, { error: refused });
+  }
   const tooMany = await limited(req, env);
   if (tooMany) return tooMany;
   let body: unknown;
@@ -160,14 +182,17 @@ async function handleApi(req: Request, env: Env, path: string): Promise<Response
   switch (path) {
     case "/api/upload":
       try {
-        return await upload(env, parseUpload(body));
+        const up = parseUpload(body);
+        const old = checkSchemas((body as { roster?: unknown }).roster, up.progress);
+        if (old) return json(old.status, { error: old.error, server: SERVER_VERSION, download: env.ADDON_URL ?? DEFAULT_ADDON_URL });
+        return await upload(env, up, client as Client);
       } catch (e) {
         if (e instanceof Invalid) return json(400, { error: e.message });
         throw e;
       }
     case "/api/profile": {
       const a = await authenticate(env, key);
-      return a.ok ? profile(env, a.user) : a.res;
+      return a.ok ? profile(env, a.user, "owner") : a.res;
     }
     case "/api/visibility": {
       const a = await authenticate(env, key);

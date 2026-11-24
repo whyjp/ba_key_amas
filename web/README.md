@@ -22,14 +22,14 @@
 
 | 경로 | 내용 |
 |---|---|
-| `#/` | 랜딩. 업로드, 내 정보, 리더보드 세 입구 |
-| `#/upload` | 파일을 골라 올린다. 닉네임과 리더보드 공개 여부를 정한다. 새 키는 한 번만 보여 준다 |
-| `#/me` | 키를 넣으면 들어간다. 탭은 요약, 대표 3인, 학생 타일, 학생 리스트, 스토리, 이벤트, 임무, 모모톡, 당번 · 메모리얼, 스케줄 |
-| `#/board` | 공개를 고른 유저의 순위. 열 머리글을 눌러 정렬한다 |
+| `#/` | 랜딩. 내 정보, 리더보드, 애드온 받기 |
+| `#/me` | 키를 넣으면 들어간다. 학생(요약, 대표 3인, 타일), 학생 리스트, 스토리, 이벤트 스토리, 임무, 모모톡, 당번 · 메모리얼, 스케줄 탭 |
+| `#/board` | 공개를 고른 선생님의 순위. 이름을 누르면 공개 조회로 간다 |
+| `#/u/<닉네임>` | 공개한 선생님의 정보 보기. 키는 필요 없고, 크레딧, 청휘석, AP와 키 관련 버튼은 가린다 |
 
-스캔하지 않은 데이터(스토리, 임무)는 탭에 "아직 스캔한 기록이 없습니다"로 나온다.
+업로드 화면은 없다. 데이터는 애드온에서만 올린다.
 
-## 애드온에서 올리기
+## 업로드와 버전
 
 ```
 ba-key-AMAS --upload https://<서버> [--public] [--nickname 이름]
@@ -37,31 +37,34 @@ ba-key-AMAS --upload https://<서버> [--public] [--nickname 이름]
 
 마지막 학생 스캔(`students.json`)과 진행 스캔(`latest.json`)을 보낸다. 닉네임은 진행 스캔이 읽은 계정 이름이다. 서버가 준 키는 `%APPDATA%/baocr/upload.json`에 서버와 닉네임별로 저장해, 다음 업로드가 같은 항목을 갱신한다. 키가 새어 나가지 않도록 https와 loopback 주소만 받는다.
 
+버전은 `src/version.ts`가 관리한다. 서버가 받아들이는 범위를 정한다.
+
+- 애드온은 `x-amas-protocol`(업로드 규약 번호)과 `x-amas-addon`(애드온 버전) 헤더를 보낸다. 서버는 `MIN_PROTOCOL`부터 `PROTOCOL`까지를 받는다. 범위 밖이면 426이고, 응답에 설치 안내 링크(`download`)가 들어 있다.
+- 스캔 파일의 `schema_version`도 본다. 학생 명단이 `MIN_ROSTER_SCHEMA`, 진행 상태가 `MIN_PROGRESS_SCHEMA`보다 낮으면 426이다.
+- 서버를 고쳐 스키마가 바뀌거나, 새 애드온의 데이터를 받아야 할 때 `MIN_PROTOCOL`을 올려 구버전을 거부한다. 하위 호환이 되는 변경이면 범위를 그대로 둔다.
+- 브라우저의 요청(`Origin`, `Sec-Fetch-*` 헤더)은 403이다. 이 검사는 애드온을 식별할 뿐 인증하지는 않는다. 헤더는 누구나 보낼 수 있다.
+- 설치 링크는 `wrangler.jsonc`의 `ADDON_URL`이다. 지금은 GitHub 릴리즈 페이지를 가리키며, 주소가 정해지면 그 값만 바꾼다. `GET /api/version`이 서버 버전과 범위, 링크를 돌려준다.
+
 ## API
 
-`GET /api/leaderboard`를 빼고는 모두 `POST`, `Content-Type: application/json`, 본문 3 MB 이하다.
+`GET`을 빼고는 모두 `POST`, `Content-Type: application/json`, 본문 3 MB 이하다.
 
 | 경로 | 본문 | 응답 |
 |---|---|---|
-| `/api/upload` | `{nickname, key?, public?, roster, progress?}` | 새 닉네임이면 201과 새 키. 있는 닉네임은 맞는 `key`가 있어야 갱신하고, 없으면 409. `public`은 기본이 꺼짐 |
-| `/api/profile` | `{key}` | 닉네임, 계정, 학생 목록, 진행 상태, 점수 분석(캐릭터별 합산과 대표 3인) |
+| `/api/upload` | `{nickname, key?, public?, roster, progress?}` (애드온 헤더 필요) | 새 닉네임이면 201과 새 키. 있는 닉네임은 맞는 `key`가 있어야 갱신하고, 없으면 409. `public`은 기본이 꺼짐 |
+| `/api/profile` | `{key}` | 닉네임, 계정, 학생 목록, 진행 상태, 분석(대표 3인과 합계) |
 | `/api/visibility` | `{key, public}` | 리더보드 공개 여부 변경 |
 | `/api/rekey` | `{key}` | 새 키 |
 | `/api/delete` | `{key}` | 삭제 |
 | `GET /api/leaderboard` | 없음 | 공개 유저 100명까지, 점수 순. 60초 캐시 |
+| `GET /api/public?nickname=` | 없음 | 공개한 유저의 정보(크레딧과 AP 제외). 비공개면 404 |
+| `GET /api/version` | 없음 | 서버 버전, 받는 업로드 규약 범위, 설치 링크 |
 
 `roster`는 스캐너의 `students.json` 그대로다. 서버가 알려진 필드만 범위를 검사해서 남기고 나머지는 버린다. 메모리얼 로비 해금은 `progress.duty.students`의 이름과 학생 이름을 맞춰 가져온다.
 
 ## 점수
 
-`src/score.ts`가 계산하고 `test/score.test.ts`가 고정한다. 기준은 게임 공식이 아니라 노력의 양을 가늠한 값이다.
-
-- 캐릭터는 이름에서 `(의상)`을 뺀 이름이다. 의상이 다른 학생의 점수는 더하고, 화면에는 의상을 모두 나란히 보인다.
-- 인연은 30까지 한 랭크 2점, 31에서 59까지 3점, 60에 닿으면 100점을 더하고 그 위는 6점이다.
-- 고정 40점, 메모리얼 로비 50점이다.
-- 육성(레벨, 성급, 스킬, 고유무기)은 0.6배다. 고유무기는 가진 것만으로 30점에 성급당 15점, 레벨당 0.6점이라 육성에서 가장 크다.
-- 리더보드 열은 인연 60+, 인연 30+, Lv 80+, 고정, 메모리얼 캐릭터 수와 보유 캐릭터 수다. 던전, 전투, 레이드는 넣지 않았다.
-- 점수는 업로드할 때 계산해 저장한다. 기준을 바꾸면 `SCORE_VERSION`을 올리고 유저가 다시 올려야 새 기준이 적용된다.
+리더보드 점수는 업로드할 때 `src/score.ts`가 계산해 저장한다. 산정 기준은 화면과 API 응답에 싣지 않는다. 응답에는 합계만 있고 항목별 점수는 없다. 기준을 바꾸면 `SCORE_VERSION`을 올리고 유저가 다시 올려야 새 기준이 적용된다.
 
 ## 보안 설정
 
@@ -77,7 +80,7 @@ npm run assets          # 학생 카탈로그와 초상화를 SchaleDB에서 받
 echo KEY_PEPPER=dev-only > .dev.vars
 npm run db:local
 npm run dev
-node scripts/upload-local.mjs http://127.0.0.1:8787 소다팝
+ba-key-AMAS --upload http://127.0.0.1:8787 --public
 npm test ; npm run typecheck
 ```
 

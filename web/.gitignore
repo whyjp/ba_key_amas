@@ -3,3 +3,6 @@ node_modules/
 .dev.vars
 src/catalog.json
 public/portraits/
+public/icons/
+public/schools/
+public/meta.json

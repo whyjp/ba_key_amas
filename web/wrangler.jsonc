@@ -10,5 +10,6 @@
   "ratelimits": [
     { "name": "LIMITER", "namespace_id": "1001", "simple": { "limit": 30, "period": 60 } }
   ],
+  "vars": { "ADDON_URL": "https://github.com/whyjp/ba_key_amas/releases/latest" },
   "observability": { "enabled": true }
 }

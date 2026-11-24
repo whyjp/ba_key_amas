@@ -14,7 +14,7 @@ function value(e, col) {
 
 export async function renderBoard(root) {
   const holder = el("div");
-  mount(root, card("리더보드", el("p", "hint", "공개를 선택한 유저만 보입니다. 점수는 의상을 이름 하나로 합쳐 계산합니다."), holder, explain()));
+  mount(root, card("리더보드", el("p", "hint", "공개를 선택한 선생님만 보입니다. 이름을 누르면 그 선생님의 정보를 볼 수 있습니다."), holder));
   let rows;
   try {
     rows = (await get("/api/leaderboard")).entries;
@@ -51,7 +51,12 @@ export async function renderBoard(root) {
     const body = el("tbody");
     for (const e of sorted) {
       const tr = el("tr");
-      tr.append(el("td", "", "#" + e.rank), el("td", "l strong", e.nickname));
+      const link = el("a", "nick", e.nickname);
+      link.href = "#/u/" + encodeURIComponent(e.nickname);
+      link.title = "이 선생님의 정보 보기";
+      const who = el("td", "l strong");
+      who.append(link);
+      tr.append(el("td", "", "#" + e.rank), who);
       const top = el("td", "l");
       const tops = el("div", "tops");
       for (const c of e.top) {
@@ -70,20 +75,4 @@ export async function renderBoard(root) {
     holder.replaceChildren(wrap);
   };
   draw();
-}
-
-function explain() {
-  const d = el("details", "how");
-  d.append(el("summary", "", "점수는 이렇게 계산합니다"));
-  const ul = el("ul");
-  for (const t of [
-    "캐릭터 하나는 이름에서 (의상)을 뺀 이름입니다. 리오와 리오(무장)은 한 캐릭터로 점수를 더합니다.",
-    "인연 랭크는 30까지 한 랭크에 2점, 31부터 59까지 3점입니다. 60에 닿으면 100점을 더 받고 그 위는 한 랭크에 6점입니다.",
-    "고정 40점, 메모리얼 로비 해금 50점입니다.",
-    "육성은 레벨, 성급, 스킬, 고유무기를 합산하고 0.6배로 칩니다. 고유무기는 가진 것만으로 30점에 성급과 레벨 점수가 붙어 가장 큽니다.",
-    "인연, 고정, 메모리얼이 육성보다 크게 반영됩니다. 던전, 전투, 레이드는 아직 점수에 넣지 않습니다.",
-    "점수 기준은 노력의 양을 가늠한 값이며 게임이 정한 공식이 아닙니다.",
-  ]) ul.append(el("li", "", t));
-  d.append(ul);
-  return d;
 }
