@@ -402,10 +402,6 @@ a.button.ghost-link:hover { background: var(--sky); }
   .layout.fit .tabs { min-width: 0; overflow-x: auto; flex-wrap: nowrap; }
 }
 
-/* the tile picture: a card background with the face side of the standing portrait on it */
-.tiles .tile .tile-bg { position: absolute; left: 0; top: 0; width: 100%; height: calc(100% - 24px); background: linear-gradient(160deg, #2c3d63, #1a2440) center / cover no-repeat; filter: saturate(.85) brightness(.85); }
-.tiles .tile .tile-img.standing { object-fit: cover; object-position: center top; }
-
 /* the pin icon for a pinned student */
 .pin-badge { position: relative; display: inline-grid; place-items: center; color: var(--navy); outline-offset: 2px; vertical-align: middle; }
 .pin-badge.dark { color: var(--navy); }

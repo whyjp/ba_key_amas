@@ -1,4 +1,4 @@
-import { cardBackground, openDetail, paintBackground } from "./detail.js";
+import { openDetail } from "./detail.js";
 import { heatmapView } from "./heatmap.js";
 import { armorColor, attackColor, bondBadge, halo, icon, loadMeta, name, pinBadge, pinHeader, ROLE, schoolLogo, stars } from "./domain.js";
 import { card, el, empty, mount, num, outfitStack, portrait, post, session } from "./ui.js";
@@ -37,15 +37,7 @@ function tile(s, ctx, meta, showInfo) {
   t.setAttribute("role", "button");
   t.tabIndex = 0;
   t.title = s.name;
-  // a background picked for the student, the face side of the standing portrait on it; the same back as the card
-  const back = el("div", "tile-bg");
-  paintBackground(back, cardBackground(s, meta));
-  const face = el("img", "tile-img standing");
-  face.src = `/tile/${encodeURIComponent(s.student_id)}.webp`;
-  face.alt = "";
-  face.loading = "lazy";
-  face.addEventListener("error", () => { face.src = `/portraits/${encodeURIComponent(s.student_id)}.webp`; face.classList.remove("standing"); }, { once: true });
-  t.append(back, face);
+  t.append(portrait(s.student_id, "tile-img"));
   if (showInfo) {
     if (s.stars) t.append(Object.assign(stars(s.stars, "student"), { className: "stars student tile-stars" }));
     if (s.level !== null) t.append(el("span", "lv", "Lv." + s.level));
@@ -366,7 +358,7 @@ function scheduleView(d) {
 }
 
 const TABS = [
-  ["heatmap", "히트맵", (d, c, m) => heatmapView(d, c, m, profileTop(d, c))],
+  ["heatmap", "오버뷰", (d, c, m) => heatmapView(d, c, m, profileTop(d, c))],
   ["students", "학생", (d, c, m) => studentsView(d, c, m)],
   ["list", "학생 리스트", (d, c, m) => listView(d, c, m)],
   ["story", "스토리", (d) => storyView(d)],

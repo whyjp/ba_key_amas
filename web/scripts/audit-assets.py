@@ -45,7 +45,6 @@ def main() -> int:
         "icon": lambda s: decodes(PUB / "icons" / f"{s['id']}.webp"),
         "standing": lambda s: decodes(PUB / "standing" / f"{s['id']}.webp"),
         "card crop": lambda s: decodes(PUB / "card" / f"{s['id']}.webp"),
-        "tile crop": lambda s: decodes(PUB / "tile" / f"{s['id']}.webp"),
         "lobby crop": lambda s: decodes(PUB / "card-lobby" / f"{s['id']}.webp"),
         "face position": lambda s: str(s["id"]) in faces,
         "halo": lambda s: str(s["id"]) in halos or s["id"] in halos,

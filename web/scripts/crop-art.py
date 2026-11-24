@@ -3,7 +3,6 @@
 The card shows its artwork in a 6:5 window. Standing art (tall) and memorial lobby art (mostly wide) are cut to
 that shape here, so the page never crops at runtime and a face is never cut in half.
   public/standing/<id>.webp -> public/card/<id>.webp         (720x600, the face side of the figure)
-  public/standing/<id>.webp -> public/tile/<id>.webp         (540x600, the face side for the student tile)
   public/lobby/<id>.webp    -> public/card-lobby/<id>.webp   (480x400, upscaled and lightly sharpened)
 
 Faces are found with OpenCV's YuNet detector (the model is downloaded once to scripts/.cache). It finds about
@@ -26,8 +25,6 @@ MODEL = CACHE / "yunet.onnx"
 MODEL_URL = "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx"
 RATIO = 6 / 5
 FACE_AT = 0.36  # where the face centre sits inside a standing crop, from the top
-TILE_RATIO = 0.9
-TILE_W, TILE_H = 540, 600
 CARD_W, CARD_H = 720, 600  # size of every standing crop: the card shows the same picture size for every student
 
 
@@ -35,17 +32,21 @@ def detector():
     CACHE.mkdir(exist_ok=True)
     if not MODEL.exists():
         MODEL.write_bytes(urllib.request.urlopen(urllib.request.Request(MODEL_URL, headers={"User-Agent": "ba-key-amas-assets"}), timeout=60).read())
-    return cv2.FaceDetectorYN.create(str(MODEL), "", (320, 320), 0.5, 0.3, 5000)
+    # A low score threshold: anime faces in a wide scene (a beach picture with the figure sitting under an umbrella)
+    # score 0.3 to 0.5. The best of the candidates is taken, not just any, see largest_face.
+    return cv2.FaceDetectorYN.create(str(MODEL), "", (320, 320), 0.3, 0.3, 5000)
 
 
 def largest_face(det, bgr):
+    """The most likely face: the candidate with the best score times area, so a faint false hit does not beat a clear
+    face. Returns (centre x, centre y, size) in pixels, or None."""
     h, w = bgr.shape[:2]
     det.setInputSize((w, h))
     _, faces = det.detect(bgr)
     if faces is None or len(faces) == 0:
         return None
-    x, y, fw, fh = max(faces, key=lambda f: f[2] * f[3])[:4]
-    return x + fw / 2, y + fh / 2, max(fw, fh)
+    x, y, fw, fh = max(faces, key=lambda f: float(f[14]) * f[2] * f[3])[:4]
+    return float(x + fw / 2), float(y + fh / 2), float(max(fw, fh))
 
 
 def clamp(v, lo, hi):
@@ -67,8 +68,14 @@ def standing_window(img, face, ratio, height_share, face_at, size):
     fig_h = max(y1 - y0, 1)
     head = alpha[y0:y0 + max(int(fig_h * 0.22), 1)]
     cols = np.where(head.any(axis=0))[0]
-    cx = face[0] if face else (float(cols.mean()) if cols.size else w / 2)
-    cy = face[1] if face else y0 + 0.14 * fig_h
+    if face:
+        cx, cy = face[0], face[1]
+    elif h >= 1.3 * w:
+        # a tall figure: the head is at the top
+        cx, cy = (float(cols.mean()) if cols.size else w / 2), y0 + 0.14 * fig_h
+    else:
+        # a scene (the figure sits among props): the top of the picture is not the head, so aim at the middle
+        cx, cy = w / 2, y0 + 0.38 * fig_h
     wh = fig_h * height_share
     if face:
         wh = max(wh, face[2] * 2.8)
@@ -80,13 +87,8 @@ def standing_window(img, face, ratio, height_share, face_at, size):
 
 
 def crop_standing(img, face):
-    """The card's 6:5 picture window."""
+    """The card's 6:5 picture window. The student tiles keep the game's own portrait, which is not cut here."""
     return standing_window(img, face, RATIO, 0.34, FACE_AT, (CARD_W, CARD_H))
-
-
-def crop_tile(img, face):
-    """The student tile: taller than wide, so more of the shoulders and less of the sides."""
-    return standing_window(img, face, TILE_RATIO, 0.25, 0.34, (TILE_W, TILE_H))
 
 
 def crop_lobby(img, face):
@@ -151,7 +153,7 @@ def write_faces(det) -> int:
 
 def main() -> int:
     det = detector()
-    jobs = (("standing", "card", crop_standing, 88), ("standing", "tile", crop_tile, 88), ("lobby", "card-lobby", crop_lobby, 90))
+    jobs = (("standing", "card", crop_standing, 88), ("lobby", "card-lobby", crop_lobby, 90))
     done = found = 0
     for src, dst, fn, quality in jobs:
         out = ROOT / "public" / dst
