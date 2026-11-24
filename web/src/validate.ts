@@ -29,9 +29,8 @@ export type Detail = Record<string, unknown>;
 
 export interface Upload {
   nickname: string;
-  key: string | null;
-  /** Show this user on the leaderboard. Off unless the uploader asks. */
-  public: boolean;
+  /** Show this user on the leaderboard: true or false when the uploader says, null to leave a stored choice alone (a new account starts private). */
+  public: boolean | null;
   students: StudentRow[];
   account: Record<string, unknown> | null;
   progress: unknown | null;
@@ -229,11 +228,10 @@ function memorialByName(progress: unknown): Map<string, boolean> {
   return out;
 }
 
-/** `body` is `{nickname, key?, public?, roster: {entries: [{student}], account?}, progress?}`. */
+/** `body` is `{nickname, public?, roster: {entries: [{student}], account?}, progress?}`. */
 export function parseUpload(body: unknown): Upload {
   if (!isObj(body)) throw new Invalid("본문이 JSON 객체가 아닙니다");
   const nickname = typeof body.nickname === "string" ? body.nickname : "";
-  const key = typeof body.key === "string" && body.key.length <= 64 ? body.key : null;
   const roster = isObj(body.roster) ? body.roster : null;
   if (!roster || !Array.isArray(roster.entries)) throw new Invalid("roster.entries 가 없습니다");
   if (roster.entries.length > MAX_STUDENTS) throw new Invalid("학생 수가 너무 많습니다");
@@ -256,5 +254,5 @@ export function parseUpload(body: unknown): Upload {
   reconcileNames(progress, students.map((s) => s.name));
   const memorial = memorialByName(progress);
   for (const s of students) s.memorial = memorial.get(s.name) ?? null;
-  return { nickname, key, public: body.public === true, students, account: parseAccount(roster.account), progress };
+  return { nickname, public: typeof body.public === "boolean" ? body.public : null, students, account: parseAccount(roster.account), progress };
 }

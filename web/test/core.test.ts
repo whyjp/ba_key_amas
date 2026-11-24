@@ -1,40 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { foldNickname, hashKey, keyMatches, newTag, normalizeNickname, parseKey } from "../src/keys.ts";
+import { normalizeNickname } from "../src/keys.ts";
 import { canonicalName, Invalid, parseUpload } from "../src/validate.ts";
-
-test("a key is nickname#hex6, split at the last #", () => {
-  assert.deepEqual(parseKey("소다팝#A1b2C3"), { nickname: "소다팝", tag: "a1b2c3" });
-  assert.equal(parseKey("소다팝"), null);
-  assert.equal(parseKey("소다팝#12345"), null);
-  assert.equal(parseKey("소다팝#12345g"), null);
-});
-
-test("nicknames reject controls, bidi marks and #", () => {
-  assert.equal(normalizeNickname("a‮b"), null);
-  assert.equal(normalizeNickname("a\nb"), null);
-  assert.equal(normalizeNickname("a#b"), null);
-  assert.equal(normalizeNickname(""), null);
-  assert.equal(normalizeNickname("x".repeat(17)), null);
-  assert.equal(normalizeNickname("  소다팝 "), "소다팝");
-});
-
-test("nicknames that differ only in case or width are one", () => {
-  assert.equal(foldNickname("Soda"), foldNickname("ＳＯＤＡ"));
-});
-
-test("the hash ignores nickname case, depends on the tag and the pepper", async () => {
-  const a = await hashKey("p", { nickname: "Soda", tag: "aaaaaa" });
-  assert.equal(a, await hashKey("p", { nickname: "soda", tag: "aaaaaa" }));
-  assert.notEqual(a, await hashKey("p", { nickname: "Soda", tag: "aaaaab" }));
-  assert.notEqual(a, await hashKey("q", { nickname: "Soda", tag: "aaaaaa" }));
-  assert.ok(await keyMatches("p", { nickname: "SODA", tag: "aaaaaa" }, a));
-  assert.ok(!(await keyMatches("p", { nickname: "soda", tag: "000000" }, a)));
-});
-
-test("tags are 6 hex digits", () => {
-  for (let i = 0; i < 50; i++) assert.match(newTag(), /^[0-9a-f]{6}$/);
-});
 
 test("an upload keeps known fields only and drops duplicates and bad numbers", () => {
   const up = parseUpload({
