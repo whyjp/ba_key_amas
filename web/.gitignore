@@ -13,3 +13,6 @@ public/halos.json
 public/card/
 public/card-lobby/
 scripts/.cache/
+public/backgrounds/
+src/backgrounds.json
+public/card-lobby.json

@@ -1,3 +1,4 @@
+import backgrounds from "./backgrounds.json";
 import catalog from "./catalog.json";
 import { formatKey, foldNickname, hashKey, keyMatches, newTag, normalizeNickname, parseKey, type ParsedKey } from "./keys.ts";
 import { BadJson, json, readJson, sameOriginJson, TooLarge } from "./security.ts";
@@ -64,13 +65,30 @@ function boardColumns(a: Analysis) {
   return { score: a.score, stats: JSON.stringify(a.stats), top: JSON.stringify(top) };
 }
 
-function studentStatements(env: Env, userId: number, students: StudentRow[]): D1PreparedStatement[] {
+const BACKGROUNDS = backgrounds as string[];
+
+interface CardBackground {
+  bg: string;
+  third: number;
+}
+
+/** A random background and a random third of it (left, centre, right), so cards of one teacher do not all look alike.
+ *  The server picks them, so the page only ever shows names from this list. */
+function randomBackground(): CardBackground | null {
+  if (BACKGROUNDS.length === 0) return null;
+  const n = new Uint32Array(2);
+  crypto.getRandomValues(n);
+  return { bg: BACKGROUNDS[(n[0] ?? 0) % BACKGROUNDS.length] as string, third: (n[1] ?? 0) % 3 };
+}
+
+function studentStatements(env: Env, userId: number, students: StudentRow[], kept: Map<string, CardBackground> = new Map()): D1PreparedStatement[] {
   const ins = env.DB.prepare(
-    "INSERT INTO students (user_id, name, student_id, level, stars, ex_skill, normal_skill, passive_skill, sub_skill, bond, uw_stars, uw_level, role, pinned, memorial, detail_json) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
+    "INSERT INTO students (user_id, name, student_id, level, stars, ex_skill, normal_skill, passive_skill, sub_skill, bond, uw_stars, uw_level, role, pinned, memorial, detail_json, bg, bg_third) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)",
   );
-  return students.map((s) =>
-    ins.bind(userId, s.name, CATALOG[s.name]?.id ?? null, s.level, s.stars, s.ex_skill, s.normal_skill, s.passive_skill, s.sub_skill, s.bond, s.uw_stars, s.uw_level, s.role, flag(s.pinned), flag(s.memorial), s.detail ? JSON.stringify(s.detail) : null),
-  );
+  return students.map((s) => {
+    const card = kept.get(s.name) ?? randomBackground();
+    return ins.bind(userId, s.name, CATALOG[s.name]?.id ?? null, s.level, s.stars, s.ex_skill, s.normal_skill, s.passive_skill, s.sub_skill, s.bond, s.uw_stars, s.uw_level, s.role, flag(s.pinned), flag(s.memorial), s.detail ? JSON.stringify(s.detail) : null, card?.bg ?? null, card?.third ?? null);
+  });
 }
 
 async function upload(env: Env, up: Upload, client: Client): Promise<Response> {
@@ -84,10 +102,13 @@ async function upload(env: Env, up: Upload, client: Client): Promise<Response> {
   if (existing) {
     const auth = await authenticate(env, up.key);
     if (!auth.ok) return json(409, { error: "이미 쓰이는 닉네임입니다. 올린 적이 있다면 key 를 함께 보내세요" });
+    // a student who was uploaded before keeps the background the card already has
+    const before = await env.DB.prepare("SELECT name, bg, bg_third FROM students WHERE user_id = ?1 AND bg IS NOT NULL AND bg_third IS NOT NULL").bind(auth.user.id).all<{ name: string; bg: string; bg_third: number }>();
+    const kept = new Map(before.results.map((r) => [r.name, { bg: r.bg, third: r.bg_third }]));
     await env.DB.batch([
       env.DB.prepare("UPDATE users SET account_json = ?1, progress_json = ?2, updated_at = ?3, public = ?4, score = ?5, stats_json = ?6, top_json = ?7, score_version = ?8, addon_version = ?9, protocol = ?10 WHERE id = ?11").bind(accountJson, progressJson, now(), Number(up.public), board.score, board.stats, board.top, SCORE_VERSION, client.addon, client.protocol, auth.user.id),
       env.DB.prepare("DELETE FROM students WHERE user_id = ?1").bind(auth.user.id),
-      ...studentStatements(env, auth.user.id, up.students),
+      ...studentStatements(env, auth.user.id, up.students, kept),
     ]);
     return json(200, { key: formatKey(auth.key), created: false, students: up.students.length, public: up.public, score: board.score });
   }

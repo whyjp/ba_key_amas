@@ -25,8 +25,6 @@ function tile(s, ctx, meta, showInfo) {
   t.tabIndex = 0;
   t.title = s.name;
   t.append(portrait(s.student_id, "tile-img"));
-  const ring = halo(meta, s.student_id, "tile-halo");
-  if (ring) t.append(ring);
   if (showInfo) {
     if (s.stars) t.append(Object.assign(stars(s.stars, "student"), { className: "stars student tile-stars" }));
     if (s.level !== null) t.append(el("span", "lv", "Lv." + s.level));

@@ -1,0 +1,142 @@
+"""High resolution memorial lobby art for the full-illustration cards (public/card-lobby/<id>.webp, 760x1280).
+
+Source: the memorial lobby images (`File:Memorial_Lobby_<Name>.jpg`) of the Blue Archive wiki (bluearchive.wiki),
+listed through its MediaWiki API and hosted on static.wikitide.net, 1.5 to 2.5 thousand pixels wide. Each image is
+matched to a student through the English name in SchaleDB (the wiki writes some outfits differently, see
+SYNONYMS), then cut to the card's portrait shape around the face. The originals are cached in scripts/.cache and
+nothing is committed. Students without a wiki image keep the small SchaleDB lobby crop made by crop-art.py.
+`public/card-lobby.json` lists the ids that got the high resolution picture.
+
+Rights stay with the wiki's contributors and the game's rights holders (Nexon, Nexon Games, Yostar).
+
+Run from web/ after extract-assets.py and before crop-art.py:  python -I scripts/extract-lobby.py
+"""
+import importlib.util
+import json
+import pathlib
+import re
+import sys
+import time
+import urllib.parse
+import urllib.request
+
+import cv2
+import numpy as np
+from PIL import Image
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+CACHE = ROOT / "scripts" / ".cache" / "lobby"
+API = "https://bluearchive.wiki/w/api.php"
+UA = "ba-key-amas-assets (build-time, one request per image)"
+PAUSE = 0.25
+OUT_W, OUT_H = 760, 1280  # the card is 380x640, drawn at twice the size
+RATIO = OUT_W / OUT_H
+
+# SchaleDB's English outfit word -> the wiki's
+SYNONYMS = {
+    "bunny": "bunny girl", "school": "school uniform", "armed": "battle", "camp": "camping", "cheer squad": "cheerleader",
+    "pop idol": "idol", "track": "sportswear", "pajamas": "pajama", "cycling": "riding", "small": "kid",
+}
+
+
+def get(url: str) -> bytes:
+    req = urllib.request.Request(url, headers={"User-Agent": UA})
+    for attempt in range(5):
+        try:
+            with urllib.request.urlopen(req, timeout=90) as r:
+                return r.read()
+        except OSError:
+            if attempt == 4:
+                raise
+            time.sleep(2 * (attempt + 1))
+    raise RuntimeError("unreachable")
+
+
+def norm(s: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", s.lower())
+
+
+def wiki_images() -> dict[str, dict]:
+    """`norm(name) -> file` for the plain memorial lobby images (numbered, pre-release and dated ones are skipped)."""
+    out: dict[str, dict] = {}
+    cont = None
+    while True:
+        q = {"action": "query", "list": "allimages", "aiprefix": "Memorial_Lobby_", "ailimit": "500", "aiprop": "url|size", "format": "json"}
+        if cont:
+            q["aicontinue"] = cont
+        data = json.loads(get(API + "?" + urllib.parse.urlencode(q)))
+        for f in data["query"]["allimages"]:
+            name = f["name"][len("Memorial_Lobby_"):].rsplit(".", 1)[0].replace("_", " ")
+            if re.search(r"( \d+|pre-release.*|\(\d{4}\))$", name, re.I):
+                continue
+            key = norm(name)
+            if key not in out or f["width"] * f["height"] > out[key]["width"] * out[key]["height"]:
+                out[key] = f
+        cont = data.get("continue", {}).get("aicontinue")
+        if not cont:
+            return out
+
+
+def wiki_key(english: str) -> str:
+    m = re.match(r"^(.*?)\s*\((.*)\)$", english)
+    base, outfit = (m.group(1), m.group(2)) if m else (english, "")
+    base = {"Aris": "Arisu"}.get(base, base)
+    outfit = SYNONYMS.get(outfit.lower(), outfit)
+    return norm(f"{base} ({outfit})" if outfit else base)
+
+
+def load_crop_art():
+    spec = importlib.util.spec_from_file_location("crop_art", ROOT / "scripts" / "crop-art.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def portrait_crop(img: Image.Image, face) -> Image.Image:
+    w, h = img.size
+    cw = min(w, round(h * RATIO))
+    ch = round(cw / RATIO)
+    cx = face[0] if face else w * 0.5
+    left = max(0, min(round(cx - cw / 2), w - cw))
+    top = max(0, min(round((face[1] if face else h * 0.4) - ch * 0.32), h - ch))
+    return img.crop((left, top, left + cw, top + ch)).resize((OUT_W, OUT_H), Image.LANCZOS)
+
+
+def main() -> int:
+    sys.stdout.reconfigure(encoding="utf-8")
+    crop = load_crop_art()
+    det = crop.detector()
+    catalog = json.loads((ROOT / "src" / "catalog.json").read_text(encoding="utf-8"))
+    ids = sorted({e["id"] for e in catalog.values()})
+    english = json.loads(get("https://schaledb.com/data/en/students.min.json"))
+    files = wiki_images()
+    CACHE.mkdir(parents=True, exist_ok=True)
+    out = ROOT / "public" / "card-lobby"
+    out.mkdir(parents=True, exist_ok=True)
+    have, missing = [], []
+    for sid in ids:
+        name = english.get(str(sid), {}).get("Name", "")
+        f = files.get(wiki_key(name))
+        if not f:
+            missing.append(name)
+            continue
+        ext = f["url"].rsplit(".", 1)[-1].lower()
+        src = CACHE / f"{sid}.{ext}"
+        if not src.exists():
+            time.sleep(PAUSE)
+            src.write_bytes(get(f["url"]))
+        bgr = cv2.imdecode(np.fromfile(str(src), dtype=np.uint8), cv2.IMREAD_COLOR)
+        if bgr is None:
+            missing.append(name)
+            continue
+        face = crop.largest_face(det, bgr)
+        img = Image.open(src).convert("RGB")
+        portrait_crop(img, face).save(out / f"{sid}.webp", "WEBP", quality=86)
+        have.append(sid)
+    (ROOT / "public" / "card-lobby.json").write_text(json.dumps(have), encoding="utf-8")
+    print(f"{len(have)} high resolution lobby cards, {len(missing)} without: {', '.join(missing[:10])}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -7,7 +7,8 @@ export function loadMeta() {
   metaPromise ??= Promise.all([
     fetch("/meta.json").then((r) => (r.ok ? r.json() : {})).catch(() => ({})),
     fetch("/halos.json").then((r) => (r.ok ? r.json() : [])).catch(() => []),
-  ]).then(([meta, halos]) => ({ ...meta, halos: new Set(halos) }));
+    fetch("/card-lobby.json").then((r) => (r.ok ? r.json() : [])).catch(() => []),
+  ]).then(([meta, halos, lobby]) => ({ ...meta, halos: new Set(halos), hiresLobby: new Set(lobby) }));
   return metaPromise;
 }
 

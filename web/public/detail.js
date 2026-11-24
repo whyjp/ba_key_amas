@@ -10,7 +10,7 @@ function tag(text, color) {
 
 function skillRow(label, value, max, locked) {
   const row = el("div", "skill" + (locked ? " locked" : ""));
-  row.append(el("span", "skill-name", label), meter(value ?? 0, max), el("b", "", value === null ? "-" : `Lv.${value}`));
+  row.append(el("span", "skill-name", label), meter(value ?? 0, max), el("b", "", locked ? "잠금" : value === null ? "-" : `Lv.${value}`));
   return row;
 }
 
@@ -143,10 +143,21 @@ function buildCard(s, meta, ctx, rank, animate) {
 
   const band = el("div", "pc-band");
   const art = el("div", "pc-art");
+  // a high resolution portrait cut fills the whole card; the small thumbnail falls back to picture plus blurred extension
+  if (tier.full && meta.hiresLobby?.has(s.student_id)) art.classList.add("hires");
   if (s.student_id) art.append(artFor(s, tier, art));
   else art.append(el("div", "pc-art-none", "일러스트 없음"));
-  const ring = halo(meta, s.student_id, "pc-halo");
-  if (ring) art.append(ring);
+  if (!tier.full) {
+    // mid-grade cards: a background picked at upload time under the cut-out portrait
+    const bg = el("div", "pc-bg");
+    if (s.bg) {
+      // the picture is enlarged and one third of it (left, centre or right, fixed at upload) is shown
+      bg.style.backgroundImage = `url("/backgrounds/${encodeURIComponent(s.bg)}.jpg")`;
+      bg.style.backgroundSize = "170% auto";
+      bg.style.backgroundPosition = ["0% 50%", "50% 50%", "100% 50%"][s.bg_third ?? 1] ?? "50% 50%";
+    }
+    art.prepend(bg);
+  }
   if (tier.key !== "n") {
     // the foil lives inside the picture only, so the text beside it stays readable
     art.append(el("div", "pc-holo"), el("div", "pc-glare"));

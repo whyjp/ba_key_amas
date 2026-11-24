@@ -37,10 +37,12 @@ def get(url: str) -> bytes:
 def main() -> int:
     students = json.loads(get(f"{BASE}/data/kr/students.min.json"))
     catalog = {}
+    backgrounds = set()
     for s in students.values():
         released = s.get("IsReleased") or []
         if len(released) <= GLOBAL_FLAG or not released[GLOBAL_FLAG]:
             continue
+        backgrounds.add(s.get("CollectionBG"))
         catalog[s["Name"]] = {
             "id": s["Id"],
             "school": s.get("School"),
@@ -67,6 +69,15 @@ def main() -> int:
                 continue
             dest.write_bytes(get(f"{BASE}/{url.format(id=entry['id'])}.{suffix}"))
             fetched += 1
+    # backgrounds for the cards: the collection backgrounds the students use, 56 or so
+    names = sorted(b for b in backgrounds if b)
+    (pub / "backgrounds").mkdir(parents=True, exist_ok=True)
+    for b in names:
+        dest = pub / "backgrounds" / f"{b}.jpg"
+        if not dest.exists():
+            dest.write_bytes(get(f"{BASE}/images/background/{b}.jpg"))
+            fetched += 1
+    (ROOT / "src" / "backgrounds.json").write_text(json.dumps(names), encoding="utf-8")
     schools = sorted({e["school"] for e in catalog.values() if e["school"]})
     (pub / "schools").mkdir(parents=True, exist_ok=True)
     for school in schools:

@@ -9,7 +9,7 @@
     "test": "node --test \"test/*.test.ts\"",
     "db:local": "wrangler d1 migrations apply ba-key-amas --local",
     "db:remote": "wrangler d1 migrations apply ba-key-amas --remote",
-    "assets": "pip install -q -r scripts/requirements.txt && python -I scripts/extract-assets.py && python -I scripts/extract-halos.py && python -I scripts/crop-art.py"
+    "assets": "pip install -q -r scripts/requirements.txt && python -I scripts/extract-assets.py && python -I scripts/extract-halos.py && python -I scripts/extract-lobby.py && python -I scripts/crop-art.py"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20261124.1",
