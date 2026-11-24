@@ -237,6 +237,20 @@ pub fn resolve(raw: &str) -> (String, NameMatch) {
     (String::new(), m)
 }
 
+/// A name read off a list screen (duty, MomoTalk), set to the dictionary's spelling. Lists are read in one small
+/// font and lose or swap a letter ("하례" for 하레, "키시키" for 키사키, "아네" for 아야네). The closest dictionary name wins
+/// when it is within two jamo edits (one for a name of under four jamo) and strictly closer than every other name; a tie or
+/// anything farther is not guessed, and `None` leaves the reading as it was.
+pub fn snap(raw: &str) -> Option<String> {
+    let cleaned = clean_name(raw);
+    if cleaned.chars().filter(|c| !c.is_whitespace()).count() < 2 {
+        return None;
+    }
+    let (i, d, margin) = nearest(&cleaned);
+    let limit = if to_jamo(&cleaned).len() < 4 { 1 } else { 2 };
+    (d <= limit && margin >= 1).then(|| RESOLVER.entries[i].name.clone())
+}
+
 /// Resolves each candidate and keeps the closest (exact > corrected > unlisted).
 pub fn best_name(cands: &[&str]) -> String {
     let rank = |s: &str| match s {

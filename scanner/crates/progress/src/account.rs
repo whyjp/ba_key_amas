@@ -41,7 +41,9 @@ pub fn parse_lobby(boxes: &[TextBox]) -> Read<Account> {
 
 /// The nickname without the decoration OCR reads from the status icon next to it (quotes, crosses).
 fn clean_nickname(raw: &str) -> Option<String> {
-    let name = raw.trim().trim_end_matches(|c: char| !c.is_alphanumeric()).trim();
+    // the sprout beside the name reads as a lone jamo ("소다팝ㅇ"); a nickname is made of whole syllables
+    let lone_jamo = |c: char| ('\u{3131}'..='\u{318E}').contains(&c);
+    let name = raw.trim().trim_end_matches(|c: char| !c.is_alphanumeric() || lone_jamo(c)).trim();
     (!name.is_empty()).then(|| name.to_string())
 }
 
@@ -55,6 +57,15 @@ mod tests {
         let r = parse_lobby(&boxes("w169-lobby"));
         assert_eq!(r.value, Account { nickname: Some("소다팝".into()), level: Some(69), circle: None });
         assert!(r.warnings.iter().any(|w| w.contains("circle")));
+    }
+
+    #[test]
+    fn an_icon_read_as_a_lone_jamo_is_not_part_of_the_nickname() {
+        assert_eq!(clean_nickname("소다팝ㅇ").as_deref(), Some("소다팝"));
+        assert_eq!(clean_nickname("소다팝 ㅇ").as_deref(), Some("소다팝"));
+        assert_eq!(clean_nickname("소다팝\"").as_deref(), Some("소다팝"));
+        assert_eq!(clean_nickname("ㅇ"), None);
+        assert_eq!(clean_nickname("Teacher7").as_deref(), Some("Teacher7"));
     }
 
     #[test]

@@ -482,7 +482,8 @@ fn momotalk_unread_section(nav: &Nav, lobby: &Look, snap: &mut ProgressSnapshot)
             }
             total = total.or(page.value.total);
             let before = rows.len();
-            for r in page.value.rows {
+            for mut r in page.value.rows {
+                r.name = canonical_name(&r.name);
                 if !rows.iter().any(|k| k.name == r.name) {
                     rows.push(r);
                 }
@@ -538,17 +539,32 @@ fn duty_section(nav: &Nav, lobby: &Look, snap: &mut ProgressSnapshot) -> Result<
     let mut cards: BTreeMap<String, DutyStudent> = BTreeMap::new();
     let (mut counted, mut limit) = (first.value.selected_count, first.value.limit);
     let mut quiet = 0;
-    for _ in 0..30 {
+    for _page in 0..60 {
         let page = duty::parse_duty(&look.boxes, &look.img);
         counted = page.value.selected_count.or(counted);
         limit = page.value.limit.or(limit);
         let before = cards.len();
-        for c in page.value.cards {
-            cards.insert(squash(&c.name), c);
+        for mut c in page.value.cards {
+            c.name = canonical_name(&c.name);
+            // a one-character reading is the list's heading or an icon, not a student (no name is that short)
+            if c.name.chars().filter(|ch| !ch.is_whitespace()).count() >= 2 {
+                cards.insert(squash(&c.name), c);
+            }
         }
         quiet = if cards.len() == before { quiet + 1 } else { 0 };
-        if quiet >= 2 {
+        if std::env::var_os("BAOCR_PROGRESS_DEBUG").is_some() {
+            eprintln!("  duty page {}: {} new, {} in all, quiet {}", _page, cards.len() - before, cards.len(), quiet);
+        }
+        if quiet >= 3 {
             break;
+        }
+        if quiet == 1 {
+            // Nothing new: the end of the list, a frame taken before the last wheel step had shown, or a step the game
+            // dropped. Scrolling again at once would add a second step on top of a first that lands late and skip a
+            // whole page of students (a run read 94 of 106 that way). So look again at the same place first.
+            std::thread::sleep(Duration::from_millis(1500));
+            look = nav.settled()?;
+            continue;
         }
         nav.scroll_list(gx, gy, true, 1)?;
         std::thread::sleep(Duration::from_millis(700));
@@ -567,6 +583,16 @@ fn duty_section(nav: &Nav, lobby: &Look, snap: &mut ProgressSnapshot) -> Result<
     Ok(())
 }
 
+/// A student name read off a list, set to the dictionary's spelling when the dictionary is sure of it: the list font
+/// gave "순" for 슌, "시로코테러" for 시로코*테러 and "우네" for 아야네. An ambiguous or unknown reading stays as read.
+fn canonical_name(raw: &str) -> String {
+    let (name, m) = baocr_names::resolve(raw);
+    match m.status.as_str() {
+        "exact" | "corrected" if !name.is_empty() => name,
+        _ => baocr_names::snap(raw).unwrap_or_else(|| raw.to_string()),
+    }
+}
+
 /// A region name without spaces: OCR spacing of the same name differs from page to page.
 fn squash(name: &str) -> String {
     name.chars().filter(|c| !c.is_whitespace()).collect()
@@ -574,6 +600,16 @@ fn squash(name: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn list_names_are_set_to_the_dictionary_spelling() {
+        assert_eq!(super::canonical_name("노아"), "노아");
+        assert_eq!(super::canonical_name("순"), "슌");
+        assert_eq!(super::canonical_name("시로코테러"), "시로코*테러");
+        assert_eq!(super::canonical_name("하례"), "하레");
+        assert_eq!(super::canonical_name("키시키"), "키사키");
+        assert_eq!(super::canonical_name("아네"), "아네", "two names are as close: not guessed");
+    }
+
     use super::*;
 
     #[test]

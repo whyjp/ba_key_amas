@@ -32,10 +32,10 @@ serde_json.workspace = true
 image.workspace = true
 clap = { version = "4", features = ["derive"] }
 ureq = { version = "2", features = ["json"] }
+baocr-names = { path = "../names" }
 
 [dev-dependencies]
 rusqlite = { version = "0.32", features = ["bundled"] }
-baocr-names = { path = "../names" }
 
 [build-dependencies]
 winresource = "0.1"
