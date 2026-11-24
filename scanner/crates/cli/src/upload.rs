@@ -103,8 +103,12 @@ pub fn check_server(server: &str) -> Result<()> {
     if secure {
         return Ok(());
     }
-    let host = server.trim_start_matches("http://").split(['/', ':']).next().unwrap_or("");
-    if matches!(host, "localhost" | "127.0.0.1" | "[::1]") {
+    let authority = server.trim_start_matches("http://").split(['/', '?', '#']).next().unwrap_or("");
+    let host = match authority.strip_prefix('[') {
+        Some(bracketed) => bracketed.split_once(']').map_or("", |(h, _)| h),
+        None => authority.split(':').next().unwrap_or(""),
+    };
+    if !authority.contains('@') && matches!(host, "localhost" | "127.0.0.1" | "::1") {
         Ok(())
     } else {
         bail!("refusing to send an account id over plain http to {host}; use https")
@@ -215,6 +219,18 @@ mod tests {
         assert!(check_server("http://ba.example.com").is_err());
         assert!(check_server("ftp://x").is_err());
         assert!(check_server("http://localhost.evil.com").is_err());
+    }
+
+    #[test]
+    fn ipv6_loopback_is_accepted_and_the_host_is_not_fooled() {
+        assert!(check_server("http://[::1]:8787").is_ok());
+        assert!(check_server("http://[::1]").is_ok());
+        assert!(check_server("http://[::1]:8787/path").is_ok());
+        assert!(check_server("http://evil.example").is_err());
+        assert!(check_server("http://[2001:db8::1]:8787").is_err());
+        assert!(check_server("http://localhost:80@evil.example/").is_err(), "user info does not make a loopback host");
+        assert!(check_server("http://127.0.0.1.evil.example:8787").is_err());
+        assert!(check_server("http://[::1").is_err());
     }
 
     #[test]
