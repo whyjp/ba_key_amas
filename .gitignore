@@ -19,8 +19,8 @@ dist-go/
 .hermes_transcript.txt
 
 models/
-rust/target/
-rust/Cargo.lock.bak
+scanner/target/
+scanner/Cargo.lock.bak
 
 # wiki DB is built locally from public data and not redistributed
 wikidb/wiki.db

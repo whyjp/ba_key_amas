@@ -1,8 +1,8 @@
 # 레이드 데이터 (총력전, 종합전술시험, 월드 레이드 등)
 
 위키 DB가 레이드류 전투에 대해 아는 것, 그 출처, 알 수 없는 것, 화면 판독기가 DB에 넘겨야 하는 것을 적는다.
-스키마는 `wikidb/schema.sql`(버전 4)이다. 코드는 `rust/crates/wikidb/src/schaledb.rs`(수집기)와
-`rust/crates/wikidb/src/raid.rs`(조회)에 있다.
+스키마는 `wikidb/schema.sql`(버전 4)이다. 코드는 `scanner/crates/wikidb/src/schaledb.rs`(수집기)와
+`scanner/crates/wikidb/src/raid.rs`(조회)에 있다.
 
 ## 모델
 

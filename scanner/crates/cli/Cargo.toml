@@ -1,0 +1,35 @@
+[package]
+name = "baocr"
+edition.workspace = true
+version.workspace = true
+
+[[bin]]
+name = "ba-key-AMAS"
+path = "src/main.rs"
+
+[features]
+# OCR on the GPU through DirectML (about 2.7x faster on the fixtures; ships DirectML.dll beside the exe)
+directml = ["baocr-ocr/directml"]
+
+[dependencies]
+baocr-core.workspace = true
+baocr-extract = { path = "../extract" }
+baocr-export = { path = "../export" }
+baocr-ocr = { path = "../ocr" }
+baocr-hcu = { path = "../hcu" }
+baocr-overlay = { path = "../overlay" }
+baocr-pipeline = { path = "../pipeline" }
+baocr-pixels = { path = "../pixels" }
+baocr-wikidb = { path = "../wikidb" }
+baocr-assist = { path = "../assist" }
+baocr-progress = { path = "../progress" }
+chrono.workspace = true
+ctrlc = "3"
+anyhow.workspace = true
+serde_json.workspace = true
+image.workspace = true
+clap = { version = "4", features = ["derive"] }
+
+[dev-dependencies]
+rusqlite = { version = "0.32", features = ["bundled"] }
+baocr-names = { path = "../names" }

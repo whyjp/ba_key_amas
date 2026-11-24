@@ -1,6 +1,6 @@
 # OCR 모델 (git이 추적하지 않음)
 
-Rust 엔진(`rust/crates/ocr`)이 쓰는 파일이다. 이 폴더에 두거나 `BAOCR_MODELS`를 설정한다.
+Rust 엔진(`scanner/crates/ocr`)이 쓰는 파일이다. 이 폴더에 두거나 `BAOCR_MODELS`를 설정한다.
 
 | 파일 | 출처 | 비고 |
 |---|---|---|

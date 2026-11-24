@@ -1,6 +1,6 @@
 # 카드 위치와 앵커, 북마크 탭, 자석
 
-코드는 `rust/crates/overlay/src/{dock,placement,fold,tab,win}.rs`이고 설정은 `assist/src/settings.rs`에 있다.
+코드는 `scanner/crates/overlay/src/{dock,placement,fold,tab,win}.rs`이고 설정은 `assist/src/settings.rs`에 있다.
 
 ## 모델
 

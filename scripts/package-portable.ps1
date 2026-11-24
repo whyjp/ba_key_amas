@@ -7,7 +7,7 @@ $env:CARGO_HOME = "D:/cargo-home"; $env:CARGO_TARGET_DIR = "D:/cargo-target/baoc
 Push-Location "$root\rust"; cargo build --release -p baocr --features directml; Pop-Location
 $rel = "$env:CARGO_TARGET_DIR/release"
 New-Item -ItemType Directory -Force $Out, "$Out\models", "$Out\wikidb", "$Out\vendor\hcu" | Out-Null
-Copy-Item "$rel\baocr.exe" "$Out\ba-scanner.exe" -Force
+Copy-Item "$rel\ba-key-AMAS.exe" "$Out\ba-key-AMAS.exe" -Force
 Get-ChildItem $rel -Filter *.dll | Copy-Item -Destination $Out -Force
 Copy-Item "$root\models\*" "$Out\models" -Recurse -Force
 Copy-Item "$root\wikidb\wiki.db" "$Out\wikidb" -Force

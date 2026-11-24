@@ -2,7 +2,7 @@
 
 명령 하나로 돈다. `pwsh scripts/live-e2e.ps1 -Label directml`. 같은 묶음을 `BAOCR_OCR_DEVICE=cpu`로 돌리려면
 `-Label cpu`를 쓴다.
-코드는 `rust/crates/cli/examples/live_e2e/{main,rig,scenarios}.rs`와 훅 `rust/crates/cli/src/dump.rs`에 있다.
+코드는 `scanner/crates/cli/examples/live_e2e/{main,rig,scenarios}.rs`와 훅 `scanner/crates/cli/src/dump.rs`에 있다.
 보고서는 `<out>/<label>/report.md|json`, 스크린샷은 `<out>/<label>/shots`에 쌓인다.
 
 ## 훅

@@ -2,7 +2,7 @@
 
 ## Microsoft Hybrid Computer Use
 
-`rust/crates/hcu/src/native.rs`의 프로세스 내 데스크톱 제어는 Hybrid Computer Use의 Windows 제공자 동작을
+`scanner/crates/hcu/src/native.rs`의 프로세스 내 데스크톱 제어는 Hybrid Computer Use의 Windows 제공자 동작을
 Win32 기반 Rust로 다시 구현한 것이다. 다시 구현한 동작은 스크린샷 전달 크기, 줌 기하, 프레임 좌표를 원본 픽셀로
 옮기는 매핑, 절대 포인터 좌표, 프레임 레이아웃 검사, 안정화 루프다. 소스 파일은 복사하지 않았고 C# 파일은
 명세로만 읽었다. 읽기용으로 보관한 원본 사본은 `third_party/hcu-reference/`에 있고 빌드에 들어가지 않는다.

@@ -57,7 +57,7 @@ BAReceipt에는 화면에서 읽을 수 없는 값도 있다(소모한 AP, 크�
 
 ## 순수 로직 크레이트
 
-`rust/crates/progress`(`baocr-progress`)가 게임과 OCR 엔진 없이 도는 읽기 로직과 내보내기를 가진다. 입력은 화면 하나의 글자 상자(`TextBox`)와 필요할 때 프레임이고, 읽지 못한 값은 `null`로 두고 `warnings`에 이유를 적는다. 위치는 글자 상자 사이의 상대 거리로 찾아서 두 화면 비율에서 같은 코드가 돈다. 화면 순회는 다른 모듈이 맡는다.
+`scanner/crates/progress`(`baocr-progress`)가 게임과 OCR 엔진 없이 도는 읽기 로직과 내보내기를 가진다. 입력은 화면 하나의 글자 상자(`TextBox`)와 필요할 때 프레임이고, 읽지 못한 값은 `null`로 두고 `warnings`에 이유를 적는다. 위치는 글자 상자 사이의 상대 거리로 찾아서 두 화면 비율에서 같은 코드가 돈다. 화면 순회는 다른 모듈이 맡는다.
 
 | 모듈 | 읽는 것 | 고정 자료 |
 |---|---|---|
@@ -103,7 +103,7 @@ BAReceipt의 "파일로 저장"은 JSON 객체 하나를 쓴다. 키는 `basic, 
 
 ## 스캔 실행부
 
-`rust/crates/cli/src/progress_scan.rs`가 화면을 돌며 위 읽기 함수를 부른다. 시작은 메뉴 카드의 `진행 상태 스캔` 버튼 또는 `baocr --scan-progress`이다. 입력 안전장치, ESC 중단, 입력 잠금은 학생 스캔과 같은 경로다.
+`scanner/crates/cli/src/progress_scan.rs`가 화면을 돌며 위 읽기 함수를 부른다. 시작은 메뉴 카드의 `진행 상태 스캔` 버튼 또는 `ba-key-AMAS --scan-progress`이다. 입력 안전장치, ESC 중단, 입력 잠금은 학생 스캔과 같은 경로다.
 
 * 누르는 곳은 `Target`에 적힌 라벨(로비의 스케줄, 이벤트 일람, 이벤트 스토리 탭)과 홈 아이콘뿐이다. 보상 받기, 입장, 확인은 목록에 없다.
 * 이벤트 일람의 라벨은 OCR이 못 읽는 때가 많아서, 그 옆의 시계 글자(`AM7:32`)를 기준으로 아이콘 위치를 찾는다.
@@ -143,4 +143,4 @@ BAReceipt의 "파일로 저장"은 JSON 객체 하나를 쓴다. 키는 `basic, 
 * 스캔 결과가 실행마다 달랐다. 모모톡은 합계 22에 읽은 합이 21인 실행이 있었다(마지막 줄이 화면 아래에 걸려 개수 상자가 읽히지 않은 것으로 보이나 확인하지 못했다). 당번 선택은 학생 수가 100, 106, 107로 달랐다. 한 번 못 읽은 줄을 다시 읽는 방법이 아직 없다.
 * 이 두 구역의 16:9 확인은 하지 못했다. 마지막 실행 직후 게임 프로세스가 사라져(원인 불명) 더 돌리지 못했다.
 
-`BAOCR_PROGRESS_ONLY=momotalk,duty baocr --scan-progress`는 이름을 준 구역만 돈다(`schedule`, `events`, `momotalk`, `duty`, `story`). 부분 결과는 `partial-<시각>.json`에 쓰고 `latest.json`과 BAReceipt 백업은 바꾸지 않는다.
+`BAOCR_PROGRESS_ONLY=momotalk,duty ba-key-AMAS --scan-progress`는 이름을 준 구역만 돈다(`schedule`, `events`, `momotalk`, `duty`, `story`). 부분 결과는 `partial-<시각>.json`에 쓰고 `latest.json`과 BAReceipt 백업은 바꾸지 않는다.

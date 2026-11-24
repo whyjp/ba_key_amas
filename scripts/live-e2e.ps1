@@ -4,6 +4,6 @@ param([string]$Label = "directml", [string]$Only = "", [string]$Out = "D:\tmp\li
 $ErrorActionPreference = "Stop"
 $t = "D:/cargo-target/baocr/release"
 $env:BAOCR_MODELS = "D:/work-github/bluearchive-ocr/models"
-$a = @("run", "--exe", "$t/baocr.exe", "--label", $Label, "--out", $Out)
+$a = @("run", "--exe", "$t/ba-key-AMAS.exe", "--label", $Label, "--out", $Out)
 if ($Only) { $a += @("--only", $Only) }
 & "$t/examples/live_e2e.exe" @a

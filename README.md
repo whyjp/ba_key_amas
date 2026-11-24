@@ -21,8 +21,8 @@ Blue Archive(글로벌 서버, 한국어 UI, 4:3 창 모드)용 Windows 애드�
 
 ## 실행
 
-1. 포터블 빌드를 쓴다. `pwsh scripts/package-portable.ps1`을 실행하면 `D:\dist\ba-scanner`에 `ba-scanner.exe`,
-   `models/`, `wikidb/`, `DirectML.dll`이 생긴다. `ba-scanner.exe`는 게임보다 먼저 켜도 되고 나중에 켜도 된다.
+1. 포터블 빌드를 쓴다. `pwsh scripts/package-portable.ps1`을 실행하면 `D:\dist\ba-scanner`에 `ba-key-AMAS.exe`,
+   `models/`, `wikidb/`, `DirectML.dll`이 생긴다. `ba-key-AMAS.exe`는 게임보다 먼저 켜도 되고 나중에 켜도 된다.
 2. 게임을 4:3 창 모드로 설정하고 Windows HDR을 끈다. HDR이 켜져 있으면 판독에 쓰는 색이 바랜다.
 3. 카드가 게임 옆에 나타난다. 모니터에 게임 옆 공간이 없으면 카드는 게임 안의 북마크 탭이 되고, 포인터를 올리면
    펼쳐진다.
@@ -45,13 +45,13 @@ Blue Archive(글로벌 서버, 한국어 UI, 4:3 창 모드)용 Windows 애드�
 
 | 명령 | 동작 |
 |---|---|
-| `baocr` 또는 `baocr --assist` | 애드온 실행 |
-| `baocr --doctor` | 게임 창, DPI, 모니터, 권한 상승, 포커스를 점검한다. 입력은 보내지 않는다 |
-| `baocr --scan-arrows --from-first --out scan` | 명령줄에서 명단을 스캔한다. `--fast`를 붙이면 메뉴 단계를 건너뛴다 |
-| `baocr --reextract scan [--ids 003,007]` | 저장한 프레임을 다시 읽는다. 게임 입력은 없다 |
-| `baocr --watch --out db` | 수동 관찰 업데이터 |
-| `baocr --learn shots` | 플레이하는 동안 새 화면과 그 텍스트를 모두 저장한다. 입력은 보내지 않는다 |
-| `baocr --image fixtures/detail-shun.png --out out` | 저장한 스크린샷 한 장을 파싱한다 |
+| `ba-key-AMAS` 또는 `ba-key-AMAS --assist` | 애드온 실행 |
+| `ba-key-AMAS --doctor` | 게임 창, DPI, 모니터, 권한 상승, 포커스를 점검한다. 입력은 보내지 않는다 |
+| `ba-key-AMAS --scan-arrows --from-first --out scan` | 명령줄에서 명단을 스캔한다. `--fast`를 붙이면 메뉴 단계를 건너뛴다 |
+| `ba-key-AMAS --reextract scan [--ids 003,007]` | 저장한 프레임을 다시 읽는다. 게임 입력은 없다 |
+| `ba-key-AMAS --watch --out db` | 수동 관찰 업데이터 |
+| `ba-key-AMAS --learn shots` | 플레이하는 동안 새 화면과 그 텍스트를 모두 저장한다. 입력은 보내지 않는다 |
+| `ba-key-AMAS --image fixtures/detail-shun.png --out out` | 저장한 스크린샷 한 장을 파싱한다 |
 | `cargo run -p baocr-wikidb --release` | SchaleDB에서 `wikidb/wiki.db`를 만든다 |
 | `cargo run -p baocr-namedict` | 패치 뒤에 이름 사전을 갱신한다 |
 
@@ -82,7 +82,7 @@ Blue Archive(글로벌 서버, 한국어 UI, 4:3 창 모드)용 Windows 애드�
 | [docs/card-dock.md](docs/card-dock.md) | 앵커, 북마크 탭, 호버 시간, 스냅 |
 | [docs/speed-research.md](docs/speed-research.md) | 지연이 생기는 곳, 측정한 선택지, DirectML |
 | [docs/live-e2e.md](docs/live-e2e.md) | 실제 게임을 대상으로 하는 라이브 테스트 |
-| [rust/PORTING.md](rust/PORTING.md) | Go 포트에서 가져온 모듈 계약 |
+| [scanner/PORTING.md](scanner/PORTING.md) | Go 포트에서 가져온 모듈 계약 |
 | [docs/history/](docs/history) | Go와 Tesseract 시기의 노트 |
 
 ## 현황
