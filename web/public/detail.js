@@ -219,10 +219,7 @@ function backFace(s, meta, tier, rank, turn) {
   }
   if (!body.childNodes.length) body.append(el("p", "bk-empty", "이 학생은 능력치를 읽지 않았습니다. 학생 스캔을 다시 하면 채워집니다."));
 
-  const back_ = el("button", "pc-flip", "카드 앞면으로");
-  back_.type = "button";
-  back_.addEventListener("click", turn);
-  back.append(head, body, back_);
+  back.append(head, body);
   if (pop.childNodes.length) back.append(pop);
   return back;
 }
@@ -319,10 +316,8 @@ function buildCard(s, meta, ctx, rank, animate) {
   const unread = ctx.unread.get(s.name);
   if (unread) marks.append(tag(`안 읽은 모모톡 ${unread}`, "#2f9a6a"));
 
-  const flip = el("button", "pc-flip", "상세 능력치 보기");
-  flip.type = "button";
   const body = el("div", "pc-body");
-  body.append(types, moves, foot, marks, flip);
+  body.append(types, moves, foot, marks);
   if (tier.full) {
     // full art: level and stars float as the first line of the overlay, not as badges on the picture
     const line = el("div", "pc-lvline");
@@ -352,7 +347,6 @@ function buildCard(s, meta, ctx, rank, animate) {
     clearTimeout(turning);
     turning = setTimeout(() => card.classList.remove("turning"), 750);
   };
-  flip.addEventListener("click", turn);
 
   card.append(el("div", "pc-edge"));
   lightEngine(card);
@@ -371,7 +365,10 @@ const TILT_MAX = 35; // an up or down part of the drag only tilts the card, up t
  * outfit picker are left alone, and a drag never ends as a click on what is under the pointer.
  */
 function dragFlip(card, inner, isFlipped, turn) {
-  const SKIP = "a, button, input, select, textarea, [role=tab]";
+  const SKIP = "a, button, input, select, textarea, [role=tab], [data-tip]";
+  // the browser's own image drag would take over the gesture
+  card.addEventListener("dragstart", (e) => e.preventDefault());
+  for (const img of card.querySelectorAll("img")) img.draggable = false;
   let drag = null;
   let swallow = false;
   card.addEventListener("pointerdown", (e) => {
@@ -398,7 +395,10 @@ function dragFlip(card, inner, isFlipped, turn) {
     if (!drag || e.pointerId !== drag.id) return;
     const d = drag;
     drag = null;
-    if (!d.moved) return;
+    if (!d.moved) {
+      if (e.type === "pointerup") turn();
+      return;
+    }
     swallow = true;
     setTimeout(() => { swallow = false; }, 0);
     const over = Math.hypot(d.ry, d.rawTilt ?? 0) > FLIP_AT && e.type !== "pointercancel";

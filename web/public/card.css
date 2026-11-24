@@ -93,7 +93,6 @@
 .pc-glare { display: block; z-index: 3; opacity: calc(var(--o) * .5); mix-blend-mode: overlay; background: radial-gradient(farthest-corner circle at var(--px) var(--py), rgba(255, 255, 255, .5), rgba(255, 255, 255, .12) 25%, rgba(0, 0, 0, .3) 100%); }
 .tier-n .pc-glare { opacity: calc(var(--o) * .22); }
 .pc-edge { display: none; position: absolute; inset: 0; border-radius: 18px; pointer-events: none; z-index: 5; padding: 2px; -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); }
-.pcard.flipped .pc-edge { opacity: 0; }
 
 /* RR: a soft sheen band that crosses the picture, and a rim that picks up the light */
 .tier-rr { --accent: #6f9bd1; --accent2: #41618f; --edge: #2c4166; }
@@ -468,6 +467,33 @@
 .pcard { touch-action: none; user-select: none; -webkit-user-select: none; cursor: grab; }
 .pcard.dragging { cursor: grabbing; }
 .pcard .pc-flip, .pcard .pc-outfits button { cursor: pointer; }
-.pc-edge, .full::after { transition: opacity .15s; }
-.pcard.dragging .pc-edge, .pcard.turning .pc-edge, .pcard.dragging.full::after, .pcard.turning.full::after { opacity: 0; }
+.full::after { transition: opacity .15s; }
+.pcard.dragging.full::after, .pcard.turning.full::after { opacity: 0; }
 .pcard.dragging { box-shadow: none; }
+
+/* the rim and the shine are flat layers over a card that turns in 3D: they ride in the same turned space so they stay with the card */
+.pc-edge { z-index: 5; }
+.pcard.flipped .pc-edge { transform: none; }
+
+/* card back: a margin all round (card edge to content 22px), the same on every side; the rim shows through it */
+.pcard .pc-back { padding: 22px 22px 18px; gap: 12px; border: 4px solid hsl(var(--h) 28% 24%); }
+.bk-head { padding-bottom: 12px; gap: 12px; }
+.bk-body { padding-right: 0; gap: 0; justify-content: space-between; }
+.bk-sec { padding: 11px 0 10px; }
+.bk-sec h3 { margin: 0 0 7px; font-size: 12px; }
+.bk-stat span, .bk-row, .bk-terr span { font-size: 12px; }
+.bk-stat { padding: 5px 0; }
+.bk-slot { padding: 7px 0; }
+.pc-back .pc-flip { margin-top: 2px; padding: 6px 16px; }
+.bk-pop { left: 16px; right: 16px; top: 76px; }
+
+/* no native drag of the pictures, so a drag always turns the card */
+.pcard img { -webkit-user-drag: none; user-drag: none; user-select: none; pointer-events: none; }
+.pcard .pc-chip, .pcard .type-pill .half { pointer-events: auto; }
+.pcard .pc-back { padding: 20px 22px 20px; gap: 10px; }
+.pcard .bk-head { padding-bottom: 10px; }
+.pcard .bk-sec { padding: 8px 0 7px; }
+.pcard .bk-sec h3 { margin: 0 0 5px; }
+.pcard .bk-stat { padding: 3px 0; }
+.pcard .bk-slot { padding: 5px 0; }
+.pcard .bk-body { justify-content: flex-start; }
