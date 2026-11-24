@@ -1,0 +1,63 @@
+name: web-ci
+
+on:
+  push:
+    paths:
+      - "web/**"
+      - "scripts/**"
+      - "docs/**"
+      - "README.md"
+      - "release-contract.json"
+      - "scanner/Cargo.toml"
+      - "scanner/crates/*/Cargo.toml"
+      - "scanner/crates/cli/src/upload.rs"
+      - ".github/workflows/web-ci.yml"
+  pull_request:
+    paths:
+      - "web/**"
+      - "scripts/**"
+      - "docs/**"
+      - "README.md"
+      - "release-contract.json"
+      - "scanner/Cargo.toml"
+      - "scanner/crates/*/Cargo.toml"
+      - "scanner/crates/cli/src/upload.rs"
+      - ".github/workflows/web-ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: web-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - run: npm test
+        working-directory: web
+      - run: npx tsc --noEmit
+        working-directory: web
+      - name: Worker bundle (no deploy, no credentials)
+        run: npx wrangler deploy --dry-run --outdir "$RUNNER_TEMP/bundle"
+        working-directory: web
+      - run: python -I scripts/check_docs.py
+      - name: Release contract
+        shell: pwsh
+        env:
+          ALLOW_LARGE_ASSETS: ${{ contains(github.event.pull_request.labels.*.name, 'large-assets') && '1' || '0' }}
+          BASE_REF: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event.before }}
+        run: ./scripts/release-check.ps1 -BaseRef $env:BASE_REF

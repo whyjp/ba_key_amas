@@ -93,7 +93,7 @@ ba-key-AMAS --forget-account
 
 ## 에셋
 
-게임 이미지는 저장소에 없고 `npm run assets`가 빌드 때 받아 온다. 모두 `.gitignore` 대상이다.
+게임 이미지는 저장소에 커밋되어 있고(정책은 [../docs/ASSETS.md](../docs/ASSETS.md)), `npm run assets`는 유지보수자가 다시 만들 때만 돌린다. 원본 입력인 `public/standing/`, `public/lobby/`, `scripts/.cache/`는 `.gitignore` 대상이다.
 
 | 스크립트 | 만드는 것 | 출처 |
 |---|---|---|
@@ -145,7 +145,12 @@ ba-key-AMAS --forget-account
 
 ```
 npm ci
+<<<<<<< HEAD
 npm run assets          # 학생 카탈로그와 초상화를 SchaleDB에서 받는다 (커밋하지 않는다)
+=======
+npm run assets          # 유지보수자 전용: 이미지와 카탈로그를 처음부터 다시 만든다 (약 20분, 결과를 커밋하면 역사가 그만큼 커진다)
+printf "KEY_PEPPER=dev-only\nALLOW_UNSIGNED_ADDON=1\n" > .dev.vars   # 로컬 개발만: 서명 없는 요청을 받는다. 운영에는 절대 두지 않는다
+>>>>>>> 0759bee (web: CI workflow, wrangler config ready for Cloudflare, asset budget and takedown docs)
 npm run db:local
 npm run dev             # 먼저 scripts/sync-dev-vars.ts가 저장소 .env의 키로 .dev.vars를 만든다 (아래 .env 참고)
 ba-key-AMAS --upload http://127.0.0.1:8787 --public   # 처음에는 회원코드를 묻는다
@@ -171,12 +176,14 @@ pwsh -File scripts/e2e-accounts.ps1          # wrangler dev 위에서 올려 보
 
 ## Cloudflare 깃 연결 배포
 
+전체 순서와 릴리즈 순서, 롤백은 [../docs/DEPLOY.md](../docs/DEPLOY.md)에 있다.
+
 1. `npx wrangler d1 create ba-key-amas`를 한 번 실행하고 나온 ID를 `wrangler.jsonc`의 `database_id`에 넣는다.
 2. 대시보드에서 Workers Builds로 이 저장소를 연결하고 Root directory를 `web`으로 한다.
-3. Build command는 `npm ci && npm run assets`, Deploy command는 `npx wrangler d1 migrations apply ba-key-amas --remote && npx wrangler deploy`로 한다. 마이그레이션은 자동으로 돌지 않아서 배포 명령에 넣었다.
+3. Build command는 `npm ci`, Deploy command는 `npx wrangler d1 migrations apply ba-key-amas --remote && npx wrangler deploy`로 한다. 마이그레이션은 자동으로 돌지 않아서 배포 명령에 넣었다.
 4. 비밀값 `KEY_PEPPER`는 대시보드의 Variables and secrets에 Secret으로 넣는다(32바이트 이상의 무작위 값). 바꾸면 기존 계정이 모두 끊기므로 한 번 정하고 유지한다. 새어 나가면 위 위협 모델을 본다.
    마이그레이션 `0007`은 사용자 표를 새로 만들며 이전 모양의 행을 지운다(배포 전 시험 행만 있다는 전제). 데이터가 쌓인 뒤에는 이런 마이그레이션을 쓰지 않는다.
-5. 초상화와 `src/catalog.json`은 저장소에 없고 빌드 때 만든다. 게임 이미지를 저장소에 두지 않기 위해서다.
+5. 이미지와 `src/catalog.json`은 저장소에 커밋되어 있다([../docs/ASSETS.md](../docs/ASSETS.md)). `npm run assets`는 유지보수자가 다시 만들 때만 쓴다.
 
 ---
 
