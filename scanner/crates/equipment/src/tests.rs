@@ -86,8 +86,9 @@ fn saori_with_fake_ocr() {
 fn locked_slots_not_equipped() {
     for f in ["detail-tsurugi-swimsuit-lv1-locked.png", "detail-serika-newyear-lv1.png"] {
         let img = fixture(f);
-        // Slot 1 (shoes) is really equipped; slots 2 and 3 show Lv.10/Lv.20 locks.
-        assert!(equip_badge(&img, 0), "{f}: slot 0 should be equipped");
+        // Slot 1 (shoes) has the yellow dot of an item waiting, and no "E" badge: not equipped. Slots 2 and 3 show
+        // Lv.10/Lv.20 locks.
+        assert!(equip_badge(&img, 0) && !equip_marker(&img, 0), "{f}: slot 0 is a dot without the E badge");
         for i in 1..3 {
             assert!(!equip_badge(&img, i), "{f}: locked slot {i} reported equipped");
         }
@@ -157,4 +158,45 @@ fn a_greyed_slot_with_a_notification_dot_is_empty_not_equipped() {
 fn an_item_in_colour_is_not_taken_for_a_greyed_one() {
     let img = fixture("detail-saori.png");
     assert!((0..3).all(|i| icon_vividness(&img, i) >= 0.006));
+}
+
+#[test]
+fn a_misread_v_does_not_lose_the_level() {
+    assert_eq!(loose_level("L060"), Some(60));
+    assert_eq!(loose_level("Lo40"), Some(40));
+    assert_eq!(loose_level("L0A0"), Some(40));
+    assert_eq!(loose_level("L020"), Some(20));
+    assert_eq!(loose_level("Ll"), Some(1));
+    assert_eq!(loose_level("Lyl"), Some(1));
+    assert_eq!(loose_level("1060"), None, "no L: not a level label");
+    assert_eq!(loose_level("Lo"), None, "zero is not a level");
+    assert_eq!(loose_level("L900"), None);
+    let obs: Vec<String> = ["L060", "1060", "L060", "160"].iter().map(|s| s.to_string()).collect();
+    assert_eq!(vote_level(&obs), Some(60));
+    assert_eq!(vote_level(&["L060".to_string()]), None, "one sighting is not enough");
+}
+
+#[test]
+fn only_the_e_badge_proves_an_item_is_equipped() {
+    // 호시노(무장), 2026-11-24: three items in colour with Lv and T labels and the E badge
+    let on = fixture("detail-equipped-bag-t8.png");
+    assert!((0..3).all(|i| equip_marker(&on, i)));
+    // 유우카(파자마): three greyed items, each with a yellow dot and nothing else (the necklace was read as tier 5)
+    let off = fixture("detail-three-greyed-slots.png");
+    assert!((0..3).all(|i| equip_badge(&off, i) && !equip_marker(&off, i)));
+    let kinds = ["Shoes".to_string(), "Bag".to_string(), "Necklace".to_string()];
+    let ocr = Fake { tier: "", level: "", state: "EMPTY" };
+    let (eq, _) = detect_equipment_for(&off, &ocr, &kinds).unwrap();
+    for e in eq.iter().take(3) {
+        assert_eq!(e.equipped, Some(false), "{e:?}");
+        assert!(e.tier.is_none() && e.level.is_none(), "{e:?}");
+    }
+}
+
+#[test]
+fn a_zero_for_the_v_is_not_a_level_digit() {
+    assert_eq!(parse_level("Lo3"), None);
+    assert_eq!(parse_level("L03"), None);
+    let obs: Vec<String> = ["L1", "Lo", "Lo3", "L1", "Ll"].iter().map(|s| s.to_string()).collect();
+    assert_eq!(vote_level(&obs), Some(1), "Lv.1 read three ways beats the single stray Lo3");
 }

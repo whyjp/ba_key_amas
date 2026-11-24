@@ -333,3 +333,13 @@ fn w169_panel_delta_follows_the_panel() {
     // the shifted panel region covers the profile's right panel: a different screen differs a lot there
     assert!(panel_delta(&a, &w169("student-list")) > 0.2);
 }
+
+#[test]
+fn list_on_the_striker_tab_is_still_the_list() {
+    let striker = load("roster-striker-tab.png");
+    assert!(!detail_visible(&striker));
+    assert!(roster_visible_pixels(&striker), "the list reopened on STRIKER was not recognised");
+    assert!(!all_tab_selected(&striker), "STRIKER selected, not All");
+    let all = load("roster-top.png");
+    assert!(roster_visible_pixels(&all) && all_tab_selected(&all));
+}

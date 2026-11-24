@@ -821,9 +821,29 @@ pub fn roster_visible_pixels(img: &RgbImage) -> bool {
     if t.top < 179 || t.bottom - t.top < min_len || t.bottom - t.top > 90 || t.bottom > list_bottom(img) || roster_cards(img).len() < 6 {
         return false;
     }
-    let [r, g, b] = px(img, 395, 110);
+    roster_tab_selected(img)
+}
+
+/// Where the three tabs of the list (All, STRIKER, SPECIAL) can be probed in a 1280x960 frame, at the row of their labels.
+const TAB_PROBES: [(i32, i32); 3] = [(395, 110), (560, 110), (700, 110)];
+
+/// The list has one tab selected, drawn filled: teal for All, red for STRIKER, blue for SPECIAL. The game reopens the
+/// list on the tab last used, so any of the three is the list. An idle tab is near white and not saturated.
+fn roster_tab_selected(img: &RgbImage) -> bool {
+    all_tab_selected(img) || TAB_PROBES[1..].iter().any(|&(x, y)| {
+        let [r, g, b] = px(img, x, y);
+        (r.max(g).max(b) as i32 - r.min(g).min(b) as i32) >= 70
+    })
+}
+
+/// Is the All tab the selected one (the whole roster, not only the STRIKER or SPECIAL students)?
+pub fn all_tab_selected(img: &RgbImage) -> bool {
+    let [r, g, b] = px(img, TAB_PROBES[0].0, TAB_PROBES[0].1);
     g as i32 > r as i32 + 24 && b as i32 > g as i32 + 20
 }
+
+/// Where to click to select the All tab, in the 1280x960 frame.
+pub const ALL_TAB_CLICK: (i32, i32) = (445, 115);
 
 // ---- arrow_scan.go fingerprints -----------------------------------------------------------------
 

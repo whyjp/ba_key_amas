@@ -3,7 +3,7 @@
 //! starts at the beginning.
 use crate::{click_game, game_capture, require_ratio43, to_frame, Exclusive, Hcu};
 use anyhow::{anyhow, bail, Result};
-use baocr_pixels::{detail_visible, roster_cards, roster_visible_pixels, same_cards, scroll_thumb, signature_distance, list_shift, slot_occupied, unowned_banner, Card, CardSignature};
+use baocr_pixels::{all_tab_selected, detail_visible, roster_cards, ALL_TAB_CLICK, roster_visible_pixels, same_cards, scroll_thumb, signature_distance, list_shift, slot_occupied, unowned_banner, Card, CardSignature};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use image::RgbImage;
 use std::thread::sleep;
@@ -341,13 +341,28 @@ fn enter_student_menu(h: &Exclusive, region: R4, button: (i32, i32)) -> Result<R
 fn reach_roster(h: &Exclusive, region: R4, student_button: &dyn Fn(&RgbImage) -> Option<(i32, i32)>) -> Result<()> {
     let img = game_capture(h, region)?;
     match screen_kind(&img) {
-        Screen::Roster => Ok(()),
-        Screen::Profile => go_to_roster(h, region).map(|_| ()),
+        Screen::Roster => {}
+        Screen::Profile => { go_to_roster(h, region)?; }
         Screen::Other => match student_button(&img) {
-            Some(b) => enter_student_menu(h, region, b).map(|_| ()),
+            Some(b) => { enter_student_menu(h, region, b)?; }
             None => bail!("open the student list, a student profile or the main menu first"),
         },
     }
+    select_all_tab(h, region)
+}
+
+/// The game reopens the list on the tab last used. A scan of STRIKER only would silently miss the SPECIAL students,
+/// so the All tab is pressed first and the list is checked to show it.
+fn select_all_tab(h: &Exclusive, region: R4) -> Result<()> {
+    for _ in 0..3 {
+        let img = game_capture(h, region)?;
+        if all_tab_selected(&img) {
+            return Ok(());
+        }
+        click_game(h, region, ALL_TAB_CLICK.0, ALL_TAB_CLICK.1)?;
+        sleep(Duration::from_millis(700));
+    }
+    bail!("the All tab of the student list could not be selected")
 }
 
 /// Learn the total and leave the game on the first student's profile.

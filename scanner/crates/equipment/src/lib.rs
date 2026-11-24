@@ -90,6 +90,23 @@ pub fn equip_badge(img: &RgbImage, i: i32) -> bool {
     hits >= 8
 }
 
+/// The dark-blue "E" badge in the corner of an equipped slot's icon. The yellow dot of an empty slot sits in the same
+/// corner and also passes `equip_badge`, so only this square, which no empty slot has, proves an item is equipped.
+/// Measured on 106 students: 0 dark-blue pixels in all 252 unequipped slots, 59 or more in all 66 equipped ones.
+pub fn equip_marker(img: &RgbImage, i: i32) -> bool {
+    let x = 760 + 95 * i;
+    let mut hits = 0;
+    for y in 680..699 {
+        for xx in x..x + 18 {
+            let [r, g, b] = px(img, xx, y);
+            if r < 70 && g < 80 && b > 60 && b > r + 20 {
+                hits += 1;
+            }
+        }
+    }
+    hits >= 30
+}
+
 /// Share of the slot icon's pixels that are saturated and bright. An equipped item is drawn in colour; an
 /// unequipped slot shows the item greyed out (and a yellow notification dot that looks like the equipped badge).
 pub fn icon_vividness(img: &RgbImage, i: i32) -> f64 {
@@ -147,7 +164,8 @@ pub fn parse_level(text: &str) -> Option<Int> {
     }
     for m in DIGITS_RE.find_iter(&normalized) {
         let tok = m.as_str();
-        if tok.len() != 2 {
+        // a leading zero is the "v" misread as 0 ("Lo3"), not a level: those go to the vote in `vote_level`
+        if tok.len() != 2 || tok.starts_with('0') {
             continue;
         }
         if let Ok(n) = tok.parse::<Int>() {
@@ -157,6 +175,37 @@ pub fn parse_level(text: &str) -> Option<Int> {
         }
     }
     None
+}
+
+/// A level from a misread "Lv.NN": the game's "v" comes out as 0, o, y or nothing ("L060", "Lo40", "Lyl"), a 4 as
+/// "A" ("L0A0"), a 1 as l or I. The digits after the leading L, leading zeros dropped, are the level (1..=70).
+pub fn loose_level(text: &str) -> Option<Int> {
+    let mut chars = text.chars().skip_while(|c| !matches!(c, 'L' | 'l'));
+    chars.next()?;
+    let mut digits = String::new();
+    for c in chars {
+        match c {
+            '0'..='9' => digits.push(c),
+            'o' | 'O' => digits.push('0'),
+            'A' => digits.push('4'),
+            'l' | 'I' | '|' => digits.push('1'),
+            'v' | 'V' | 'u' | 'U' | 'y' | 'Y' | '-' | '.' | ' ' => {}
+            _ => return None,
+        }
+    }
+    let n: Int = digits.trim_start_matches('0').parse().ok()?;
+    (1..=70).contains(&n).then_some(n)
+}
+
+/// The level most observations agree on, at least twice.
+fn vote_level(obs: &[String]) -> Option<Int> {
+    let mut votes: BTreeMap<Int, usize> = BTreeMap::new();
+    for o in obs {
+        if let Some(n) = loose_level(o) {
+            *votes.entry(n).or_default() += 1;
+        }
+    }
+    votes.into_iter().filter(|(_, c)| *c >= 2).max_by_key(|(_, c)| *c).map(|(n, _)| n)
 }
 
 fn crop_clamped(img: &RgbImage, r: Roi) -> RgbImage {
@@ -306,7 +355,7 @@ fn equipment_level(img: &RgbImage, ocr: &dyn Ocr, i: i32) -> Result<(Option<Int>
             }
         }
     }
-    Ok((None, obs.join(" | ")))
+    Ok((vote_level(&obs), obs.join(" | ")))
 }
 
 fn read_line(img: &RgbImage, ocr: &dyn Ocr, roi: Roi) -> Result<String> {
@@ -360,13 +409,16 @@ pub fn detect_equipment_for(img: &RgbImage, ocr: &dyn Ocr, slot_kinds: &[String]
     for i in 0..3 {
         let hint = slot_kinds.get(i as usize).map(String::as_str).filter(|k| !k.is_empty());
         let mut e = blank(i + 1, "standard");
-        if equip_badge(img, i) {
+        if equip_marker(img, i) {
             e.equipped = Some(true);
+        } else if equip_badge(img, i) {
+            // a yellow dot and no "E": the slot is empty and an item is waiting to be put on
+            e.equipped = Some(false);
         }
         let tier_text = read_line(img, ocr, tier_roi(i))?;
         let ocr_tier = equipment_tier(&tier_text);
         raw.insert(format!("equipment_{}_tier", i + 1), tier_text);
-        if e.equipped.is_some() {
+        if e.equipped == Some(true) {
             let (lvl, obs) = equipment_level(img, ocr, i)?;
             e.level = lvl;
             raw.insert(format!("equipment_{}_level", i + 1), obs);
