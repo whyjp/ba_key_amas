@@ -56,3 +56,7 @@ npm test ; npm run typecheck
 3. Build command는 `npm ci && npm run assets`, Deploy command는 `npx wrangler d1 migrations apply ba-key-amas --remote && npx wrangler deploy`로 한다. 마이그레이션은 자동으로 돌지 않아서 배포 명령에 넣었다.
 4. 비밀값 `KEY_PEPPER`는 대시보드의 Variables and secrets에 Secret으로 넣는다. 바꾸면 기존 키가 모두 무효가 되므로 한 번 정하고 유지한다.
 5. 초상화와 `src/catalog.json`은 저장소에 없고 빌드 때 만든다. 게임 이미지를 저장소에 두지 않기 위해서다.
+
+---
+
+게임 <블루 아카이브>의 에셋 및 콘텐츠의 권리는 넥슨, 넥슨게임즈 및 Yostar에 있습니다.

@@ -64,3 +64,4 @@ tbody tr:nth-child(even) { background: #f1f7fd; }
 td.null { color: var(--line); }
 @media (max-width: 600px) { main { padding: 12px; } }
 [hidden] { display: none !important; }
+.legal { max-width: 1180px; margin: 24px auto; padding: 0 20px 20px; color: var(--soft); font-size: 12px; text-align: center; }
