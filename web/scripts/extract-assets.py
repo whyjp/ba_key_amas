@@ -96,7 +96,11 @@ def main() -> int:
     for item in json.loads(get(f"{BASE}/data/kr/equipment.min.json")).values():
         if item["Category"] in EQUIPMENT_TYPES and 1 <= item["Tier"] <= 10 and "설계도" not in item["Name"]:
             equipment.setdefault(item["Category"], {})[str(item["Tier"])] = {"name": item["Name"], "max_level": item.get("MaxLevel")}
+    # characters, outfits merged by name: what the card grades are measured against
+    import re
+    characters = {re.sub(r"\s*\([^)]*\)\s*$", "", n).strip() or n for n in catalog}
     meta = {
+        "character_count": len(characters),
         "equipment": equipment,
         "schools": loc["School"],
         "attack": loc["BulletType"],

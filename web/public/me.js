@@ -92,11 +92,16 @@ function favourites(d, ctx) {
   return row;
 }
 
-function studentsView(d, ctx, meta) {
-  const root = el("div", "main-view");
+/** The top of the profile: the numbers and the teacher's three favourites. */
+function profileTop(d, ctx) {
   const top = el("div", "main-top");
   top.append(summaryBar(d));
   if (d.analysis.top.length) top.append(favourites(d, ctx));
+  return top;
+}
+
+function studentsView(d, ctx, meta) {
+  const root = el("div", "main-view");
 
   const bar = el("div", "bar");
   const filter = el("input");
@@ -126,7 +131,7 @@ function studentsView(d, ctx, meta) {
   sort.addEventListener("change", draw);
   info.addEventListener("change", draw);
   draw();
-  root.append(top, bar, grid);
+  root.append(bar, grid);
   return root;
 }
 
@@ -338,8 +343,8 @@ function scheduleView(d) {
 }
 
 const TABS = [
+  ["heatmap", "히트맵", (d, c, m) => heatmapView(d, c, m, profileTop(d, c))],
   ["students", "학생", (d, c, m) => studentsView(d, c, m)],
-  ["heatmap", "학생 히트맵", (d, c, m) => heatmapView(d, c, m)],
   ["list", "학생 리스트", (d, c, m) => listView(d, c, m)],
   ["story", "스토리", (d) => storyView(d)],
   ["events", "이벤트 스토리", (d, c, m) => eventView(d, m)],
@@ -349,43 +354,22 @@ const TABS = [
   ["schedule", "스케줄", (d) => scheduleView(d)],
 ];
 
-function teacherPanel(d, root) {
+function teacherPanel(d) {
   const panel = el("div", "teacher");
   const level = d.progress?.account?.level;
   panel.append(el("small", "", "선생님"), el("b", "", `${d.nickname}${level ? ` (Lv.${level})` : ""}`));
-  if (d.view === "owner") {
-    const vis = el("button", "ghost wide", d.public ? "리더보드 공개 중" : "리더보드 비공개");
-    vis.title = "누르면 공개 여부를 바꿉니다";
-    vis.addEventListener("click", async () => {
-      try {
-        const r = await post("/api/visibility", { key: session.key, public: !d.public });
-        d.public = r.public;
-        vis.textContent = d.public ? "리더보드 공개 중" : "리더보드 비공개";
-      } catch (e) { alert(e.message); }
-    });
-    const rekey = el("button", "ghost wide", "키 바꾸기");
-    rekey.addEventListener("click", async () => {
-      if (!confirm("키를 새로 만듭니다. 이전 키는 곧바로 쓸 수 없게 됩니다.")) return;
-      try {
-        const r = await post("/api/rekey", { key: session.key });
-        session.key = r.key;
-        prompt("새 키입니다. 지금 복사해 두세요.", r.key);
-      } catch (e) { alert(e.message); }
-    });
-    const out = el("button", "ghost wide", "닫기");
-    out.addEventListener("click", () => { session.key = null; session.data = null; renderMe(root); });
-    panel.append(vis, rekey, out);
-  } else {
-    const back = el("a", "button wide", "리더보드로");
-    back.href = "#/";
-    panel.append(back);
-  }
+  // public or not, and the key, are changed in the add-on only, so this only says which it is
+  if (d.view === "owner") panel.append(el("small", "teacher-note", d.public ? "리더보드에 공개 중" : "리더보드에 공개하지 않음"));
+  const back = el("a", "button wide", "리더보드로");
+  back.href = "#/";
+  panel.append(back);
   return panel;
 }
 
 async function board(root, d) {
   const meta = await loadMeta();
   const ctx = context(d);
+  ctx.totalCharacters = meta.character_count;
   ctx.open = (s) => openDetail(s, meta, ctx);
   const side = el("nav", "side");
   side.setAttribute("aria-label", "정보 보기 탭");
@@ -402,51 +386,24 @@ async function board(root, d) {
     b.addEventListener("click", () => show(id));
     tabs.append(b);
   }
-  side.append(tabs, teacherPanel(d, root));
+  side.append(tabs, teacherPanel(d));
   const layout = el("div", "layout fit");
   layout.append(side, body);
   mount(root, layout);
-  show("students");
+  show("heatmap");
 }
 
-export async function renderMe(root, publicNickname) {
+/** A teacher's page: found by nickname among the public ones, or opened with a key (then `session.data` holds it). */
+export async function renderProfile(root, publicNickname, notFound) {
   if (publicNickname) {
     try {
-      const d = await fetch("/api/public?nickname=" + encodeURIComponent(publicNickname)).then(async (r) => {
-        const out = await r.json();
-        if (!r.ok) throw new Error(out.error || "불러오지 못했습니다");
-        return out;
-      });
+      const r = await fetch("/api/public?nickname=" + encodeURIComponent(publicNickname));
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "불러오지 못했습니다");
       return board(root, d);
     } catch (e) {
-      return mount(root, card("조회할 수 없습니다", el("p", "msg", e.message)));
+      return notFound(e.message);
     }
   }
-  if (session.data) return board(root, session.data);
-  const form = el("form");
-  const key = el("input");
-  key.type = "text";
-  key.maxLength = 40;
-  key.placeholder = "닉네임#a1b2c3";
-  key.spellcheck = false;
-  key.required = true;
-  key.autocomplete = "off";
-  const go = el("button", "", "조회");
-  go.type = "submit";
-  const msg = el("p", "msg");
-  msg.setAttribute("role", "alert");
-  form.append(key, go);
-  const gate = card("키로 조회", el("p", "hint", "애드온에서 업로드할 때 받은 닉네임#6자리 키를 입력하세요. 닉네임만으로는 조회할 수 없습니다."), form, msg);
-  gate.classList.add("gate");
-  mount(root, gate);
-  form.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    msg.textContent = "";
-    try {
-      const k = key.value.trim();
-      session.data = await post("/api/profile", { key: k });
-      session.key = k;
-      renderMe(root);
-    } catch (err) { msg.textContent = err.message; }
-  });
+  return board(root, session.data);
 }

@@ -87,6 +87,35 @@ def crop_lobby(img, face):
     return img.convert("RGB").crop(((w - cw) // 2, (h - ch) // 2, (w - cw) // 2 + cw, (h - ch) // 2 + ch)), (480, 400)
 
 
+# The portraits (public/portraits, 200x226) are cut with the face near the middle: across the students the detected
+# face centres sit at x 0.51 and y 0.48 with little spread. A student whose face is not found takes that mean.
+MEAN_FACE = (0.51, 0.48)
+
+
+def write_faces(det) -> int:
+    """`public/faces.json`: id -> [x, y], the face centre as fractions of the portrait, for placing the face in a
+    heatmap cell. Found at normal size, then at double size (small faces), else the mean."""
+    import json as _json
+    faces, found = {}, 0
+    for path in sorted((ROOT / "public" / "portraits").glob("*.webp")):
+        bgr = cv2.imdecode(np.fromfile(str(path), dtype=np.uint8), cv2.IMREAD_COLOR)
+        h, w = bgr.shape[:2]
+        face = largest_face(det, bgr)
+        if face is None:
+            big = cv2.resize(bgr, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
+            face = largest_face(det, big)
+            if face is not None:
+                face = (face[0] / 2, face[1] / 2, face[2] / 2)
+        if face is not None:
+            found += 1
+            xy = (min(max(face[0] / w, 0.2), 0.8), min(max(face[1] / h, 0.25), 0.7))
+        else:
+            xy = MEAN_FACE
+        faces[path.stem] = [round(float(xy[0]), 3), round(float(xy[1]), 3)]
+    (ROOT / "public" / "faces.json").write_text(_json.dumps(faces), encoding="utf-8")
+    return found
+
+
 def main() -> int:
     det = detector()
     jobs = (("standing", "card", crop_standing, 88), ("lobby", "card-lobby", crop_lobby, 90))
@@ -111,6 +140,7 @@ def main() -> int:
             cropped.save(target, "WEBP", quality=quality)
             done += 1
     print(f"{done} crops written, face found in {found}")
+    print(f"faces.json: face found on {write_faces(det)} portraits, the rest take the mean")
     return 0
 
 

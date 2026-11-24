@@ -2,7 +2,7 @@ import backgrounds from "./backgrounds.json";
 import catalog from "./catalog.json";
 import { formatKey, foldNickname, hashKey, keyMatches, newTag, normalizeNickname, parseKey, type ParsedKey } from "./keys.ts";
 import { BadJson, json, readJson, sameOriginJson, TooLarge } from "./security.ts";
-import { analyze, SCORE_VERSION, type Analysis, type OwnedStudent } from "./score.ts";
+import { aggregate, analyze, SCORE_VERSION, summarize, type Analysis, type CharSummary, type OwnedStudent } from "./score.ts";
 import { checkClient, checkSchemas, MIN_PROTOCOL, PROTOCOL, SERVER_VERSION, type Client } from "./version.ts";
 import { Invalid, MAX_BODY_BYTES, parseUpload, type StudentRow, type Upload } from "./validate.ts";
 
@@ -29,6 +29,7 @@ interface UserRow {
 }
 
 const DEFAULT_ADDON_URL = "https://github.com/whyjp/ba_key_amas/releases/latest";
+const ADDON_ONLY = new Set(["/api/upload", "/api/visibility", "/api/rekey", "/api/delete"]);
 const MAX_FAILS = 5;
 const LOCK_SECONDS = 15 * 60;
 const CATALOG = catalog as Record<string, { id: number; school: string | null; attack: string | null; armor: string | null; squad: string | null; equipment?: string[] | null }>;
@@ -62,7 +63,7 @@ function owned(s: StudentRow): OwnedStudent {
 /** The leaderboard row stored with a user: the score, the count columns and the three best characters. */
 function boardColumns(a: Analysis) {
   const top = a.top.map((c) => ({ base: c.base, total: c.total, outfits: c.outfits.slice(0, 4) }));
-  return { score: a.score, stats: JSON.stringify(a.stats), top: JSON.stringify(top) };
+  return { score: a.score, stats: JSON.stringify(a.stats), top: JSON.stringify(top), chars: JSON.stringify(summarize(a)) };
 }
 
 const BACKGROUNDS = backgrounds as string[];
@@ -106,7 +107,7 @@ async function upload(env: Env, up: Upload, client: Client): Promise<Response> {
     const before = await env.DB.prepare("SELECT name, bg, bg_third FROM students WHERE user_id = ?1 AND bg IS NOT NULL AND bg_third IS NOT NULL").bind(auth.user.id).all<{ name: string; bg: string; bg_third: number }>();
     const kept = new Map(before.results.map((r) => [r.name, { bg: r.bg, third: r.bg_third }]));
     await env.DB.batch([
-      env.DB.prepare("UPDATE users SET account_json = ?1, progress_json = ?2, updated_at = ?3, public = ?4, score = ?5, stats_json = ?6, top_json = ?7, score_version = ?8, addon_version = ?9, protocol = ?10 WHERE id = ?11").bind(accountJson, progressJson, now(), Number(up.public), board.score, board.stats, board.top, SCORE_VERSION, client.addon, client.protocol, auth.user.id),
+      env.DB.prepare("UPDATE users SET account_json = ?1, progress_json = ?2, updated_at = ?3, public = ?4, score = ?5, stats_json = ?6, top_json = ?7, score_version = ?8, addon_version = ?9, protocol = ?10, chars_json = ?11 WHERE id = ?12").bind(accountJson, progressJson, now(), Number(up.public), board.score, board.stats, board.top, SCORE_VERSION, client.addon, client.protocol, board.chars, auth.user.id),
       env.DB.prepare("DELETE FROM students WHERE user_id = ?1").bind(auth.user.id),
       ...studentStatements(env, auth.user.id, up.students, kept),
     ]);
@@ -116,13 +117,22 @@ async function upload(env: Env, up: Upload, client: Client): Promise<Response> {
   const hash = await hashKey(env.KEY_PEPPER, key);
   const t = now();
   try {
-    const res = await env.DB.prepare("INSERT INTO users (nick_norm, nickname, key_hash, account_json, progress_json, created_at, updated_at, public, score, stats_json, top_json, score_version, addon_version, protocol) VALUES (?1,?2,?3,?4,?5,?6,?6,?7,?8,?9,?10,?11,?12,?13)").bind(nick, nickname, hash, accountJson, progressJson, t, Number(up.public), board.score, board.stats, board.top, SCORE_VERSION, client.addon, client.protocol).run();
+    const res = await env.DB.prepare("INSERT INTO users (nick_norm, nickname, key_hash, account_json, progress_json, created_at, updated_at, public, score, stats_json, top_json, score_version, addon_version, protocol, chars_json) VALUES (?1,?2,?3,?4,?5,?6,?6,?7,?8,?9,?10,?11,?12,?13,?14)").bind(nick, nickname, hash, accountJson, progressJson, t, Number(up.public), board.score, board.stats, board.top, SCORE_VERSION, client.addon, client.protocol, board.chars).run();
     const id = res.meta.last_row_id;
     await env.DB.batch(studentStatements(env, id, up.students));
   } catch {
     return json(409, { error: "이미 쓰이는 닉네임입니다" });
   }
   return json(201, { key: formatKey(key), created: true, students: up.students.length, public: up.public, score: board.score });
+}
+
+function ownedFromRows(rows: Record<string, unknown>[]): OwnedStudent[] {
+  return rows.map((r) => ({
+    name: String(r.name), student_id: (r.student_id as number | null) ?? null, level: r.level as number | null, stars: r.stars as number | null,
+    ex_skill: r.ex_skill as number | null, normal_skill: r.normal_skill as number | null, passive_skill: r.passive_skill as number | null, sub_skill: r.sub_skill as number | null,
+    bond: r.bond as number | null, uw_stars: r.uw_stars as number | null, uw_level: r.uw_level as number | null,
+    pinned: r.pinned === null ? null : Boolean(r.pinned), memorial: r.memorial === null ? null : Boolean(r.memorial),
+  }));
 }
 
 async function profile(env: Env, user: UserRow, view: "owner" | "public"): Promise<Response> {
@@ -132,14 +142,7 @@ async function profile(env: Env, user: UserRow, view: "owner" | "public"): Promi
     const detail = typeof r.detail_json === "string" ? JSON.parse(r.detail_json) : null;
     return { ...r, user_id: undefined, detail_json: undefined, detail, school: c?.school ?? null, attack: c?.attack ?? null, armor: c?.armor ?? null, equipment_slots: c?.equipment ?? null };
   });
-  const analysis = analyze(
-    rows.results.map((r) => ({
-      name: String(r.name), student_id: (r.student_id as number | null) ?? null, level: r.level as number | null, stars: r.stars as number | null,
-      ex_skill: r.ex_skill as number | null, normal_skill: r.normal_skill as number | null, passive_skill: r.passive_skill as number | null, sub_skill: r.sub_skill as number | null,
-      bond: r.bond as number | null, uw_stars: r.uw_stars as number | null, uw_level: r.uw_level as number | null,
-      pinned: r.pinned === null ? null : Boolean(r.pinned), memorial: r.memorial === null ? null : Boolean(r.memorial),
-    })),
-  );
+  const analysis = analyze(ownedFromRows(rows.results));
   return json(200, {
     nickname: user.nickname,
     updated_at: user.updated_at,
@@ -164,6 +167,25 @@ async function publicProfile(env: Env, nickname: string): Promise<Response> {
   return user ? profile(env, user, "public") : json(404, { error: "공개된 유저가 아닙니다" });
 }
 
+/**
+ * Every public teacher's characters added up (outfits merged by name). A teacher uploaded before the characters were
+ * kept gets them computed here once and stored. Only owners and totals leave, never a single student's own stats.
+ */
+async function communityStudents(env: Env): Promise<Response> {
+  const users = await env.DB.prepare("SELECT id, chars_json FROM users WHERE public = 1").all<{ id: number; chars_json: string | null }>();
+  const lists: CharSummary[][] = [];
+  for (const u of users.results) {
+    let chars = u.chars_json;
+    if (!chars) {
+      const rows = await env.DB.prepare("SELECT * FROM students WHERE user_id = ?1").bind(u.id).all();
+      chars = JSON.stringify(summarize(analyze(ownedFromRows(rows.results))));
+      await env.DB.prepare("UPDATE users SET chars_json = ?1 WHERE id = ?2").bind(chars, u.id).run();
+    }
+    lists.push(JSON.parse(chars) as CharSummary[]);
+  }
+  return json(200, { teachers: users.results.length, characters: aggregate(lists) }, { "cache-control": "public, max-age=60" });
+}
+
 /** Public users only, best first. Reads columns stored at upload, so it never touches the students table. */
 async function leaderboard(env: Env): Promise<Response> {
   const rows = await env.DB.prepare("SELECT nickname, score, stats_json, top_json, updated_at FROM users WHERE public = 1 ORDER BY score DESC, updated_at ASC LIMIT 100").all<{
@@ -184,11 +206,13 @@ async function limited(req: Request, env: Env): Promise<Response | null> {
 
 async function handleApi(req: Request, env: Env, path: string): Promise<Response> {
   if (req.method === "GET" && path === "/api/leaderboard") return (await limited(req, env)) ?? leaderboard(env);
+  if (req.method === "GET" && path === "/api/leaderboard/students") return (await limited(req, env)) ?? communityStudents(env);
   if (req.method === "GET" && path === "/api/version") return json(200, { server: SERVER_VERSION, protocol: PROTOCOL, min_protocol: MIN_PROTOCOL, download: env.ADDON_URL ?? DEFAULT_ADDON_URL });
   if (req.method === "GET" && path === "/api/public") return (await limited(req, env)) ?? publicProfile(env, new URL(req.url).searchParams.get("nickname") ?? "");
   if (req.method !== "POST") return json(405, { error: "POST 만 받습니다" }, { allow: "POST, GET" });
   let client: Client | null = null;
-  if (path === "/api/upload") {
+  // what changes an account (upload, public or private, new key, delete) is for the add-on only
+  if (ADDON_ONLY.has(path)) {
     const c = checkClient(req.headers);
     if ("status" in c) return json(c.status, { error: c.error, server: SERVER_VERSION, protocol: PROTOCOL, min_protocol: MIN_PROTOCOL, download: env.ADDON_URL ?? DEFAULT_ADDON_URL });
     client = c;

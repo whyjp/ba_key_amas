@@ -53,6 +53,15 @@ struct Args {
     /// Send the last student scan and progress scan to a ba-key-AMAS web server (https, or http://localhost). No game input.
     #[arg(long, value_name = "SERVER_URL")]
     upload: Option<String>,
+    /// Change the account the saved key opens: --visibility public|private, or --rekey. Add-on only; the website cannot.
+    #[arg(long, value_name = "SERVER_URL")]
+    manage: Option<String>,
+    /// --manage: show this account on the leaderboard (public) or not (private).
+    #[arg(long, value_name = "public|private")]
+    visibility: Option<String>,
+    /// --manage: replace the key with a new one.
+    #[arg(long)]
+    rekey: bool,
     /// --upload: show this account on the server's leaderboard (default: private).
     #[arg(long)]
     public: bool,
@@ -179,10 +188,10 @@ fn real_main() -> Result<()> {
         println!("{}", report.render());
         return Ok(());
     }
-    let modes = [args.boxes.is_some(), args.image.is_some(), args.reextract.is_some(), args.scan_arrows, args.scan_progress, args.upload.is_some(), args.watch, args.grab.is_some(), args.learn.is_some(), args.assist];
+    let modes = [args.boxes.is_some(), args.image.is_some(), args.reextract.is_some(), args.scan_arrows, args.scan_progress, args.upload.is_some(), args.manage.is_some(), args.watch, args.grab.is_some(), args.learn.is_some(), args.assist];
     let chosen = modes.iter().filter(|m| **m).count();
     if chosen > 1 {
-        bail!("choose one of --image, --reextract, --scan-arrows, --scan-progress, --upload, --watch, --grab, --learn, --assist (none starts the add-on)");
+        bail!("choose one of --image, --reextract, --scan-arrows, --scan-progress, --upload, --manage, --watch, --grab, --learn, --assist (none starts the add-on)");
     }
     if args.from_first && !args.scan_arrows {
         bail!("--from-first requires --scan-arrows");
@@ -193,6 +202,19 @@ fn real_main() -> Result<()> {
         let store = progress.parent().map(|p| p.join("upload.json")).unwrap_or_else(|| PathBuf::from("upload.json"));
         let req = upload::Request { server: server.clone(), nickname: args.nickname.clone(), public: args.public, students_dir: args.out_dir(), progress_dir: progress, store };
         println!("{}", upload::run(&req)?);
+        return Ok(());
+    }
+    if let Some(server) = &args.manage {
+        let action = match (args.visibility.as_deref(), args.rekey) {
+            (Some("public"), false) => upload::Action::Visibility(true),
+            (Some("private"), false) => upload::Action::Visibility(false),
+            (None, true) => upload::Action::Rekey,
+            _ => bail!("--manage needs exactly one of --visibility public|private or --rekey"),
+        };
+        let progress = progress_dir();
+        let store = progress.parent().map(|p| p.join("upload.json")).unwrap_or_else(|| PathBuf::from("upload.json"));
+        let req = upload::Manage { server: server.clone(), nickname: args.nickname.clone(), action, progress_dir: progress, store };
+        println!("{}", upload::manage(&req)?);
         return Ok(());
     }
     if let Some(png) = &args.boxes {

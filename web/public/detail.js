@@ -26,6 +26,24 @@ const TIERS = [
   { key: "ar", label: "AR", art: "standing", full: false },
   { key: "rr", label: "RR", art: "standing", full: false },
 ];
+
+/** Share of ALL characters of the game each grade takes, from the top: SAR 1%, UR 2%, SR 3%, AR 6%, RR 10%. The
+ *  grade of a card is its character's place among the teacher's characters, measured against this share of the
+ *  whole roster, so it means the same for a teacher with 40 characters and one with 140. */
+export const GRADE_SHARE = [0.01, 0.02, 0.03, 0.06, 0.10];
+const FALLBACK_TOTAL = 145;
+
+/** `rank` is 0-based. The grade, or the plain card past the last one. */
+export function tierFor(rank, totalCharacters) {
+  if (rank < 0) return PLAIN;
+  const total = totalCharacters || FALLBACK_TOTAL;
+  let upTo = 0;
+  for (let i = 0; i < TIERS.length; i++) {
+    upTo += Math.max(i === 0 ? 1 : 0, Math.round(total * GRADE_SHARE[i]));
+    if (rank < upTo) return TIERS[i];
+  }
+  return PLAIN;
+}
 const PLAIN = { key: "n", label: "", art: "standing", full: false };
 const CARD_W = 380;
 const CARD_H = 640;
@@ -195,7 +213,7 @@ const EXTRA_STATS = [
 
 /** One card. `animate` plays the landing motion; switching outfits skips the long intro. */
 function buildCard(s, meta, ctx, rank, animate) {
-  const tier = TIERS[rank] ?? PLAIN;
+  const tier = tierFor(rank, ctx.totalCharacters);
   const det = s.detail ?? {};
   const card = el("div", "pcard tier-" + tier.key + (tier.full ? " full frame-" + tier.frame : "") + (animate ? "" : " quick"));
   card.setAttribute("role", "dialog");
@@ -290,7 +308,7 @@ function buildCard(s, meta, ctx, rank, animate) {
   if (tier.label) {
     // the grade and the overall place, at the very bottom of the card
     const grade = el("div", "pc-grade");
-    grade.append(el("b", "", tier.label), el("span", "", `전체 ${rank + 1}위`));
+    grade.append(el("b", "", tier.label), el("span", "", `전체 ${rank + 1}위 · 상위 ${((rank + 1) / (ctx.totalCharacters || FALLBACK_TOTAL) * 100).toFixed(1)}%`));
     body.append(grade);
   }
   front.append(band, head, body);
@@ -431,7 +449,7 @@ function intro(s, meta, tier, students) {
 export function openDetail(s, meta, ctx) {
   const prev = document.activeElement;
   const rank = ctx.rankOf ? ctx.rankOf(s.name) : -1;
-  const tier = TIERS[rank] ?? PLAIN;
+  const tier = tierFor(rank, ctx.totalCharacters);
   const outfits = ctx.siblings ? ctx.siblings(s.name) : [s];
 
   const scrim = el("div", "scrim");

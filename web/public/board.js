@@ -1,3 +1,5 @@
+import { communityHeatmap } from "./heatmap.js";
+import { loadMeta } from "./domain.js";
 import { card, el, empty, get, mount, num, outfitStack } from "./ui.js";
 
 const COLS = [
@@ -12,20 +14,44 @@ function value(e, col) {
   return e.stats ? e.stats[col] : null;
 }
 
+/** The leaderboard: the community map of characters, and the ranking of teachers. A teacher opens that teacher's page. */
 export async function renderBoard(root) {
-  const holder = el("div");
-  mount(root, card("리더보드", el("p", "hint", "공개를 선택한 선생님만 보입니다. 이름을 누르면 그 선생님의 정보를 볼 수 있습니다."), holder));
-  let rows;
-  try {
-    rows = (await get("/api/leaderboard")).entries;
-  } catch (err) {
-    holder.append(el("p", "msg", err.message));
-    return;
-  }
-  if (rows.length === 0) {
-    holder.append(empty("아직 공개한 유저가 없습니다."));
-    return;
-  }
+  const seg = el("div", "seg");
+  const tabs = [["map", "학생 히트맵"], ["rank", "선생님 순위"]].map(([id, label]) => {
+    const b = el("button", "", label);
+    b.type = "button";
+    b.dataset.tab = id;
+    b.setAttribute("role", "tab");
+    seg.append(b);
+    return b;
+  });
+  const holder = el("div", "board-panel");
+  mount(root, card("리더보드", seg, holder));
+  const show = async (id) => {
+    for (const t of tabs) t.setAttribute("aria-selected", String(t.dataset.tab === id));
+    holder.replaceChildren(el("p", "hint", "불러오는 중"));
+    try {
+      if (id === "map") await showMap(holder);
+      else await showRanking(holder);
+    } catch (err) {
+      holder.replaceChildren(el("p", "msg", err.message));
+    }
+  };
+  for (const t of tabs) t.addEventListener("click", () => show(t.dataset.tab));
+  show("map");
+}
+
+async function showMap(holder) {
+  const [data, meta] = await Promise.all([get("/api/leaderboard/students"), loadMeta()]);
+  if (data.characters.length === 0) return void holder.replaceChildren(empty("아직 공개한 유저가 없습니다."));
+  holder.replaceChildren(communityHeatmap(data.characters, meta, data.teachers));
+}
+
+async function showRanking(holder) {
+  holder.replaceChildren(el("p", "hint", "공개를 선택한 선생님만 보입니다. 선생님을 누르면 그 선생님의 상세 정보를 볼 수 있습니다."), el("div", "ranking"));
+  const rows = (await get("/api/leaderboard")).entries;
+  const area = holder.querySelector(".ranking");
+  if (rows.length === 0) return void area.replaceChildren(empty("아직 공개한 유저가 없습니다."));
   let sort = { col: "score", dir: -1 };
   const draw = () => {
     const sorted = [...rows].sort((a, b) => {
@@ -67,12 +93,14 @@ export async function renderBoard(root) {
       top.append(tops);
       tr.append(top, el("td", "strong", num(e.score)));
       for (const col of ["bond60", "bond30", "levelHigh", "pinned", "memorial", "characters"]) tr.append(el("td", "", num(e.stats?.[col])));
+      tr.classList.add("clickable");
+      tr.addEventListener("click", () => { location.hash = link.getAttribute("href"); });
       body.append(tr);
     }
     table.append(thead, body);
     const wrap = el("div", "listwrap");
     wrap.append(table);
-    holder.replaceChildren(wrap);
+    area.replaceChildren(wrap);
   };
   draw();
 }

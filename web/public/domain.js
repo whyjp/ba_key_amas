@@ -8,7 +8,8 @@ export function loadMeta() {
     fetch("/meta.json").then((r) => (r.ok ? r.json() : {})).catch(() => ({})),
     fetch("/halos.json").then((r) => (r.ok ? r.json() : [])).catch(() => []),
     fetch("/card-lobby.json").then((r) => (r.ok ? r.json() : [])).catch(() => []),
-  ]).then(([meta, halos, lobby]) => ({ ...meta, halos: new Set(halos), hiresLobby: new Set(lobby) }));
+    fetch("/faces.json").then((r) => (r.ok ? r.json() : {})).catch(() => ({})),
+  ]).then(([meta, halos, lobby, faces]) => ({ ...meta, halos: new Set(halos), hiresLobby: new Set(lobby), faces }));
   return metaPromise;
 }
 

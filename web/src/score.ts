@@ -141,3 +141,38 @@ export function analyze(students: OwnedStudent[]): Analysis {
   const score = Math.round(characters.reduce((n, c) => n + c.total, 0) * 10) / 10;
   return { score, stats, characters, top: characters.slice(0, 3) };
 }
+
+export interface CharSummary {
+  base: string;
+  total: number;
+  outfits: Outfit[];
+}
+
+/** A user's characters without the parts of the score: all the leaderboard keeps per character. */
+export function summarize(a: Analysis): CharSummary[] {
+  return a.characters.map((c) => ({ base: c.base, total: c.total, outfits: c.outfits.slice(0, 4) }));
+}
+
+export interface Community {
+  base: string;
+  /** The characters' totals added up over every user who owns the character. */
+  total: number;
+  owners: number;
+  outfits: Outfit[];
+}
+
+/** Adds up the characters of many users: one entry per character name, best first. Nothing of a single student's
+ *  own stats takes part, only who owns the character and what it is worth. */
+export function aggregate(users: CharSummary[][]): Community[] {
+  const by = new Map<string, Community>();
+  for (const list of users) {
+    for (const c of list) {
+      const e = by.get(c.base) ?? { base: c.base, total: 0, owners: 0, outfits: [] };
+      e.total += c.total;
+      e.owners += 1;
+      for (const o of c.outfits) if (!e.outfits.some((x) => x.name === o.name) && e.outfits.length < 4) e.outfits.push(o);
+      by.set(c.base, e);
+    }
+  }
+  return [...by.values()].map((e) => ({ ...e, total: Math.round(e.total * 10) / 10 })).sort((a, b) => b.total - a.total || a.base.localeCompare(b.base, "ko"));
+}

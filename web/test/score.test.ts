@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { analyze, baseName, bondPoints, OUTFIT_DECAY, type OwnedStudent } from "../src/score.ts";
+import { aggregate, analyze, baseName, bondPoints, OUTFIT_DECAY, summarize, type OwnedStudent } from "../src/score.ts";
 import { parseUpload } from "../src/validate.ts";
 
 const s = (name: string, o: Partial<OwnedStudent> = {}): OwnedStudent => ({
@@ -77,4 +77,16 @@ test("the duty scan decides memorial lobby, by name", () => {
   assert.equal(up.public, true);
   assert.deepEqual(up.students.map((x) => x.memorial), [true, false, null]);
   assert.equal(parseUpload({ nickname: "x", roster: { entries: [{ student: { name: "a" } }] } }).public, false);
+});
+
+test("the community sum adds a character over the teachers who own it, outfits merged, without stats", () => {
+  const a = analyze([s("리오", { bond: 20, student_id: 1 }), s("리오(무장)", { bond: 10, student_id: 2 }), s("아루", { bond: 5 })]);
+  const b = analyze([s("리오", { bond: 30, student_id: 1 })]);
+  const sum = aggregate([summarize(a), summarize(b)]);
+  const rio = sum.find((c) => c.base === "리오");
+  assert.equal(rio?.owners, 2);
+  assert.deepEqual(rio?.outfits.map((o) => o.name), ["리오", "리오(무장)"]);
+  assert.equal(rio?.total, Math.round(((a.characters.find((c) => c.base === "리오")?.total ?? 0) + (b.characters[0]?.total ?? 0)) * 10) / 10);
+  assert.equal(sum[0]?.base, "리오", "best first");
+  assert.deepEqual(Object.keys(rio ?? {}).sort(), ["base", "outfits", "owners", "total"], "no stats of a single student leave");
 });

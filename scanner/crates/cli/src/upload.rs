@@ -119,6 +119,67 @@ update the add-on: {url}"),
     Ok(format!("{} {} ({} students, score {})", if new { "new key" } else { "updated" }, key, out["students"], out["score"]))
 }
 
+/// What to change on the account the saved key opens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Action {
+    /// Show this teacher on the leaderboard, or stop showing.
+    Visibility(bool),
+    /// Replace the key with a new one (the old one stops working).
+    Rekey,
+}
+
+pub struct Manage {
+    pub server: String,
+    pub nickname: Option<String>,
+    pub action: Action,
+    pub progress_dir: PathBuf,
+    pub store: PathBuf,
+}
+
+/// Public or private, and a new key, are changed here and nowhere on the website.
+pub fn manage(req: &Manage) -> Result<String> {
+    check_server(&req.server)?;
+    let progress = read_json(&req.progress_dir.join("latest.json")).ok();
+    let nickname = req.nickname.clone().or_else(|| nickname_of(&progress)).ok_or_else(|| anyhow!("no account nickname: pass --nickname"))?;
+    let mut store = KeyStore::load(&req.store);
+    let key = store.get(&req.server, &nickname).ok_or_else(|| anyhow!("no saved key for {nickname} on {}: upload once first", req.server))?.to_string();
+    let (path, body) = match req.action {
+        Action::Visibility(on) => ("/api/visibility", json!({ "key": key, "public": on })),
+        Action::Rekey => ("/api/rekey", json!({ "key": key })),
+    };
+    let out = post_json(&format!("{}{path}", req.server.trim_end_matches('/')), body)?;
+    match req.action {
+        Action::Visibility(_) => Ok(format!("leaderboard: {}", if out["public"].as_bool().unwrap_or(false) { "public" } else { "private" })),
+        Action::Rekey => {
+            let new = out["key"].as_str().ok_or_else(|| anyhow!("the server sent no key"))?;
+            store.set(&req.server, &nickname, new);
+            store.save(&req.store)?;
+            Ok(format!("new key {new} (the old one no longer works)"))
+        }
+    }
+}
+
+fn post_json(url: &str, body: Value) -> Result<Value> {
+    let res = match ureq::post(url)
+        .set("content-type", "application/json")
+        .set("x-amas-protocol", &UPLOAD_PROTOCOL.to_string())
+        .set("x-amas-addon", env!("CARGO_PKG_VERSION"))
+        .send_json(body)
+    {
+        Ok(r) => r,
+        Err(ureq::Error::Status(code, r)) => {
+            let v = r.into_json::<Value>().unwrap_or(Value::Null);
+            let msg = v["error"].as_str().unwrap_or_default();
+            match v["download"].as_str() {
+                Some(url) if code == 426 => bail!("server answered {code}: {msg}\nupdate the add-on: {url}"),
+                _ => bail!("server answered {code}: {msg}"),
+            }
+        }
+        Err(e) => return Err(e.into()),
+    };
+    Ok(res.into_json()?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
