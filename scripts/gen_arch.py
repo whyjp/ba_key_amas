@@ -98,16 +98,13 @@ def main():
     svg.append("</svg>")
     svg_text = "\n".join(svg)
     (DOCS / "diagrams").mkdir(exist_ok=True)
-    (DOCS / "diagrams" / "crates.svg").write_text(svg_text, encoding="utf-8", newline="
-")
+    (DOCS / "diagrams" / "crates.svg").write_text(svg_text, encoding="utf-8", newline="\n")
     mmd = ["graph TD"] + [f"  {a.replace('-', '_')}[{a}] --> {b.replace('-', '_')}[{b}]" for a, b in edges]
-    (DOCS / "diagrams" / "crates.mmd").write_text("\n".join(mmd) + "\n", encoding="utf-8", newline="
-")
+    (DOCS / "diagrams" / "crates.mmd").write_text("\n".join(mmd) + "\n", encoding="utf-8", newline="\n")
     tpl = DOCS / "architecture.template.html"
     if tpl.exists():
         html = tpl.read_text(encoding="utf-8").replace("<!--CRATES_SVG-->", svg_text)
-        (DOCS / "architecture.html").write_text(html, encoding="utf-8", newline="
-")
+        (DOCS / "architecture.html").write_text(html, encoding="utf-8", newline="\n")
     print(f"{len(pk)} crates, {len(edges)} edges, depth {max(depth.values()) + 1}")
 
 
