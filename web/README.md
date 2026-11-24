@@ -146,13 +146,21 @@ ba-key-AMAS --forget-account
 ```
 npm ci
 npm run assets          # 학생 카탈로그와 초상화를 SchaleDB에서 받는다 (커밋하지 않는다)
-printf "KEY_PEPPER=dev-only\nALLOW_UNSIGNED_ADDON=1\n" > .dev.vars   # 로컬 개발만: 서명 없는 요청을 받는다. 운영에는 절대 두지 않는다
 npm run db:local
-npm run dev
+npm run dev             # 먼저 scripts/sync-dev-vars.ts가 저장소 .env의 키로 .dev.vars를 만든다 (아래 .env 참고)
 ba-key-AMAS --upload http://127.0.0.1:8787 --public   # 처음에는 회원코드를 묻는다
 npm test ; npm run typecheck
 pwsh -File scripts/e2e-accounts.ps1          # wrangler dev 위에서 올려 보는 종단 시험
 ```
+
+## 로컬 `.env` (git이 무시한다)
+
+저장소 루트의 `.env`에 `BAOCR_ADDON_SIGNING_KEY=<키>`를 넣어 두면 로컬 작업이 모두 같은 키를 쓴다. 견본은 `.env.example`이다. `.env`는 `.gitignore`에 있어 커밋되지 않는다.
+
+- **빌드와 `cargo test`.** `scanner/crates/cli/build.rs`가 가장 가까운 `.env`(없으면 `BAOCR_ENV_FILE`이 가리키는 파일)를 읽어 컴파일러에 키를 넘긴다. 그래서 로컬 빌드도 공식 릴리스처럼 서명한다. 환경 변수 `BAOCR_ADDON_SIGNING_KEY`가 이미 있으면 그쪽이 우선이다(CI가 쓰는 경로). `.env`를 **처음 만든 뒤에는** `touch scanner/crates/cli/build.rs`로 한 번 다시 읽히게 하고, 이후 값을 바꾸면 cargo가 알아서 다시 빌드한다.
+- **로컬 서버(`npm run dev`).** `scripts/sync-dev-vars.ts`가 `.env`의 키를 `web/.dev.vars`의 `ADDON_SIGNING_KEY`로 옮긴다. 키가 없으면 `ALLOW_UNSIGNED_ADDON=1`을 쓰고(로컬 개발 전용) 그렇다고 알려 준다. `KEY_PEPPER`는 처음에 무작위로 만들어 두고 이후 유지한다.
+- **종단 시험.** `scripts/e2e-accounts.ps1`은 `-SigningKey`를 주지 않으면 `.env`의 키를 읽고, 실행 파일이 그 키로 빌드되었다고 보고 런타임에는 키를 건네지 않는다. 그러니 `.env`를 쓴 뒤에 빌드한 실행 파일을 `-Exe`로 줘야 한다.
+- 작업 트리(worktree)는 저장소 루트가 아니라서 각자 `.env`를 두거나 `BAOCR_ENV_FILE`로 한 파일을 가리켜야 한다. 키를 모든 작업 트리에 흩뿌리지 않는 쪽을 권한다.
 
 ## 애드온 서명 키 설정
 
