@@ -77,17 +77,33 @@ function cell(c, rank, byName, meta, ctx) {
   if (rank < 3) t.classList.add("top" + (rank + 1));
   // a portrait wherever there is room for a face; only a sliver gets none
   const showArt = Math.min(c.w, c.h) >= 16 && a >= 400;
+  const owned = (o) => byName.get(o.name);
+  const shown = showArt ? ch.outfits.filter((o) => o.id).slice(0, c.w >= 200 ? 3 : c.w >= 120 ? 2 : 1) : [];
+  // a character whose outfits share the cell is split into left / middle / right pieces; each piece is its own button
+  const split = shown.length > 1;
   if (showArt) {
     const art = el("div", "hm-art");
-    const shown = ch.outfits.filter((o) => o.id).slice(0, c.w >= 200 ? 3 : c.w >= 120 ? 2 : 1);
     const slotW = (c.w - 2) / Math.max(shown.length, 1);
     for (const o of shown) {
-      const p = el("i");
+      const seg = el("i");
+      const p = el("b");
       const { size, pos } = placeFace(slotW, c.h - 2, meta.faces?.[String(o.id)]);
       p.style.backgroundImage = `url(/portraits/${encodeURIComponent(o.id)}.webp)`;
       p.style.backgroundSize = size;
       p.style.backgroundPosition = pos;
-      art.append(p);
+      seg.append(p);
+      if (split && owned(o)) {
+        seg.classList.add("pick");
+        seg.tabIndex = 0;
+        seg.setAttribute("role", "button");
+        seg.setAttribute("aria-label", o.name);
+        seg.title = `${o.name}
+카드 열기`;
+        const open = (e) => { e.stopPropagation(); openDetail(owned(o), meta, ctx); };
+        seg.addEventListener("click", open);
+        seg.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(e); } });
+      }
+      art.append(seg);
     }
     t.append(art);
   }
@@ -99,13 +115,17 @@ function cell(c, rank, byName, meta, ctx) {
     if (big && c.h >= 70) label.append(el("span", "", num(ch.total)));
   }
   t.append(label);
+  if (split) t.classList.add("split");
   const first = byName.get(ch.outfits[0]?.name);
-  if (first) {
+  if (first && !split) {
     t.tabIndex = 0;
     t.setAttribute("role", "button");
     const open = () => openDetail(first, meta, ctx);
     t.addEventListener("click", open);
     t.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } });
+  } else if (first) {
+    // a click on the name strip or a gap opens the first outfit
+    t.addEventListener("click", () => openDetail(first, meta, ctx));
   }
   return t;
 }
@@ -145,7 +165,7 @@ function mountTreemap(frame, chars, byName, meta, ctx, fit) {
 /** One teacher's characters. `top` (summary and favourites) sits above the map. */
 export function heatmapView(d, ctx, meta, top) {
   const root = el("div", "main-view");
-  const note = el("p", "hint", "넓을수록 점수가 높은 학생입니다. 의상이 다른 같은 학생은 한 칸에 모았습니다. 칸을 누르면 학생 카드가 열립니다.");
+  const note = el("p", "hint", "넓을수록 점수가 높은 학생입니다. 의상이 다른 같은 학생은 한 칸에 모았습니다. 한 칸에 의상이 여럿이면 칸이 조각으로 나뉘며, 마음에 드는 조각을 눌러 그 의상의 카드를 엽니다.");
   const frame = el("div", "hm-frame");
   if (top) root.append(top);
   root.append(note, frame);
