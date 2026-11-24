@@ -6,3 +6,10 @@ public/portraits/
 public/icons/
 public/schools/
 public/meta.json
+public/standing/
+public/lobby/
+public/halos/
+public/halos.json
+public/card/
+public/card-lobby/
+scripts/.cache/

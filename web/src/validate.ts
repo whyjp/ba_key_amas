@@ -20,7 +20,10 @@ export interface StudentRow {
   role: string | null;
   pinned: boolean | null;
   memorial: boolean | null;
+  detail: Detail | null;
 }
+
+export type Detail = Record<string, unknown>;
 
 export interface Upload {
   nickname: string;
@@ -48,6 +51,91 @@ function str(v: unknown, max: number): string | null {
   return typeof v === "string" && v.length > 0 && v.length <= max ? v.normalize("NFC") : null;
 }
 
+
+const BIG = 2_000_000_000;
+
+function pick(v: unknown, keys: string[], lo = 0, hi = BIG): Obj | null {
+  if (!isObj(v)) return null;
+  const out: Obj = {};
+  for (const k of keys) {
+    const n = int(v[k], lo, hi);
+    if (n !== null) out[k] = n;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+function bools(v: unknown, keys: string[]): Obj | null {
+  if (!isObj(v)) return null;
+  const out: Obj = {};
+  for (const k of keys) if (typeof v[k] === "boolean") out[k] = v[k];
+  return Object.keys(out).length ? out : null;
+}
+
+const POSITIONS = new Set(["FRONT", "MIDDLE", "BACK"]);
+const STAT_KEYS = ["max_hp", "attack", "defense", "healing"];
+const DETAIL_KEYS = ["accuracy", "evasion", "critical", "critical_damage_pct", "defense_pierce", "stability", "range", "cost_recovery", "cc_power", "cc_resist", "type_bonus_pct", "max_cost_bonus"];
+const MYSTIC_KEYS = ["stars", "next_stars", "max_bond_rank", "next_max_bond_rank", "next_max_hp", "next_attack", "next_healing"];
+const TERRAIN_KEYS = ["urban", "outdoor", "indoor"];
+
+function parseEquipment(v: unknown): Obj[] {
+  if (!Array.isArray(v)) return [];
+  const out: Obj[] = [];
+  for (const e of v.slice(0, 6)) {
+    if (!isObj(e)) continue;
+    const row: Obj = {};
+    const slot = int(e.slot, 1, 6);
+    if (slot === null) continue;
+    row.slot = slot;
+    row.unique = e.slot_kind === "unique_gear";
+    if (typeof e.equipped === "boolean") row.equipped = e.equipped;
+    const kind = str(e.type, 20);
+    if (kind) row.type = kind;
+    const name = str(e.item_name, 60);
+    if (name) row.item_name = name;
+    const tier = int(e.tier, 1, 12);
+    if (tier !== null) row.tier = tier;
+    const level = int(e.level, 1, 100);
+    if (level !== null) row.level = level;
+    out.push(row);
+  }
+  return out;
+}
+
+/** The scanned numbers beyond the table columns. Every field is whitelisted, ranged and typed here. */
+export function parseDetail(v: Obj): Detail | null {
+  const d: Detail = {};
+  const stats = pick(v.stats, STAT_KEYS);
+  if (stats) d.stats = stats;
+  const exp = pick(v.exp, ["current", "required"]);
+  if (exp) d.exp = exp;
+  if (isObj(v.loadout)) {
+    const pos = typeof v.loadout.position === "string" && POSITIONS.has(v.loadout.position) ? v.loadout.position : null;
+    const weapon = typeof v.loadout.weapon_class === "string" && /^[A-Z]{2,3}$/.test(v.loadout.weapon_class) ? v.loadout.weapon_class : null;
+    if (pos) d.position = pos;
+    if (weapon) d.weapon_class = weapon;
+  }
+  const fixed = isObj(v.fixed_meta) ? v.fixed_meta.terrain_base : null;
+  const terrain = pick(v.terrain, TERRAIN_KEYS, 0, 4) ?? pick(fixed, TERRAIN_KEYS, 0, 4);
+  if (terrain) d.terrain = terrain;
+  const equipment = parseEquipment(v.equipment);
+  if (equipment.length) d.equipment = equipment;
+  const locked = bools(v.skill_locked, ["ex", "basic", "passive", "sub"]);
+  if (locked) d.skill_locked = locked;
+  const locks = bools(v.locks, ["ability_unlock_locked", "simsang_bloom_locked"]);
+  if (locks) d.locks = locks;
+  const deep = isObj(v.deep) ? v.deep : null;
+  if (deep) {
+    const sd = isObj(deep.stat_detail) ? deep.stat_detail : null;
+    const more = sd ? pick(sd, DETAIL_KEYS, -BIG, BIG) : null;
+    if (more) d.stat_detail = more;
+    const base = pick(deep.base_stats, STAT_KEYS);
+    if (base) d.base_stats = base;
+    const mystic = pick(deep.mystic, MYSTIC_KEYS);
+    if (mystic) d.mystic = mystic;
+  }
+  return Object.keys(d).length ? d : null;
+}
+
 const ROLES = new Set(["STRIKER", "SPECIAL"]);
 
 export function parseStudent(v: unknown): StudentRow | null {
@@ -68,6 +156,7 @@ export function parseStudent(v: unknown): StudentRow | null {
     role: typeof v.combat_role === "string" && ROLES.has(v.combat_role) ? v.combat_role : null,
     pinned: typeof v.is_pinned === "boolean" ? v.is_pinned : null,
     memorial: null,
+    detail: parseDetail(v),
   };
 }
 

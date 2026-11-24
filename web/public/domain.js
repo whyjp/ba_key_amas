@@ -4,8 +4,21 @@ import { el } from "./ui.js";
 
 let metaPromise;
 export function loadMeta() {
-  metaPromise ??= fetch("/meta.json").then((r) => (r.ok ? r.json() : {})).catch(() => ({}));
+  metaPromise ??= Promise.all([
+    fetch("/meta.json").then((r) => (r.ok ? r.json() : {})).catch(() => ({})),
+    fetch("/halos.json").then((r) => (r.ok ? r.json() : [])).catch(() => []),
+  ]).then(([meta, halos]) => ({ ...meta, halos: new Set(halos) }));
   return metaPromise;
+}
+
+/** A student's halo (the ring over the head, which is what identifies the student), or null when there is none. */
+export function halo(meta, id, cls = "halo") {
+  if (!id || !meta.halos?.has(id)) return null;
+  const img = el("img", cls);
+  img.src = "/halos/" + encodeURIComponent(id) + ".png";
+  img.alt = "";
+  img.loading = "lazy";
+  return img;
 }
 
 export const ROLE = { STRIKER: "스트라이커", SPECIAL: "스페셜" };

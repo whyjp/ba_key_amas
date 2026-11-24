@@ -1,5 +1,6 @@
 import { openDetail } from "./detail.js";
-import { armorColor, attackColor, bondBadge, icon, loadMeta, name, ROLE, schoolLogo, stars } from "./domain.js";
+import { heatmapView } from "./heatmap.js";
+import { armorColor, attackColor, bondBadge, halo, icon, loadMeta, name, ROLE, schoolLogo, stars } from "./domain.js";
 import { card, el, empty, mount, num, outfitStack, portrait, post, session } from "./ui.js";
 
 const NOT_SCANNED = "아직 스캔한 기록이 없습니다.";
@@ -9,7 +10,10 @@ function context(d) {
   const duty = new Set((d.progress?.duty?.students ?? []).filter((s) => s.selected === true).map((s) => s.name));
   const unread = new Map((d.progress?.momotalk?.unread ?? []).map((u) => [u.name, u.count]));
   const byName = new Map(d.students.map((s) => [s.name, s]));
-  return { duty, unread, byName };
+  // place of each character in the overall ranking (the analysis lists them best first)
+  const place = new Map(d.analysis.characters.map((c, i) => [c.base, i]));
+  const rankOf = (studentName) => place.get(studentName.replace(/\s*\([^)]*\)\s*$/, "").trim() || studentName) ?? -1;
+  return { duty, unread, byName, rankOf };
 }
 
 function tile(s, ctx, meta, showInfo) {
@@ -18,6 +22,8 @@ function tile(s, ctx, meta, showInfo) {
   t.tabIndex = 0;
   t.title = s.name;
   t.append(portrait(s.student_id, "tile-img"));
+  const ring = halo(meta, s.student_id, "tile-halo");
+  if (ring) t.append(ring);
   if (showInfo) {
     if (s.stars) t.append(Object.assign(stars(s.stars, "student"), { className: "stars student tile-stars" }));
     if (s.level !== null) t.append(el("span", "lv", "Lv." + s.level));
@@ -157,7 +163,7 @@ function listView(d, ctx, meta) {
       tr.addEventListener("keydown", (e) => { if (e.key === "Enter") open(); });
       const who = el("td", "l");
       const w = el("div", "who-cell");
-      w.append(icon(s.student_id), el("span", "strong", s.name));
+      w.append(icon(s.student_id), halo(meta, s.student_id, "ico-halo") ?? "", el("span", "strong", s.name));
       who.append(w);
       const sc = el("td", "l");
       const sw = el("div", "who-cell");
@@ -317,6 +323,7 @@ function scheduleView(d) {
 
 const TABS = [
   ["students", "학생", (d, c, m) => studentsView(d, c, m)],
+  ["heatmap", "학생 히트맵", (d, c, m) => heatmapView(d, c, m)],
   ["list", "학생 리스트", (d, c, m) => listView(d, c, m)],
   ["story", "스토리", (d) => storyView(d)],
   ["events", "이벤트 스토리", (d, c, m) => eventView(d, m)],

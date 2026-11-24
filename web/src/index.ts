@@ -66,10 +66,10 @@ function boardColumns(a: Analysis) {
 
 function studentStatements(env: Env, userId: number, students: StudentRow[]): D1PreparedStatement[] {
   const ins = env.DB.prepare(
-    "INSERT INTO students (user_id, name, student_id, level, stars, ex_skill, normal_skill, passive_skill, sub_skill, bond, uw_stars, uw_level, role, pinned, memorial) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
+    "INSERT INTO students (user_id, name, student_id, level, stars, ex_skill, normal_skill, passive_skill, sub_skill, bond, uw_stars, uw_level, role, pinned, memorial, detail_json) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
   );
   return students.map((s) =>
-    ins.bind(userId, s.name, CATALOG[s.name]?.id ?? null, s.level, s.stars, s.ex_skill, s.normal_skill, s.passive_skill, s.sub_skill, s.bond, s.uw_stars, s.uw_level, s.role, flag(s.pinned), flag(s.memorial)),
+    ins.bind(userId, s.name, CATALOG[s.name]?.id ?? null, s.level, s.stars, s.ex_skill, s.normal_skill, s.passive_skill, s.sub_skill, s.bond, s.uw_stars, s.uw_level, s.role, flag(s.pinned), flag(s.memorial), s.detail ? JSON.stringify(s.detail) : null),
   );
 }
 
@@ -108,7 +108,8 @@ async function profile(env: Env, user: UserRow, view: "owner" | "public"): Promi
   const rows = await env.DB.prepare("SELECT * FROM students WHERE user_id = ?1").bind(user.id).all();
   const students = rows.results.map((r) => {
     const c = CATALOG[String(r.name)];
-    return { ...r, user_id: undefined, school: c?.school ?? null, attack: c?.attack ?? null, armor: c?.armor ?? null };
+    const detail = typeof r.detail_json === "string" ? JSON.parse(r.detail_json) : null;
+    return { ...r, user_id: undefined, detail_json: undefined, detail, school: c?.school ?? null, attack: c?.attack ?? null, armor: c?.armor ?? null };
   });
   const analysis = analyze(
     rows.results.map((r) => ({
@@ -126,7 +127,12 @@ async function profile(env: Env, user: UserRow, view: "owner" | "public"): Promi
     account: view === "owner" && user.account_json ? JSON.parse(user.account_json) : null,
     progress: user.progress_json ? JSON.parse(user.progress_json) : null,
     students,
-    analysis: { score: analysis.score, stats: analysis.stats, top: analysis.top.map((c) => ({ base: c.base, total: c.total, outfits: c.outfits })) },
+    analysis: {
+      score: analysis.score,
+      stats: analysis.stats,
+      top: analysis.top.map((c) => ({ base: c.base, total: c.total, outfits: c.outfits })),
+      characters: analysis.characters.map((c) => ({ base: c.base, total: c.total, outfits: c.outfits })),
+    },
   });
 }
 

@@ -47,7 +47,7 @@ test("an upload keeps known fields only and drops duplicates and bad numbers", (
     ], account: { credits: 5, pyroxene: -1, ap: "10/20", extra: 1 } },
   });
   assert.equal(up.students.length, 2);
-  assert.deepEqual(up.students[0], { name: "아루", level: 80, stars: 3, ex_skill: null, normal_skill: null, passive_skill: null, sub_skill: null, bond: null, uw_stars: null, uw_level: null, role: "STRIKER", pinned: true, memorial: null });
+  assert.deepEqual(up.students[0], { name: "아루", level: 80, stars: 3, ex_skill: null, normal_skill: null, passive_skill: null, sub_skill: null, bond: null, uw_stars: null, uw_level: null, role: "STRIKER", pinned: true, memorial: null, detail: null });
   assert.equal(up.students[1]?.level, null);
   assert.deepEqual(up.account, { credits: 5, ap: "10/20" });
 });
@@ -55,4 +55,28 @@ test("an upload keeps known fields only and drops duplicates and bad numbers", (
 test("an upload without readable students is refused", () => {
   assert.throws(() => parseUpload({ nickname: "a", roster: { entries: [] } }), Invalid);
   assert.throws(() => parseUpload([]), Invalid);
+});
+
+test("scanned detail is whitelisted and ranged; terrain falls back to the dictionary", () => {
+  const up = parseUpload({
+    nickname: "x",
+    roster: { entries: [{ student: {
+      name: "리오", stats: { max_hp: 33907, attack: 3444, defense: -5, healing: 1, evil: 9 }, exp: { current: 41, required: 21790 },
+      loadout: { position: "MIDDLE", weapon_class: "HG<script>" }, terrain: { urban: null, outdoor: null, indoor: null },
+      fixed_meta: { terrain_base: { urban: 4, outdoor: 2, indoor: 0 } },
+      equipment: [{ slot: 1, slot_kind: "standard", equipped: true, type: "Hat", item_name: "Mini Hat", tier: 6, level: 50 }, { slot: 9 }],
+      skill_locked: { ex: false, basic: true, extra: true },
+      deep: { stat_detail: { accuracy: 100, critical: 200, range: 650, bogus: 1 }, mystic: { stars: 2, status_text: "free text" } },
+    } }] },
+  });
+  assert.deepEqual(up.students[0]?.detail, {
+    stats: { max_hp: 33907, attack: 3444, healing: 1 },
+    exp: { current: 41, required: 21790 },
+    position: "MIDDLE",
+    terrain: { urban: 4, outdoor: 2, indoor: 0 },
+    equipment: [{ slot: 1, unique: false, equipped: true, type: "Hat", item_name: "Mini Hat", tier: 6, level: 50 }],
+    skill_locked: { ex: false, basic: true },
+    stat_detail: { accuracy: 100, critical: 200, range: 650 },
+    mystic: { stars: 2 },
+  });
 });

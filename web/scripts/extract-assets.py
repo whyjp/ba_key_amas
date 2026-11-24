@@ -12,6 +12,7 @@ Run from web/:  python -I scripts/extract-assets.py
 import json
 import pathlib
 import sys
+import time
 import urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -20,9 +21,17 @@ GLOBAL_FLAG = 1  # IsReleased = [JP, Global, CN]
 
 
 def get(url: str) -> bytes:
+    """One polite request; a dropped connection is retried with a growing pause."""
     req = urllib.request.Request(url, headers={"User-Agent": "ba-key-amas-assets"})
-    with urllib.request.urlopen(req, timeout=60) as r:
-        return r.read()
+    for attempt in range(5):
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                return r.read()
+        except OSError:
+            if attempt == 4:
+                raise
+            time.sleep(2 * (attempt + 1))
+    raise RuntimeError("unreachable")
 
 
 def main() -> int:
@@ -44,7 +53,12 @@ def main() -> int:
 
     pub = ROOT / "public"
     fetched = 0
-    for folder, url, suffix in (("portraits", "images/student/collection/{id}", "webp"), ("icons", "images/student/icon/{id}", "webp")):
+    for folder, url, suffix in (
+        ("portraits", "images/student/collection/{id}", "webp"),
+        ("icons", "images/student/icon/{id}", "webp"),
+        ("standing", "images/student/portrait/{id}", "webp"),
+        ("lobby", "images/student/lobby/{id}", "webp"),
+    ):
         out = pub / folder
         out.mkdir(parents=True, exist_ok=True)
         for entry in catalog.values():
