@@ -217,8 +217,19 @@ pub fn scan_progress(ocr: Arc<dyn Ocr>, hcu: &Exclusive, region: [f64; 4], out: 
     snap.warnings.extend(acct.warnings);
 
     let mut read = 1;
-    let steps: [(&str, Section); 5] = [("스케줄", schedule_section), ("이벤트 스토리", past_events_section), ("모모톡 안 읽음", momotalk_unread_section), ("당번 선택", duty_section), ("메인 스토리", main_story_section)];
-    for (name, step) in steps {
+    let steps: [(&str, &str, Section); 5] = [
+        ("schedule", "스케줄", schedule_section),
+        ("events", "이벤트 스토리", past_events_section),
+        ("momotalk", "모모톡 안 읽음", momotalk_unread_section),
+        ("duty", "당번 선택", duty_section),
+        ("story", "메인 스토리", main_story_section),
+    ];
+    // BAOCR_PROGRESS_ONLY=momotalk,duty runs only those sections (for checking one without walking the rest)
+    let only: Option<Vec<String>> = std::env::var("BAOCR_PROGRESS_ONLY").ok().map(|v| v.split(',').map(|s| s.trim().to_string()).collect());
+    for (key, name, step) in steps {
+        if only.as_ref().is_some_and(|o| !o.iter().any(|k| k == key)) {
+            continue;
+        }
         report(BannerState::scanning(read, Some(SECTIONS)));
         let lobby = nav.to_lobby()?;
         match step(&nav, &lobby, &mut snap) {
@@ -236,12 +247,20 @@ pub fn scan_progress(ocr: Arc<dyn Ocr>, hcu: &Exclusive, region: [f64; 4], out: 
 
     std::fs::create_dir_all(out)?;
     let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
-    let file = out.join(format!("progress-{stamp}.json"));
     let text = serde_json::to_string_pretty(&snap)?;
-    std::fs::write(&file, &text)?;
-    std::fs::write(out.join("latest.json"), &text)?;
-    let backup = bareceipt::export(&snap, &[]);
-    std::fs::write(out.join("bareceipt-backup.json"), bareceipt::to_file_text(&backup.value))?;
+    let file = if only.is_some() {
+        // a partial read must not replace the last full one
+        let file = out.join(format!("partial-{stamp}.json"));
+        std::fs::write(&file, &text)?;
+        file
+    } else {
+        let file = out.join(format!("progress-{stamp}.json"));
+        std::fs::write(&file, &text)?;
+        std::fs::write(out.join("latest.json"), &text)?;
+        let backup = bareceipt::export(&snap, &[]);
+        std::fs::write(out.join("bareceipt-backup.json"), bareceipt::to_file_text(&backup.value))?;
+        file
+    };
     report(BannerState::finished(read, Some(SECTIONS)));
     Ok(ProgressSummary { sections_read: read, warnings: snap.warnings, file })
 }
