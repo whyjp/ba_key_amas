@@ -348,7 +348,9 @@ function buildCard(s, meta, ctx, rank, animate) {
     turning = setTimeout(() => card.classList.remove("turning"), 750);
   };
 
-  card.append(el("div", "pc-edge"));
+  // the rim belongs to each face, so it turns with the card instead of staying put
+  front.append(el("div", "pc-edge"));
+  back.append(el("div", "pc-edge"));
   lightEngine(card);
   dragFlip(card, inner, () => flipped, turn);
   return card;

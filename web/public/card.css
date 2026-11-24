@@ -468,12 +468,10 @@
 .pcard.dragging { cursor: grabbing; }
 .pcard .pc-flip, .pcard .pc-outfits button { cursor: pointer; }
 .full::after { transition: opacity .15s; }
+/* the intro shine is a flat layer over the card, so it steps aside while the card turns */
 .pcard.dragging.full::after, .pcard.turning.full::after { opacity: 0; }
 .pcard.dragging { box-shadow: none; }
 
-/* the rim and the shine are flat layers over a card that turns in 3D: they ride in the same turned space so they stay with the card */
-.pc-edge { z-index: 5; }
-.pcard.flipped .pc-edge { transform: none; }
 
 /* card back: a margin all round (card edge to content 22px), the same on every side; the rim shows through it */
 .pcard .pc-back { padding: 22px 22px 18px; gap: 12px; border: 4px solid hsl(var(--h) 28% 24%); }
