@@ -11,6 +11,7 @@ mod assist;
 mod dump;
 mod profile;
 mod progress_scan;
+mod upload;
 mod scan;
 use anyhow::{bail, Context, Result};
 use baocr_core::ocr_api::Ocr;
@@ -49,6 +50,15 @@ struct Args {
     /// Read the account progress (schedule ranks, event story stamps) by walking the game's screens (HCU).
     #[arg(long)]
     scan_progress: bool,
+    /// Send the last student scan and progress scan to a ba-key-AMAS web server (https, or http://localhost). No game input.
+    #[arg(long, value_name = "SERVER_URL")]
+    upload: Option<String>,
+    /// --upload: show this account on the server's leaderboard (default: private).
+    #[arg(long)]
+    public: bool,
+    /// --upload: the nickname to upload under (default: the account nickname the progress scan read).
+    #[arg(long)]
+    nickname: Option<String>,
     /// Passive background updater (screenshots only, no input).
     #[arg(long)]
     watch: bool,
@@ -169,15 +179,22 @@ fn real_main() -> Result<()> {
         println!("{}", report.render());
         return Ok(());
     }
-    let modes = [args.boxes.is_some(), args.image.is_some(), args.reextract.is_some(), args.scan_arrows, args.scan_progress, args.watch, args.grab.is_some(), args.learn.is_some(), args.assist];
+    let modes = [args.boxes.is_some(), args.image.is_some(), args.reextract.is_some(), args.scan_arrows, args.scan_progress, args.upload.is_some(), args.watch, args.grab.is_some(), args.learn.is_some(), args.assist];
     let chosen = modes.iter().filter(|m| **m).count();
     if chosen > 1 {
-        bail!("choose one of --image, --reextract, --scan-arrows, --watch, --grab, --learn, --assist (none starts the add-on)");
+        bail!("choose one of --image, --reextract, --scan-arrows, --scan-progress, --upload, --watch, --grab, --learn, --assist (none starts the add-on)");
     }
     if args.from_first && !args.scan_arrows {
         bail!("--from-first requires --scan-arrows");
     }
     let opts = Options { verify_fixed: args.verify_fixed };
+    if let Some(server) = &args.upload {
+        let progress = progress_dir();
+        let store = progress.parent().map(|p| p.join("upload.json")).unwrap_or_else(|| PathBuf::from("upload.json"));
+        let req = upload::Request { server: server.clone(), nickname: args.nickname.clone(), public: args.public, students_dir: args.out_dir(), progress_dir: progress, store };
+        println!("{}", upload::run(&req)?);
+        return Ok(());
+    }
     if let Some(png) = &args.boxes {
         let img = image::open(png)?.to_rgb8();
         for b in load_ocr(&args)?.boxes(&img)? {

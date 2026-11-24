@@ -1,6 +1,7 @@
 import catalog from "./catalog.json";
 import { formatKey, foldNickname, hashKey, keyMatches, newTag, normalizeNickname, parseKey, type ParsedKey } from "./keys.ts";
 import { BadJson, json, readJson, sameOriginJson, TooLarge } from "./security.ts";
+import { analyze, SCORE_VERSION, type Analysis, type OwnedStudent } from "./score.ts";
 import { Invalid, MAX_BODY_BYTES, parseUpload, type StudentRow, type Upload } from "./validate.ts";
 
 interface Env {
@@ -20,6 +21,7 @@ interface UserRow {
   account_json: string | null;
   progress_json: string | null;
   updated_at: number;
+  public: number;
 }
 
 const MAX_FAILS = 5;
@@ -46,12 +48,24 @@ async function authenticate(env: Env, raw: unknown): Promise<Auth> {
   return { ok: true, user, key };
 }
 
+const flag = (b: boolean | null): number | null => (b === null ? null : Number(b));
+
+function owned(s: StudentRow): OwnedStudent {
+  return { ...s, student_id: CATALOG[s.name]?.id ?? null };
+}
+
+/** The leaderboard row stored with a user: the score, the count columns and the three best characters. */
+function boardColumns(a: Analysis) {
+  const top = a.top.map((c) => ({ base: c.base, total: c.total, outfits: c.outfits.slice(0, 4) }));
+  return { score: a.score, stats: JSON.stringify(a.stats), top: JSON.stringify(top) };
+}
+
 function studentStatements(env: Env, userId: number, students: StudentRow[]): D1PreparedStatement[] {
   const ins = env.DB.prepare(
-    "INSERT INTO students (user_id, name, student_id, level, stars, ex_skill, normal_skill, passive_skill, sub_skill, bond, uw_stars, uw_level, role, pinned) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
+    "INSERT INTO students (user_id, name, student_id, level, stars, ex_skill, normal_skill, passive_skill, sub_skill, bond, uw_stars, uw_level, role, pinned, memorial) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
   );
   return students.map((s) =>
-    ins.bind(userId, s.name, CATALOG[s.name]?.id ?? null, s.level, s.stars, s.ex_skill, s.normal_skill, s.passive_skill, s.sub_skill, s.bond, s.uw_stars, s.uw_level, s.role, s.pinned === null ? null : Number(s.pinned)),
+    ins.bind(userId, s.name, CATALOG[s.name]?.id ?? null, s.level, s.stars, s.ex_skill, s.normal_skill, s.passive_skill, s.sub_skill, s.bond, s.uw_stars, s.uw_level, s.role, flag(s.pinned), flag(s.memorial)),
   );
 }
 
@@ -60,29 +74,30 @@ async function upload(env: Env, up: Upload): Promise<Response> {
   if (!nickname) return json(400, { error: "닉네임은 1~16자이며 # 과 제어 문자를 쓸 수 없습니다" });
   const nick = foldNickname(nickname);
   const existing = await env.DB.prepare("SELECT id FROM users WHERE nick_norm = ?1").bind(nick).first<{ id: number }>();
+  const board = boardColumns(analyze(up.students.map(owned)));
   const accountJson = up.account ? JSON.stringify(up.account) : null;
   const progressJson = up.progress ? JSON.stringify(up.progress) : null;
   if (existing) {
     const auth = await authenticate(env, up.key);
     if (!auth.ok) return json(409, { error: "이미 쓰이는 닉네임입니다. 올린 적이 있다면 key 를 함께 보내세요" });
     await env.DB.batch([
-      env.DB.prepare("UPDATE users SET account_json = ?1, progress_json = ?2, updated_at = ?3 WHERE id = ?4").bind(accountJson, progressJson, now(), auth.user.id),
+      env.DB.prepare("UPDATE users SET account_json = ?1, progress_json = ?2, updated_at = ?3, public = ?4, score = ?5, stats_json = ?6, top_json = ?7, score_version = ?8 WHERE id = ?9").bind(accountJson, progressJson, now(), Number(up.public), board.score, board.stats, board.top, SCORE_VERSION, auth.user.id),
       env.DB.prepare("DELETE FROM students WHERE user_id = ?1").bind(auth.user.id),
       ...studentStatements(env, auth.user.id, up.students),
     ]);
-    return json(200, { key: formatKey(auth.key), created: false, students: up.students.length });
+    return json(200, { key: formatKey(auth.key), created: false, students: up.students.length, public: up.public, score: board.score });
   }
   const key: ParsedKey = { nickname, tag: newTag() };
   const hash = await hashKey(env.KEY_PEPPER, key);
   const t = now();
   try {
-    const res = await env.DB.prepare("INSERT INTO users (nick_norm, nickname, key_hash, account_json, progress_json, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?6)").bind(nick, nickname, hash, accountJson, progressJson, t).run();
+    const res = await env.DB.prepare("INSERT INTO users (nick_norm, nickname, key_hash, account_json, progress_json, created_at, updated_at, public, score, stats_json, top_json, score_version) VALUES (?1,?2,?3,?4,?5,?6,?6,?7,?8,?9,?10,?11)").bind(nick, nickname, hash, accountJson, progressJson, t, Number(up.public), board.score, board.stats, board.top, SCORE_VERSION).run();
     const id = res.meta.last_row_id;
     await env.DB.batch(studentStatements(env, id, up.students));
   } catch {
     return json(409, { error: "이미 쓰이는 닉네임입니다" });
   }
-  return json(201, { key: formatKey(key), created: true, students: up.students.length });
+  return json(201, { key: formatKey(key), created: true, students: up.students.length, public: up.public, score: board.score });
 }
 
 async function profile(env: Env, user: UserRow): Promise<Response> {
@@ -91,23 +106,50 @@ async function profile(env: Env, user: UserRow): Promise<Response> {
     const c = CATALOG[String(r.name)];
     return { ...r, user_id: undefined, school: c?.school ?? null, attack: c?.attack ?? null, armor: c?.armor ?? null };
   });
+  const analysis = analyze(
+    rows.results.map((r) => ({
+      name: String(r.name), student_id: (r.student_id as number | null) ?? null, level: r.level as number | null, stars: r.stars as number | null,
+      ex_skill: r.ex_skill as number | null, normal_skill: r.normal_skill as number | null, passive_skill: r.passive_skill as number | null, sub_skill: r.sub_skill as number | null,
+      bond: r.bond as number | null, uw_stars: r.uw_stars as number | null, uw_level: r.uw_level as number | null,
+      pinned: r.pinned === null ? null : Boolean(r.pinned), memorial: r.memorial === null ? null : Boolean(r.memorial),
+    })),
+  );
   return json(200, {
     nickname: user.nickname,
     updated_at: user.updated_at,
+    public: Boolean(user.public),
     account: user.account_json ? JSON.parse(user.account_json) : null,
     progress: user.progress_json ? JSON.parse(user.progress_json) : null,
     students,
+    analysis: { score: analysis.score, stats: analysis.stats, top: analysis.top, characters: analysis.characters },
   });
 }
 
+/** Public users only, best first. Reads columns stored at upload, so it never touches the students table. */
+async function leaderboard(env: Env): Promise<Response> {
+  const rows = await env.DB.prepare("SELECT nickname, score, stats_json, top_json, updated_at FROM users WHERE public = 1 ORDER BY score DESC, updated_at ASC LIMIT 100").all<{
+    nickname: string; score: number; stats_json: string | null; top_json: string | null; updated_at: number;
+  }>();
+  const entries = rows.results.map((r, i) => ({
+    rank: i + 1, nickname: r.nickname, score: r.score, updated_at: r.updated_at,
+    stats: r.stats_json ? JSON.parse(r.stats_json) : null, top: r.top_json ? JSON.parse(r.top_json) : [],
+  }));
+  return json(200, { entries }, { "cache-control": "public, max-age=60" });
+}
+
+async function limited(req: Request, env: Env): Promise<Response | null> {
+  if (!env.LIMITER) return null;
+  const ip = req.headers.get("cf-connecting-ip") ?? "unknown";
+  return (await env.LIMITER.limit({ key: ip })).success ? null : json(429, { error: "요청이 너무 많습니다" }, { "retry-after": "60" });
+}
+
 async function handleApi(req: Request, env: Env, path: string): Promise<Response> {
-  if (req.method !== "POST") return json(405, { error: "POST 만 받습니다" }, { allow: "POST" });
+  if (req.method === "GET" && path === "/api/leaderboard") return (await limited(req, env)) ?? leaderboard(env);
+  if (req.method !== "POST") return json(405, { error: "POST 만 받습니다" }, { allow: "POST, GET" });
   const refused = sameOriginJson(req);
   if (refused) return json(400, { error: refused });
-  if (env.LIMITER) {
-    const ip = req.headers.get("cf-connecting-ip") ?? "unknown";
-    if (!(await env.LIMITER.limit({ key: ip })).success) return json(429, { error: "요청이 너무 많습니다" }, { "retry-after": "60" });
-  }
+  const tooMany = await limited(req, env);
+  if (tooMany) return tooMany;
   let body: unknown;
   try {
     body = await readJson(req, MAX_BODY_BYTES);
@@ -126,6 +168,13 @@ async function handleApi(req: Request, env: Env, path: string): Promise<Response
     case "/api/profile": {
       const a = await authenticate(env, key);
       return a.ok ? profile(env, a.user) : a.res;
+    }
+    case "/api/visibility": {
+      const a = await authenticate(env, key);
+      if (!a.ok) return a.res;
+      const on = (body as { public?: unknown }).public === true;
+      await env.DB.prepare("UPDATE users SET public = ?1 WHERE id = ?2").bind(Number(on), a.user.id).run();
+      return json(200, { public: on });
     }
     case "/api/rekey": {
       const a = await authenticate(env, key);

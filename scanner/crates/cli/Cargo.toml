@@ -29,6 +29,7 @@ anyhow.workspace = true
 serde_json.workspace = true
 image.workspace = true
 clap = { version = "4", features = ["derive"] }
+ureq = { version = "2", features = ["json"] }
 
 [dev-dependencies]
 rusqlite = { version = "0.32", features = ["bundled"] }

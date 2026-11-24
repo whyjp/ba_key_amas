@@ -2,7 +2,7 @@
 // dropped, numbers are range-checked and strings are length-capped. Nothing from the body reaches SQL or
 // the page except through these types.
 
-export const MAX_BODY_BYTES = 1_000_000;
+export const MAX_BODY_BYTES = 3_000_000;
 export const MAX_STUDENTS = 400;
 export const MAX_PROGRESS_BYTES = 200_000;
 
@@ -19,11 +19,14 @@ export interface StudentRow {
   uw_level: number | null;
   role: string | null;
   pinned: boolean | null;
+  memorial: boolean | null;
 }
 
 export interface Upload {
   nickname: string;
   key: string | null;
+  /** Show this user on the leaderboard. Off unless the uploader asks. */
+  public: boolean;
   students: StudentRow[];
   account: Record<string, unknown> | null;
   progress: unknown | null;
@@ -64,6 +67,7 @@ export function parseStudent(v: unknown): StudentRow | null {
     uw_level: int(v.unique_weapon_level, 1, 60),
     role: typeof v.combat_role === "string" && ROLES.has(v.combat_role) ? v.combat_role : null,
     pinned: typeof v.is_pinned === "boolean" ? v.is_pinned : null,
+    memorial: null,
   };
 }
 
@@ -78,7 +82,18 @@ function parseAccount(v: unknown): Obj | null {
   return out;
 }
 
-/** `body` is `{nickname, key?, roster: {entries: [{student}], account?}, progress?}`. */
+/** The duty menu scan lists every owned student with the memorial lobby icon state. */
+function memorialByName(progress: unknown): Map<string, boolean> {
+  const out = new Map<string, boolean>();
+  const duty = isObj(progress) && isObj(progress.duty) ? progress.duty : null;
+  if (!duty || !Array.isArray(duty.students)) return out;
+  for (const d of duty.students) {
+    if (isObj(d) && typeof d.name === "string" && typeof d.memorial_lobby === "boolean") out.set(d.name.normalize("NFC"), d.memorial_lobby);
+  }
+  return out;
+}
+
+/** `body` is `{nickname, key?, public?, roster: {entries: [{student}], account?}, progress?}`. */
 export function parseUpload(body: unknown): Upload {
   if (!isObj(body)) throw new Invalid("본문이 JSON 객체가 아닙니다");
   const nickname = typeof body.nickname === "string" ? body.nickname : "";
@@ -102,5 +117,7 @@ export function parseUpload(body: unknown): Upload {
     if (JSON.stringify(body.progress).length > MAX_PROGRESS_BYTES) throw new Invalid("progress 가 너무 큽니다");
     progress = body.progress;
   }
-  return { nickname, key, students, account: parseAccount(roster.account), progress };
+  const memorial = memorialByName(progress);
+  for (const s of students) s.memorial = memorial.get(s.name) ?? null;
+  return { nickname, key, public: body.public === true, students, account: parseAccount(roster.account), progress };
 }

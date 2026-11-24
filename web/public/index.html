@@ -5,43 +5,20 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ba-key-AMAS</title>
 <link rel="stylesheet" href="/app.css">
-<script src="/app.js" defer></script>
+<script type="module" src="/app.js"></script>
 </head>
 <body>
 <header class="cap">
-  <span class="mark">AMAS</span>
-  <h1>ba-key-AMAS</h1>
+  <a class="brand" href="#/"><span class="mark">AMAS</span><span class="title">ba-key-AMAS</span></a>
+  <nav class="top" aria-label="주 메뉴">
+    <a href="#/upload" data-route="upload">업로드</a>
+    <a href="#/me" data-route="me">내 정보</a>
+    <a href="#/board" data-route="board">리더보드</a>
+  </nav>
   <span id="who" class="who" hidden></span>
 </header>
 
-<main>
-  <section id="gate" class="card">
-    <h2>키로 조회</h2>
-    <p class="hint">업로드할 때 받은 <b>닉네임#6자리</b> 키를 입력하세요. 닉네임만으로는 조회할 수 없습니다.</p>
-    <form id="gate-form" autocomplete="off">
-      <input id="key" type="text" maxlength="40" placeholder="닉네임#a1b2c3" spellcheck="false" required>
-      <button type="submit">조회</button>
-    </form>
-    <p id="gate-msg" class="msg" role="alert"></p>
-  </section>
-
-  <section id="board" hidden>
-    <div class="card summary" id="summary"></div>
-    <div class="bar">
-      <div class="seg" role="tablist" aria-label="보기">
-        <button id="v-tile" role="tab" aria-selected="true">타일</button>
-        <button id="v-list" role="tab" aria-selected="false">리스트</button>
-      </div>
-      <input id="filter" type="search" placeholder="학생 이름 검색" maxlength="20">
-      <span id="count" class="hint"></span>
-      <span class="grow"></span>
-      <button id="rekey" class="ghost">키 바꾸기</button>
-      <button id="logout" class="ghost">닫기</button>
-    </div>
-    <div id="tiles" class="tiles"></div>
-    <div id="list" class="listwrap" hidden></div>
-  </section>
-</main>
+<main id="app"></main>
 
 <footer class="legal">게임 &lt;블루 아카이브&gt;의 에셋 및 콘텐츠의 권리는 넥슨, 넥슨게임즈 및 Yostar에 있습니다.</footer>
 </body>

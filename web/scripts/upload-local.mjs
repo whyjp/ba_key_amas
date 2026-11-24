@@ -1,10 +1,12 @@
 // Uploads the scanner's local output to a running server (until the scanner has its own upload step).
-//   node scripts/upload-local.mjs <server-url> <nickname> [key]
+//   node scripts/upload-local.mjs <server-url> <nickname> [key] [--public]
 // Reads %APPDATA%/baocr/students/students.json and, when present, progress/latest.json.
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
-const [url, nickname, key] = process.argv.slice(2);
+const args = process.argv.slice(2);
+const isPublic = args.includes("--public");
+const [url, nickname, key] = args.filter((a) => a !== "--public");
 if (!url || !nickname) {
   console.error("usage: node scripts/upload-local.mjs <server-url> <nickname> [key]");
   process.exit(2);
@@ -17,7 +19,7 @@ const progress = existsSync(progressPath) ? JSON.parse(readFileSync(progressPath
 const res = await fetch(new URL("/api/upload", url), {
   method: "POST",
   headers: { "content-type": "application/json" },
-  body: JSON.stringify({ nickname, key, roster, progress }),
+  body: JSON.stringify({ nickname, key, public: isPublic, roster, progress }),
 });
 const out = await res.json();
 if (!res.ok) {
