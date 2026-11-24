@@ -368,9 +368,7 @@ impl Widget for PortraitIcons {
     }
 }
 
-/// Right edges of the six slots of the squad strip at the bottom of the 빠른 편성 popup:
-/// four strikers, then two specials (frame pixels). The icon columns straddle these edges.
-const SLOT_RIGHT_EDGES: [i32; 6] = [111, 205, 300, 392, 490, 579];
+use crate::portrait::SLOT_RIGHT_EDGES;
 /// Top of the column: below the leader badge of the first slot.
 const SLOT_COLUMN_TOP: i32 = 700;
 /// A slot's outline: this far left of its right edge, between these rows, this far right of it.
@@ -383,11 +381,23 @@ pub fn slot_marks(team: &[StudentBrief], brief: Option<&MissionBrief>, terrain: 
 
 /// [`slot_marks`] for a frame of the given layout.
 pub fn slot_marks_in(team: &[StudentBrief], brief: Option<&MissionBrief>, terrain: Option<&str>, types: &TypeTable, layout: Layout) -> Vec<Mark> {
+    let mut slots: [Option<StudentBrief>; 6] = Default::default();
+    for (i, s) in team.iter().filter(|s| s.squad_type == "Main").take(4).enumerate() {
+        slots[i] = Some(s.clone());
+    }
+    for (i, s) in team.iter().filter(|s| s.squad_type != "Main").take(2).enumerate() {
+        slots[4 + i] = Some(s.clone());
+    }
+    slot_marks_at(&slots, brief, terrain, types, layout)
+}
+
+/// Marks for the squad strip when who stands in each slot is known (an empty or unknown slot gets none).
+pub fn slot_marks_at(slots: &[Option<StudentBrief>; 6], brief: Option<&MissionBrief>, terrain: Option<&str>, types: &TypeTable, layout: Layout) -> Vec<Mark> {
     let spots = popup_spots(layout);
-    let strikers = team.iter().filter(|s| s.squad_type == "Main").take(4).enumerate().map(|(i, s)| (i, s));
-    let specials = team.iter().filter(|s| s.squad_type != "Main").take(2).enumerate().map(|(i, s)| (4 + i, s));
-    strikers
-        .chain(specials)
+    slots
+        .iter()
+        .enumerate()
+        .filter_map(|(slot, s)| s.as_ref().map(|s| (slot, s)))
         .filter_map(|(slot, s)| {
             let (icons, grade) = marks_of(s, brief, terrain, types, true);
             if icons.is_empty() {
@@ -418,7 +428,7 @@ impl Widget for SlotStats {
     }
     fn render(&self, cx: &Context) -> Option<Output> {
         // the strip's place on a raid's popup is not known: no icons rather than icons on the wrong things
-        (cx.obs.scene == Scene::QuickFormation && cx.obs.raid.is_none()).then(|| Output::Marks(slot_marks_in(&cx.team(), cx.brief(), cx.terrain(), cx.types, cx.obs.layout)))
+        (cx.obs.scene == Scene::QuickFormation && cx.obs.raid.is_none()).then(|| Output::Marks(slot_marks_at(&cx.slot_students(), cx.brief(), cx.terrain(), cx.types, cx.obs.layout)))
     }
 }
 

@@ -91,6 +91,23 @@ impl Context<'_> {
         }
     }
 
+    /// Who stands in each of the six slots of the squad strip, as far as it is known.
+    pub fn slot_students(&self) -> [Option<StudentBrief>; 6] {
+        if self.obs.slots.iter().all(Option::is_none) {
+            // no slot was told by its picture: the squad in the order seen, strikers first, then specials
+            let team = self.team();
+            let mut slots: [Option<StudentBrief>; 6] = Default::default();
+            for (i, s) in team.iter().filter(|s| s.squad_type == "Main").take(4).enumerate() {
+                slots[i] = Some(s.clone());
+            }
+            for (i, s) in team.iter().filter(|s| s.squad_type != "Main").take(2).enumerate() {
+                slots[4 + i] = Some(s.clone());
+            }
+            return slots;
+        }
+        std::array::from_fn(|i| self.obs.slots[i].and_then(|id| self.students.iter().find(|s| s.id == id).cloned()))
+    }
+
     /// The squad's students, strikers and specials in the order seen.
     pub fn team(&self) -> Vec<StudentBrief> {
         self.obs.squad.iter().filter_map(|id| self.students.iter().find(|s| s.id == *id).cloned()).collect()

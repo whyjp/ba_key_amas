@@ -7,6 +7,7 @@
 use baocr_core::ocr_api::{Ocr, TextBox};
 use baocr_extract::raid::{RaidRef, RaidTracker};
 use baocr_extract::scene::{classify_in, squad_names_in, Layout, MissionRef, MissionTracker, Scene};
+use crate::portrait;
 use baocr_extract::{read_card_names, CardName};
 use baocr_pixels::{quick_card_selected, quick_tab_is_striker};
 use baocr_wikidb::{StudentBrief, Wiki};
@@ -24,6 +25,9 @@ pub struct Observation {
     pub cards: Vec<CardName>,
     /// The squad being edited, strikers and specials in slot order, as far as it has been seen.
     pub squad: Vec<i64>,
+    /// Who stands in each of the six slots of the squad strip (four strikers, two specials): the strikers' portraits are
+    /// told by their pictures (the slots carry no name), the specials by the names under the popup.
+    pub slots: [Option<i64>; 6],
     /// The kind of student the grid's active tab lists: "Main" (STRIKER) or "Support" (SPECIAL).
     pub grid_kind: Option<&'static str>,
     /// The screen ratio of the frame this was read from: where marks are placed depends on it.
@@ -32,7 +36,7 @@ pub struct Observation {
 
 impl Observation {
     pub fn new(scene: Scene) -> Observation {
-        Observation { scene, mission: None, raid: None, cards: Vec::new(), squad: Vec::new(), grid_kind: None, layout: Layout::Ratio43 }
+        Observation { scene, mission: None, raid: None, cards: Vec::new(), squad: Vec::new(), slots: [None; 6], grid_kind: None, layout: Layout::Ratio43 }
     }
 
     /// The 빠른 편성 popup is up but its grid shows no names (compact view).
@@ -90,11 +94,14 @@ pub struct Observer<'a> {
     /// The last screen that was recognised (the idle lobby is told from it: it has no text of its own).
     last: Scene,
     cards: CardMemory,
+    /// Whether each student is a striker (true) or a special, and each one's name: what the portraits are matched among.
+    strikers: std::collections::HashMap<i64, bool>,
+    names: std::collections::HashMap<i64, String>,
 }
 
 impl<'a> Observer<'a> {
     pub fn new(ocr: &'a dyn Ocr, students: &'a [StudentBrief]) -> Observer<'a> {
-        Observer { ocr, students, tracker: MissionTracker::default(), raid_tracker: RaidTracker::default(), squad: Vec::new(), last: Scene::Unknown, cards: CardMemory::default() }
+        Observer { ocr, students, tracker: MissionTracker::default(), raid_tracker: RaidTracker::default(), squad: Vec::new(), last: Scene::Unknown, cards: CardMemory::default(), strikers: students.iter().map(|s| (s.id, s.squad_type == "Main")).collect(), names: students.iter().map(|s| (s.id, s.name.clone())).collect() }
     }
 
     /// Forget the mission and the squad (the game was closed: what was known is not true any more).
@@ -169,8 +176,37 @@ impl<'a> Observer<'a> {
             }
             _ => {}
         }
-        obs.squad = self.squad.clone();
+        obs.slots = self.slots(img, scene, layout);
+        obs.squad = if scene == Scene::QuickFormation { obs.slots.iter().flatten().copied().collect() } else { self.squad.clone() };
         obs
+    }
+
+    /// The six slots of the strip. In the popup the strikers' pictures say who they are; where a picture is not
+    /// believed, the names read elsewhere fill the slot in order, as before.
+    fn slots(&self, img: &RgbImage, scene: Scene, layout: Layout) -> [Option<i64>; 6] {
+        let is_striker = |id: &i64| self.strikers.get(id) == Some(&true);
+        let named_strikers: Vec<i64> = self.squad.iter().copied().filter(is_striker).collect();
+        let specials: Vec<i64> = self.squad.iter().copied().filter(|id| !is_striker(id)).collect();
+        let mut slots = [None; 6];
+        if scene == Scene::QuickFormation {
+            let book = portrait::Book::bundled();
+            let same = |a: i64, b: i64| self.names.get(&a) == self.names.get(&b);
+            for (k, slot) in slots.iter_mut().enumerate().take(4) {
+                let (cx, cy) = portrait::slot_centre(k, layout);
+                *slot = book.identify(&portrait::probe(img, cx, cy), &|id| self.strikers.get(&id) == Some(&true), &same).filter(|m| m.trusted()).map(|m| m.id);
+            }
+        }
+        let seen: Vec<i64> = slots.iter().flatten().copied().collect();
+        let mut rest = named_strikers.into_iter().filter(|id| !seen.contains(id));
+        for slot in slots.iter_mut().take(4) {
+            if slot.is_none() {
+                *slot = rest.next();
+            }
+        }
+        for (k, id) in specials.into_iter().take(2).enumerate() {
+            slots[4 + k] = Some(id);
+        }
+        slots
     }
 }
 
