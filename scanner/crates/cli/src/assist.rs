@@ -243,7 +243,9 @@ fn run_on<S: Surface>(surface: S, ocr: Arc<dyn Ocr>, session: &HcuSession, regio
         });
         still = if moving { 0 } else { still + 1 };
         prev = Some(key);
-        if moving {
+        // With BAOCR_OVERLAY_CAPTURABLE (screenshots of the add-on) the icons are in the frames this reads, so showing them
+        // looks like the screen moving and would take them down again; that mode keeps them up.
+        if moving && std::env::var_os("BAOCR_OVERLAY_CAPTURABLE").is_none() {
             // icons placed for the old view would sit on the wrong things until the new one is read
             prof.time("transition", || assistant.transition());
         }

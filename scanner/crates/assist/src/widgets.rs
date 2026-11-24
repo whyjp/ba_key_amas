@@ -271,19 +271,29 @@ fn popup_spots(layout: Layout) -> PopupSpots {
     }
 }
 
-/// What goes on one student's portrait: how well it suits the battle and the terrain face,
-/// or just "SP" for a special that is not rated. Without a known mission nothing can be
-/// rated, and only the terrain face (when the terrain is known) remains.
-fn marks_of(s: &StudentBrief, brief: Option<&MissionBrief>, terrain: Option<&str>, types: &TypeTable) -> (Vec<Icon>, Option<baocr_overlay::Grade>) {
+/// What goes on one student's portrait, top to bottom: how well it suits the battle (or "SP" for a special
+/// that is not rated), then the attack and armor type, then the terrain face. The types are the student's
+/// own facts, so they are shown whether or not a mission is known: the verdict never takes their place.
+/// Without a known mission nothing can be rated, and the types and the terrain face (when known) remain.
+fn marks_of(s: &StudentBrief, brief: Option<&MissionBrief>, terrain: Option<&str>, types: &TypeTable, paired: bool) -> (Vec<Icon>, Option<baocr_overlay::Grade>) {
     let face = terrain.and_then(|t| s.adaptation(t)).map(Icon::Face);
+    let kinds = type_icons(s, paired);
     match brief.map(|b| rate(s, b, terrain, types)) {
         Some(Rating::Rated(fit)) => {
             let grade = grade_of(fit);
-            (std::iter::once(Icon::Fit(grade)).chain(face).collect(), Some(grade))
+            (std::iter::once(Icon::Fit(grade)).chain(kinds).chain(face).collect(), Some(grade))
         }
-        Some(Rating::NotRated(_)) => (vec![Icon::Special], None),
-        // no mission to rate against: the fixed facts of the student, straight from the database
-        None => (attack_icon(&s.bullet_type).into_iter().chain(armor_icon(&s.armor_type)).chain(face).collect(), None),
+        Some(Rating::NotRated(_)) => (std::iter::once(Icon::Special).chain(kinds).collect(), None),
+        None => (kinds.into_iter().chain(face).collect(), None),
+    }
+}
+
+/// The attack and armor type badges: two stacked ones, or one row when `paired` (the squad strip has
+/// little height to spare).
+fn type_icons(s: &StudentBrief, paired: bool) -> Vec<Icon> {
+    match (paired, attack_icon(&s.bullet_type), armor_icon(&s.armor_type)) {
+        (true, Some(Icon::Attack(a)), Some(Icon::Armor(r))) => vec![Icon::Pair(a, r)],
+        (_, a, r) => a.into_iter().chain(r).collect(),
     }
 }
 
@@ -326,7 +336,7 @@ pub fn card_marks_in(cards: &[CardName], students: &[StudentBrief], brief: Optio
                 return None;
             }
             let s = Wiki::match_student_as(students, &c.text, kind)?;
-            let (icons, grade) = marks_of(&s, brief, terrain, types);
+            let (icons, grade) = marks_of(&s, brief, terrain, types, false);
             if icons.is_empty() {
                 return None;
             }
@@ -379,7 +389,7 @@ pub fn slot_marks_in(team: &[StudentBrief], brief: Option<&MissionBrief>, terrai
     strikers
         .chain(specials)
         .filter_map(|(slot, s)| {
-            let (icons, grade) = marks_of(s, brief, terrain, types);
+            let (icons, grade) = marks_of(s, brief, terrain, types, true);
             if icons.is_empty() {
                 return None;
             }
@@ -487,7 +497,7 @@ mod tests {
     }
 
     #[test]
-    fn portrait_marks_carry_the_grade_a_terrain_face_and_a_frame_and_skip_rows_scrolled_out() {
+    fn portrait_marks_carry_the_grade_the_attack_and_armor_type_a_terrain_face_and_a_frame_and_skip_rows_scrolled_out() {
         let (b, t) = (brief(), types());
         let students = squad();
         let cards = vec![
@@ -498,26 +508,28 @@ mod tests {
         ];
         let marks = card_marks(&cards, &students, Some(&b), Some("Outdoor"), &t, None);
         assert_eq!(marks.len(), 2, "a row scrolled out and an unknown name get no marks");
-        assert_eq!(marks[0].icons, vec![Icon::Fit(Grade::Excellent), Icon::Face(4)]);
-        assert_eq!(marks[1].icons, vec![Icon::Fit(Grade::Poor), Icon::Face(2)]);
+        let (pierce, heavy) = (Icon::Attack(TypeTag { hue: Hue::Yellow, glyph: '관' }), Icon::Armor(TypeTag { hue: Hue::Yellow, glyph: '중' }));
+        let (mystic, unarmed) = (Icon::Attack(TypeTag { hue: Hue::Blue, glyph: '신' }), Icon::Armor(TypeTag { hue: Hue::Blue, glyph: '특' }));
+        // the verdict and the student's own types are both there: the verdict does not take the types' place
+        assert_eq!(marks[0].icons, vec![Icon::Fit(Grade::Excellent), pierce.clone(), heavy.clone(), Icon::Face(4)]);
+        assert_eq!(marks[1].icons, vec![Icon::Fit(Grade::Poor), mystic, unarmed, Icon::Face(2)]);
         // the column's middle is on the portrait's right edge, its top just below the badge
         assert_eq!((marks[0].cx, marks[0].top(), marks[0].vertical), (736 + 52, 429 - 68, true));
         let frame = marks[0].frame.unwrap();
         assert_eq!((frame.left, frame.right, frame.grade), (736 - 55, 736 + 55, Grade::Excellent));
         // no mission known: nothing to rate, so the fixed facts from the database: attack type, armor type, terrain face
-        let pierce = Icon::Attack(TypeTag { hue: Hue::Yellow, glyph: '관' });
-        let heavy = Icon::Armor(TypeTag { hue: Hue::Yellow, glyph: '중' });
         assert_eq!(card_marks(&cards, &students, None, Some("Outdoor"), &t, None)[0].icons, vec![pierce.clone(), heavy.clone(), Icon::Face(4)]);
         assert_eq!(card_marks(&cards, &students, None, None, &t, None)[0].icons, vec![pierce, heavy], "without a terrain the face is left out, the types stay");
     }
 
     #[test]
-    fn a_special_judged_by_skill_gets_only_sp_and_no_frame() {
+    fn a_special_judged_by_skill_gets_sp_and_its_types_but_no_frame() {
         let (b, t) = (brief(), types());
         let students = squad();
         let cards = vec![CardName { text: "아코".into(), x: 736.0, y0: 429.0 }, CardName { text: "이로하".into(), x: 847.0, y0: 429.0 }];
         let marks = card_marks(&cards, &students, Some(&b), Some("Outdoor"), &t, Some("Support"));
-        assert_eq!(marks[0].icons, vec![Icon::Special]);
+        let (mystic, light) = (Icon::Attack(TypeTag { hue: Hue::Blue, glyph: '신' }), Icon::Armor(TypeTag { hue: Hue::Red, glyph: '경' }));
+        assert_eq!(marks[0].icons, vec![Icon::Special, mystic, light]);
         assert!(marks[0].frame.is_none());
         assert_eq!(marks[1].icons[0], Icon::Fit(Grade::Excellent), "an attacker special is rated like a striker");
     }
@@ -530,7 +542,7 @@ mod tests {
         let students = vec![striker, special];
         let cards = vec![CardName { text: "호시노(무장)".into(), x: 736.0, y0: 429.0 }];
         assert!(card_marks(&cards, &students, Some(&b), None, &t, None).is_empty(), "no tab known, two different students");
-        assert_eq!(card_marks(&cards, &students, Some(&b), None, &t, Some("Support"))[0].icons, vec![Icon::Special]);
+        assert_eq!(card_marks(&cards, &students, Some(&b), None, &t, Some("Support"))[0].icons[0], Icon::Special);
         assert!(matches!(card_marks(&cards, &students, Some(&b), None, &t, Some("Main"))[0].icons[0], Icon::Fit(_)));
     }
 
@@ -540,7 +552,7 @@ mod tests {
         let team = vec![squad()[0].clone(), squad()[3].clone(), squad()[5].clone()];
         let marks = slot_marks(&team, Some(&b), Some("Outdoor"), &t);
         assert_eq!(marks.iter().map(|m| (m.cx, m.top())).collect::<Vec<_>>(), vec![(111, 700), (205, 700), (490, 700)]);
-        assert_eq!(marks[2].icons, vec![Icon::Special]);
+        assert_eq!(marks[2].icons[0], Icon::Special);
         assert!(slot_marks(&[], Some(&b), None, &t).is_empty());
     }
 
