@@ -27,3 +27,7 @@ wikidb/wiki.db
 wikidb/wiki.db.tmp
 web/node_modules/
 wikidb/*.bak
+
+# local secrets, never committed (copy .env.example to .env)
+.env
+.env.local

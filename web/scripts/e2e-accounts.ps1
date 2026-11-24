@@ -7,7 +7,8 @@
 # and exits 1 on any failure.
 param(
     [string]$Exe = "D:\scan-run\member-key\ba-key-AMAS.exe",
-    [string]$SigningKey = "e2e-signing-key-0123456789abcdef",
+    # default: the key in the repository's local .env (then the exe is expected to carry it from its build), else a test key
+    [string]$SigningKey = "",
     # the exe carries the key from its build (BAOCR_ADDON_SIGNING_KEY at compile time): do not hand it over at run time
     [switch]$KeyCompiledIn,
     [int]$Port = 8799,
@@ -74,6 +75,21 @@ function Rows() { (Sql "SELECT id, nickname, public, public_id FROM users ORDER 
 function StopWrangler() {
     Get-CimInstance Win32_Process | Where-Object { $_.Name -eq "workerd.exe" -or ($_.Name -eq "node.exe" -and $_.CommandLine -match "wrangler") } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 }
+
+if (-not $SigningKey) {
+    $dir = $PSScriptRoot
+    for ($i = 0; $i -lt 6 -and $dir; $i++) {
+        $f = Join-Path $dir ".env"
+        if (Test-Path $f) {
+            $line = Get-Content $f | Where-Object { $_ -match '^\s*BAOCR_ADDON_SIGNING_KEY\s*=' } | Select-Object -First 1
+            if ($line) { $SigningKey = ($line -replace '^[^=]*=', '').Trim().Trim('"').Trim("'") }
+            break
+        }
+        $dir = Split-Path $dir -Parent
+    }
+    if ($SigningKey.Length -ge 16) { $KeyCompiledIn = $true; Write-Host "signing key from .env: the exe must have been built after it was written" }
+}
+if ($SigningKey.Length -lt 16) { $SigningKey = "e2e-signing-key-0123456789abcdef" }
 
 # a clean slate: no stale wrangler or workerd, an empty state and an empty add-on folder
 StopWrangler
