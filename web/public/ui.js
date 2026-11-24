@@ -19,11 +19,7 @@ async function call(path, init) {
   return out;
 }
 
-export const post = (path, body) => call(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 export const get = (path) => call(path);
-
-/** The key of the signed-in view. Memory only: not storage, not the URL. */
-export const session = { key: null, data: null };
 
 export function portrait(id, cls = "pt") {
   if (!id) return el("div", cls + " ph", "?");

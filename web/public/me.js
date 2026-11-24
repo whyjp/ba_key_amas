@@ -1,7 +1,7 @@
 import { openDetail } from "./detail.js";
 import { heatmapView } from "./heatmap.js";
 import { armorColor, attackColor, bondBadge, halo, icon, loadMeta, name, pinBadge, pinHeader, ROLE, schoolLogo, stars } from "./domain.js";
-import { card, el, empty, mount, num, outfitStack, portrait, post, session } from "./ui.js";
+import { card, el, empty, mount, num, outfitStack, portrait } from "./ui.js";
 
 const NOT_SCANNED = "아직 스캔한 기록이 없습니다.";
 
@@ -379,8 +379,8 @@ function teacherPanel(d) {
   const panel = el("div", "teacher");
   const level = d.progress?.account?.level;
   panel.append(el("small", "", "선생님"), el("b", "", `${d.nickname}${level ? ` (Lv.${level})` : ""}`));
-  // public or not, and the key, are changed in the add-on only, so this only says which it is
-  if (d.view === "owner") panel.append(el("small", "teacher-note", d.public ? "리더보드에 공개 중" : "리더보드에 공개하지 않음"));
+  // public or not is changed in the add-on only; a private teacher is reached by the link alone, so say so
+  if (!d.public) panel.append(el("small", "teacher-note", "리더보드에 공개하지 않은 선생님"));
   const back = el("a", "button wide", "리더보드로");
   back.href = "#/";
   panel.append(back);
@@ -414,17 +414,14 @@ async function board(root, d) {
   show("heatmap");
 }
 
-/** A teacher's page: found by nickname among the public ones, or opened with a key (then `session.data` holds it). */
-export async function renderProfile(root, publicNickname, notFound) {
-  if (publicNickname) {
-    try {
-      const r = await fetch("/api/public?nickname=" + encodeURIComponent(publicNickname));
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error || "불러오지 못했습니다");
-      return board(root, d);
-    } catch (e) {
-      return notFound(e.message);
-    }
+/** A teacher's page, opened by its public id (a leaderboard row, a search result or the add-on's link). */
+export async function renderProfile(root, publicId, notFound) {
+  try {
+    const r = await fetch("/api/public?id=" + encodeURIComponent(publicId));
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || "불러오지 못했습니다");
+    return board(root, d);
+  } catch (e) {
+    return notFound(e.message);
   }
-  return board(root, session.data);
 }

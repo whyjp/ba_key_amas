@@ -79,7 +79,7 @@ async function showRanking(holder) {
     for (const e of sorted) {
       const tr = el("tr");
       const link = el("a", "nick", e.nickname);
-      link.href = "#/u/" + encodeURIComponent(e.nickname);
+      link.href = "#/u/" + e.public_id;
       link.title = "이 선생님의 정보 보기";
       const who = el("td", "l strong");
       who.append(link);
