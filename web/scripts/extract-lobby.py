@@ -3,7 +3,8 @@
 Source: the memorial lobby images (`File:Memorial_Lobby_<Name>.jpg`) of the Blue Archive wiki (bluearchive.wiki),
 listed through its MediaWiki API and hosted on static.wikitide.net, 1.5 to 2.5 thousand pixels wide. Each image is
 matched to a student through the English name in SchaleDB (the wiki writes some outfits differently, see
-SYNONYMS), then cut to the card's portrait shape around the face. The originals are cached in scripts/.cache and
+SYNONYMS), then cut to the card's portrait shape around the face (a detected face first, else the spot where SchaleDB's
+face-centred thumbnail sits in the big picture, found by template matching). The originals are cached in scripts/.cache and
 nothing is committed. Students without a wiki image keep the small SchaleDB lobby crop made by crop-art.py.
 `public/card-lobby.json` lists the ids that got the high resolution picture.
 
@@ -92,13 +93,47 @@ def load_crop_art():
     return mod
 
 
-def portrait_crop(img: Image.Image, face) -> Image.Image:
+def locate_by_thumbnail(big_gray, thumb_path: pathlib.Path):
+    """Find where SchaleDB's small lobby crop (cut around the character's face) sits inside the big picture.
+
+    Multi-scale template matching on the opaque middle of the thumbnail. Returns (score, cx, cy) in big-image pixels.
+    """
+    if not thumb_path.exists():
+        return 0.0, None, None
+    t = np.array(Image.open(thumb_path).convert("RGBA"))
+    th, tw = t.shape[:2]
+    core = cv2.cvtColor(t[:, :, :3], cv2.COLOR_RGB2GRAY)[int(th * 0.15):int(th * 0.85), int(tw * 0.15):int(tw * 0.85)]
+    h, w = big_gray.shape
+    k = 640 / w
+    small = cv2.resize(big_gray, (640, max(1, int(h * k))))
+    best = (0.0, None, None)
+    for crop_w in np.linspace(120, w, 40):  # width of the thumbnail's region in the big picture
+        s = (crop_w / tw) * k
+        cw, ch = int(core.shape[1] * s), int(core.shape[0] * s)
+        if cw < 24 or ch < 24 or cw >= small.shape[1] or ch >= small.shape[0]:
+            continue
+        res = cv2.matchTemplate(small, cv2.resize(core, (cw, ch), interpolation=cv2.INTER_AREA), cv2.TM_CCOEFF_NORMED)
+        _, score, _, loc = cv2.minMaxLoc(res)
+        if score > best[0]:
+            best = (float(score), (loc[0] + cw / 2) / k, (loc[1] + ch / 2) / k)
+    return best
+
+
+def portrait_crop(img: Image.Image, face, spot) -> Image.Image:
+    """A full-height portrait window. Centre: the detected face, else the matched thumbnail's centre, else the
+    middle. When a face box is known the window is nudged until the whole face sits inside with a margin."""
     w, h = img.size
     cw = min(w, round(h * RATIO))
     ch = round(cw / RATIO)
-    cx = face[0] if face else w * 0.5
-    left = max(0, min(round(cx - cw / 2), w - cw))
-    top = max(0, min(round((face[1] if face else h * 0.4) - ch * 0.32), h - ch))
+    cx = face[0] if face else (spot[0] if spot else w * 0.5)
+    left = round(cx - cw / 2)
+    if face:
+        half = face[2] / 2
+        margin = cw * 0.08
+        left = min(left, round(cx - half - margin))      # keep the face's left edge inside
+        left = max(left, round(cx + half + margin - cw))  # and its right edge
+    left = max(0, min(left, w - cw))
+    top = max(0, min(round(h - ch) // 2, h - ch))
     return img.crop((left, top, left + cw, top + ch)).resize((OUT_W, OUT_H), Image.LANCZOS)
 
 
@@ -114,6 +149,7 @@ def main() -> int:
     out = ROOT / "public" / "card-lobby"
     out.mkdir(parents=True, exist_ok=True)
     have, missing = [], []
+    how = {"face": 0, "thumbnail": 0, "middle": 0}
     for sid in ids:
         name = english.get(str(sid), {}).get("Name", "")
         f = files.get(wiki_key(name))
@@ -130,11 +166,16 @@ def main() -> int:
             missing.append(name)
             continue
         face = crop.largest_face(det, bgr)
+        spot = None
+        if face is None:
+            score, cx, cy = locate_by_thumbnail(cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY), ROOT / "public" / "lobby" / f"{sid}.webp")
+            spot = (cx, cy) if score >= 0.6 and cx is not None else None
+        how[("face" if face else "thumbnail" if spot else "middle")] += 1
         img = Image.open(src).convert("RGB")
-        portrait_crop(img, face).save(out / f"{sid}.webp", "WEBP", quality=86)
+        portrait_crop(img, face, spot).save(out / f"{sid}.webp", "WEBP", quality=86)
         have.append(sid)
     (ROOT / "public" / "card-lobby.json").write_text(json.dumps(have), encoding="utf-8")
-    print(f"{len(have)} high resolution lobby cards, {len(missing)} without: {', '.join(missing[:10])}")
+    print(f"{len(have)} high resolution lobby cards, {len(missing)} without: {', '.join(missing[:10])}. centred by {how}")
     return 0
 
 

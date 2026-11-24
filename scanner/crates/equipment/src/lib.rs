@@ -95,10 +95,26 @@ pub fn unique_state(text: &str) -> Option<bool> {
     text.to_uppercase().contains("EMPTY").then_some(false)
 }
 
-/// Parse a tier from OCR text ("T4", "[4", ...).
+/// Highest level of an item at each tier (index 0 is tier 1). Tier up needs the item at this level.
+pub const TIER_LEVEL_CAP: [Int; 10] = [10, 20, 30, 40, 45, 50, 55, 60, 65, 70];
+
+/// The lowest tier an item showing `level` can be, since a tier's items stop at `TIER_LEVEL_CAP`.
+pub fn min_tier_for_level(level: Int) -> Option<Int> {
+    TIER_LEVEL_CAP.iter().position(|cap| level <= *cap).map(|i| i as Int + 1)
+}
+
+/// Parse a tier from OCR text ("T4", "[4", ...). The small italic T is often lost, leaving only the digit ("6"),
+/// which is taken when it is all the text holds.
 pub fn equipment_tier(text: &str) -> Option<Int> {
-    let m = TIER_RE.captures(text.trim())?;
-    m.get(1)?.as_str().parse().ok()
+    let text = text.trim();
+    if let Some(m) = TIER_RE.captures(text) {
+        return m.get(1)?.as_str().parse().ok();
+    }
+    let digits: String = text.chars().filter(|c| !c.is_whitespace()).collect();
+    if (1..=2).contains(&digits.chars().count()) && digits.chars().all(|c| c.is_ascii_digit()) {
+        return digits.parse().ok().filter(|t| (1..=10).contains(t));
+    }
+    None
 }
 
 /// Parse a level from one OCR observation, as Go does: needs a l/u/v glyph and
@@ -206,6 +222,12 @@ pub struct ItemMatch {
 /// Match slot `slot` (1..=3) against the catalog templates; `None` unless the
 /// best score is <= 40 and beats the runner-up by >= 12.
 pub fn match_equipment(img: &RgbImage, slot: i32, tier: Option<Int>) -> Result<Option<ItemMatch>> {
+    match_equipment_in(img, slot, tier, None, None)
+}
+
+/// `match_equipment` narrowed by what is already known: the item type the student's slot takes (from the
+/// dictionary) and the lowest tier the visible level allows.
+pub fn match_equipment_in(img: &RgbImage, slot: i32, tier: Option<Int>, kind: Option<&str>, min_tier: Option<Int>) -> Result<Option<ItemMatch>> {
     if !(1..=3).contains(&slot) {
         return Ok(None);
     }
@@ -213,7 +235,7 @@ pub fn match_equipment(img: &RgbImage, slot: i32, tier: Option<Int>) -> Result<O
     let mut winner: Option<&CatalogEntry> = None;
     let at = ICON_ORIGINS[(slot - 1) as usize];
     for e in &catalog().entries {
-        if e.slot != slot || tier.is_some_and(|t| e.tier != t) {
+        if e.slot != slot || tier.is_some_and(|t| e.tier != t) || kind.is_some_and(|k| e.kind != k) || min_tier.is_some_and(|m| e.tier < m) {
             continue;
         }
         let icon = load_icon(&e.kind, e.tier)?;
@@ -288,13 +310,18 @@ fn blank(slot: i32, kind: &str) -> Equipment {
 }
 
 /// The four equipment slots (slot 4 = unique gear) plus the raw OCR strings.
-pub fn detect_equipment(
-    img: &RgbImage,
-    ocr: &dyn Ocr,
-) -> Result<(Vec<Equipment>, BTreeMap<String, String>)> {
+pub fn detect_equipment(img: &RgbImage, ocr: &dyn Ocr) -> Result<(Vec<Equipment>, BTreeMap<String, String>)> {
+    detect_equipment_for(img, ocr, &[])
+}
+
+/// `detect_equipment` for a student whose slot item types are known (`Hat`, `Hairpin`, `Watch` ...). The known
+/// type limits the icon match to that type, and with a tier read from the screen the item is named from the
+/// catalog even when the icon match is unsure: one type at one tier is exactly one item.
+pub fn detect_equipment_for(img: &RgbImage, ocr: &dyn Ocr, slot_kinds: &[String]) -> Result<(Vec<Equipment>, BTreeMap<String, String>)> {
     let mut raw = BTreeMap::new();
     let mut result = Vec::with_capacity(4);
     for i in 0..3 {
+        let hint = slot_kinds.get(i as usize).map(String::as_str).filter(|k| !k.is_empty());
         let mut e = blank(i + 1, "standard");
         if equip_badge(img, i) {
             e.equipped = Some(true);
@@ -306,12 +333,24 @@ pub fn detect_equipment(
             let (lvl, obs) = equipment_level(img, ocr, i)?;
             e.level = lvl;
             raw.insert(format!("equipment_{}_level", i + 1), obs);
-            if let Some(m) = match_equipment(img, i + 1, e.tier)? {
+            // a level above the tier's cap means the tier was misread
+            if let (Some(t), Some(l)) = (e.tier, e.level) {
+                if TIER_LEVEL_CAP.get((t - 1) as usize).is_some_and(|cap| l > *cap) {
+                    e.tier = None;
+                }
+            }
+            let min_tier = if e.tier.is_none() { e.level.and_then(min_tier_for_level) } else { None };
+            if let Some(m) = match_equipment_in(img, i + 1, e.tier, hint, min_tier)? {
                 e.kind = Some(m.kind);
                 e.item_name = Some(m.name);
                 e.icon_match_error = Some(m.error);
                 if e.tier.is_none() {
                     e.tier = Some(m.tier);
+                }
+            } else if let Some(k) = hint {
+                e.kind = Some(k.to_string());
+                if let Some(t) = e.tier {
+                    e.item_name = catalog().entries.iter().find(|c| c.slot == i + 1 && c.kind == k && c.tier == t).map(|c| c.name.clone());
                 }
             }
         }

@@ -1,5 +1,6 @@
 // The detail sheet of one owned student: opens over the tiles, closes with its button, Esc or a click outside.
-import { armorColor, attackColor, bondBadge, halo, icon, meter, name, ROLE, schoolLogo, stars } from "./domain.js";
+import { ARMOR_HUE, armorColor, ATTACK_HUE, attackColor, bondBadge, EQUIP_KO, halo, icon, meter, name, POSITION_KO, ROLE, schoolLogo, stars } from "./domain.js";
+import { glyph, positionGlyph } from "./icons.js";
 import { el, num, portrait } from "./ui.js";
 
 function tag(text, color) {
@@ -15,80 +16,6 @@ function skillRow(label, value, max, locked) {
 }
 
 
-const POSITION = { FRONT: "전열", MIDDLE: "중열", BACK: "후열" };
-const GRADE = ["D", "C", "B", "A", "S"];
-const EXTRA_STATS = [
-  ["accuracy", "명중 수치"], ["evasion", "회피 수치"], ["critical", "치명 수치"], ["critical_damage_pct", "치명 피해율", "%"],
-  ["defense_pierce", "방어력 무시"], ["stability", "안정 수치"], ["range", "사거리"], ["cost_recovery", "코스트 회복력"],
-  ["cc_power", "CC 강화력"], ["cc_resist", "CC 저항력"], ["type_bonus_pct", "타입 보너스", "%"], ["max_cost_bonus", "최대 코스트 보너스"],
-];
-
-function section(title, ...kids) {
-  const s = el("div", "dsec");
-  s.append(el("h3", "", title), ...kids);
-  return s;
-}
-
-function figure(label, value, unit = "") {
-  const f = el("div", "fig");
-  f.append(el("span", "stat-label", label), el("b", "", value === undefined || value === null ? "-" : num(value) + unit));
-  return f;
-}
-
-function detailSections(d) {
-  if (!d) return [el("p", "empty", "이 학생은 능력치를 읽지 않았습니다. 학생 스캔을 다시 하면 채워집니다.")];
-  const out = [];
-  const head = el("div", "tags");
-  if (d.position) head.append(Object.assign(el("span", "tag", POSITION[d.position] ?? d.position), {}));
-  if (d.weapon_class) head.append(el("span", "tag", "무기 " + d.weapon_class));
-  if (head.childNodes.length) out.push(head);
-  if (d.stats) {
-    const g = el("div", "figs");
-    g.append(figure("최대 체력", d.stats.max_hp), figure("공격력", d.stats.attack), figure("방어력", d.stats.defense), figure("치유력", d.stats.healing));
-    out.push(section("전투 능력치", g));
-  }
-  if (d.exp && d.exp.required) {
-    const bar = el("div", "xp");
-    const fill = el("i");
-    fill.style.width = Math.min(100, Math.round(((d.exp.current ?? 0) / d.exp.required) * 100)) + "%";
-    bar.append(fill);
-    out.push(section("레벨 경험치", bar, el("small", "hint", `${num(d.exp.current)} / ${num(d.exp.required)}`)));
-  }
-  if (d.stat_detail) {
-    const g = el("div", "figs small");
-    for (const [k, label, unit] of EXTRA_STATS) if (d.stat_detail[k] !== undefined) g.append(figure(label, d.stat_detail[k], unit));
-    out.push(section("상세 능력치", g));
-  }
-  if (d.terrain) {
-    const row = el("div", "terrain");
-    for (const [k, label] of [["urban", "시가지"], ["outdoor", "야외"], ["indoor", "실내"]]) {
-      if (d.terrain[k] === undefined) continue;
-      const grade = GRADE[d.terrain[k]];
-      const c = el("div", "terr g" + grade);
-      c.append(el("span", "", label), el("b", "", grade));
-      row.append(c);
-    }
-    out.push(section("지형 적응", row));
-  }
-  if (d.equipment) {
-    const row = el("div", "gear");
-    for (const e of d.equipment) {
-      const g = el("div", "gear-slot" + (e.equipped === false ? " empty" : ""));
-      g.append(el("b", "", e.unique ? "고유 장비" : `장비 ${e.slot}`), el("span", "", e.item_name ?? e.type ?? (e.equipped === false ? "미장착" : "-")), el("small", "", [e.tier ? `T${e.tier}` : "", e.level ? `Lv.${e.level}` : ""].filter(Boolean).join(" ")));
-      row.append(g);
-    }
-    out.push(section("장비", row));
-  }
-  if (d.mystic) {
-    const g = el("div", "figs small");
-    for (const [k, label] of [["stars", "현재 성급"], ["next_stars", "다음 성급"], ["max_bond_rank", "인연 랭크 상한"], ["next_max_bond_rank", "다음 인연 상한"], ["next_max_hp", "다음 최대 체력"], ["next_attack", "다음 공격력"], ["next_healing", "다음 치유력"]]) {
-      if (d.mystic[k] !== undefined) g.append(figure(label, d.mystic[k]));
-    }
-    out.push(section("신비 해방", g));
-  }
-  return out;
-}
-
 // Card tiers by the character's place in the teacher's overall ranking. The top three are special
 // illustration cards (the memorial lobby art over the whole card; SAR has no frame, UR a gold one, SR a silver one),
 // four and five are framed foil cards, the rest plain.
@@ -102,6 +29,14 @@ const TIERS = [
 const PLAIN = { key: "n", label: "", art: "standing", full: false };
 const CARD_W = 380;
 const CARD_H = 640;
+
+/** A card uploaded before backgrounds were assigned still gets one: picked from the name, so it never changes. */
+function fallbackBackground(name, list) {
+  if (!list?.length) return null;
+  let h = 0;
+  for (const c of name) h = (h * 31 + c.codePointAt(0)) >>> 0;
+  return { bg: list[h % list.length], third: (h >>> 8) % 3 };
+}
 
 /** The cut artwork first, then the uncut one, then the small portrait; a card never ends up without a picture. */
 function artFor(s, tier, art) {
@@ -117,11 +52,143 @@ function artFor(s, tier, art) {
   return img;
 }
 
+/** An icon in a round chip. The words show on hover or keyboard focus. */
+function chip(svg, text, cls) {
+  const c = el("span", "pc-chip " + (cls ?? ""));
+  c.tabIndex = 0;
+  c.dataset.tip = text;
+  c.setAttribute("aria-label", text);
+  c.append(svg);
+  return c;
+}
+
+/** Attack and armor type together as one pill, (Mystic / Heavy armor) style: two halves, each with its own icon and colour. */
+function typePill(s, meta) {
+  const pill = el("span", "type-pill");
+  const half = (key, kind, label, hue) => {
+    const h = el("span", "half " + kind);
+    h.tabIndex = 0;
+    h.dataset.tip = label;
+    h.setAttribute("aria-label", label);
+    h.style.setProperty("--hue", String(hue));
+    h.append(glyph(key, 15));
+    return h;
+  };
+  pill.append(
+    half(s.attack ?? "Normal", "atk", "공격 타입 " + name.attack(meta, s.attack), ATTACK_HUE[s.attack] ?? 220),
+    half(s.armor ?? "Normal", "arm", "방어 타입 " + name.armor(meta, s.armor), ARMOR_HUE[s.armor] ?? 220),
+  );
+  return pill;
+}
+
 function stat(label, value) {
   const d = el("div", "pc-stat");
   d.append(el("span", "", label), el("b", "", value === undefined || value === null ? "-" : num(value)));
   return d;
 }
+
+
+const GRADE_LETTER = ["D", "C", "B", "A", "S"];
+const TIER_HUE = [210, 200, 170, 130, 90, 50, 30, 10, 330, 290];
+
+function bkSection(title, ...kids) {
+  const s = el("section", "bk-sec");
+  s.append(el("h3", "", title), ...kids);
+  return s;
+}
+
+function bkRow(label, value) {
+  const r = el("div", "bk-row");
+  r.append(el("span", "", label), el("b", "", value === undefined || value === null ? "-" : typeof value === "string" ? value : num(value)));
+  return r;
+}
+
+/** The back of the card: every scanned spec, in panels. Missing parts are left out, not shown as dashes. */
+function backFace(s, meta, tier, rank, turn) {
+  const d = s.detail ?? {};
+  const back = el("div", "pc-face pc-back");
+  const head = el("div", "bk-head");
+  const who = el("div", "bk-who");
+  who.append(el("h2", "", s.name), el("small", "", [name.school(meta, s.school), tier.label ? `${tier.label} · 전체 ${rank + 1}위` : ""].filter(Boolean).join(" · ")));
+  head.append(icon(s.student_id, "ico bk-ico"), who);
+  const body = el("div", "bk-body");
+
+  if (d.stats) {
+    const g = el("div", "bk-stats");
+    for (const [k, label] of [["max_hp", "최대 체력"], ["attack", "공격력"], ["defense", "방어력"], ["healing", "치유력"]]) {
+      const c = el("div", "bk-stat " + k);
+      c.append(el("span", "", label), el("b", "", d.stats[k] === undefined ? "-" : num(d.stats[k])));
+      g.append(c);
+    }
+    body.append(bkSection("전투 능력치", g));
+  }
+  if (d.exp && d.exp.required) {
+    const bar = el("div", "bk-xp");
+    const fill = el("i");
+    fill.style.width = Math.min(100, Math.round(((d.exp.current ?? 0) / d.exp.required) * 100)) + "%";
+    bar.append(fill);
+    body.append(bkSection("레벨 경험치", bar, el("small", "bk-note", `${num(d.exp.current)} / ${num(d.exp.required)}`)));
+  }
+  if (d.stat_detail) {
+    const rows = el("div", "bk-rows");
+    for (const [k, label, unit] of EXTRA_STATS) if (d.stat_detail[k] !== undefined) rows.append(bkRow(label, unit ? `${num(d.stat_detail[k])}${unit}` : d.stat_detail[k]));
+    body.append(bkSection("상세 능력치", rows));
+  }
+  if (d.terrain) {
+    const row = el("div", "bk-terrain");
+    for (const [k, label] of [["urban", "시가지"], ["outdoor", "야외"], ["indoor", "실내"]]) {
+      if (d.terrain[k] === undefined) continue;
+      const grade = GRADE_LETTER[d.terrain[k]];
+      const c = el("div", "bk-terr g" + grade);
+      c.append(el("b", "", grade), el("span", "", label));
+      row.append(c);
+    }
+    body.append(bkSection("지형 적응", row));
+  }
+  if (d.equipment) {
+    const slots = el("div", "bk-gear");
+    for (const e of d.equipment) {
+      const g = el("div", "bk-slot" + (e.equipped === false ? " empty" : ""));
+      if (e.tier) g.style.setProperty("--th", String(TIER_HUE[e.tier - 1] ?? 210));
+      const top = el("div", "bk-slot-top");
+      top.append(el("span", "bk-slot-kind", e.unique ? "고유 장비" : EQUIP_KO[e.type] ?? `장비 ${e.slot}`));
+      if (e.tier) top.append(el("b", "bk-tier", `T${e.tier}`));
+      g.append(top);
+      g.append(el("span", "bk-slot-name", e.item_name ?? (e.equipped === false ? "미장착" : "읽지 못함")));
+      if (e.level) {
+        const cap = TIER_LEVEL_CAP[(e.tier ?? 0) - 1];
+        const bar = el("div", "bk-lv");
+        const fill = el("i");
+        fill.style.width = cap ? Math.min(100, Math.round((e.level / cap) * 100)) + "%" : "100%";
+        bar.append(fill);
+        g.append(bar, el("small", "", `Lv.${e.level}${cap ? ` / ${cap}` : ""}`));
+      }
+      slots.append(g);
+    }
+    body.append(bkSection("장비", slots));
+  }
+  if (d.mystic) {
+    const rows = el("div", "bk-rows");
+    for (const [k, label] of [["stars", "현재 성급"], ["next_stars", "다음 성급"], ["max_bond_rank", "인연 랭크 상한"], ["next_max_bond_rank", "다음 인연 상한"], ["next_max_hp", "다음 최대 체력"], ["next_attack", "다음 공격력"], ["next_healing", "다음 치유력"]]) {
+      if (d.mystic[k] !== undefined) rows.append(bkRow(label, d.mystic[k]));
+    }
+    body.append(bkSection("신비 해방", rows));
+  }
+  if (!body.childNodes.length) body.append(el("p", "bk-empty", "이 학생은 능력치를 읽지 않았습니다. 학생 스캔을 다시 하면 채워집니다."));
+
+  const back_ = el("button", "pc-flip", "카드 앞면으로");
+  back_.type = "button";
+  back_.addEventListener("click", turn);
+  back.append(head, body, back_);
+  return back;
+}
+
+const TIER_LEVEL_CAP = [10, 20, 30, 40, 45, 50, 55, 60, 65, 70];
+const EXTRA_STATS = [
+  ["accuracy", "명중 수치"], ["evasion", "회피 수치"], ["critical", "치명 수치"], ["critical_damage_pct", "치명 피해율", "%"],
+  ["defense_pierce", "방어력 무시"], ["stability", "안정 수치"], ["range", "사거리"], ["cost_recovery", "코스트 회복력"],
+  ["cc_power", "CC 강화력"], ["cc_resist", "CC 저항력"], ["type_bonus_pct", "타입 보너스", "%"], ["max_cost_bonus", "최대 코스트 보너스"],
+];
 
 /** One card. `animate` plays the landing motion; switching outfits skips the long intro. */
 function buildCard(s, meta, ctx, rank, animate) {
@@ -131,12 +198,16 @@ function buildCard(s, meta, ctx, rank, animate) {
   card.setAttribute("role", "dialog");
   card.setAttribute("aria-modal", "true");
   card.setAttribute("aria-label", s.name);
+  card.dataset.atk = s.attack ?? "Normal";
+  card.dataset.arm = s.armor ?? "Normal";
+  card.style.setProperty("--h", String(ATTACK_HUE[s.attack] ?? 220));
+  card.style.setProperty("--ha", String(ARMOR_HUE[s.armor] ?? 220));
   const inner = el("div", "pc-inner");
 
   const front = el("div", "pc-face pc-front");
   const head = el("div", "pc-head");
   const title = el("div", "pc-title");
-  title.append(el("small", "", tier.label ? `${tier.label} · 전체 ${rank + 1}위` : (s.role ? ROLE[s.role] ?? "" : "")), el("h2", "", s.name));
+  title.append(el("small", "", name.school(meta, s.school)), el("h2", "", s.name));
   const hp = el("div", "pc-hp");
   hp.append(el("small", "", "최대 체력"), el("b", "", det.stats?.max_hp ? num(det.stats.max_hp) : "-"));
   head.append(schoolLogo(s.school), title, hp);
@@ -150,18 +221,19 @@ function buildCard(s, meta, ctx, rank, animate) {
   if (!tier.full) {
     // mid-grade cards: a background picked at upload time under the cut-out portrait
     const bg = el("div", "pc-bg");
-    if (s.bg) {
+    const pick = s.bg ? { bg: s.bg, third: s.bg_third ?? 1 } : fallbackBackground(s.name, meta.backgrounds);
+    if (pick) {
       // the picture is enlarged and one third of it (left, centre or right, fixed at upload) is shown
-      bg.style.backgroundImage = `url("/backgrounds/${encodeURIComponent(s.bg)}.jpg")`;
+      bg.style.backgroundImage = `url("/backgrounds/${encodeURIComponent(pick.bg)}.jpg")`;
       bg.style.backgroundSize = "170% auto";
-      bg.style.backgroundPosition = ["0% 50%", "50% 50%", "100% 50%"][s.bg_third ?? 1] ?? "50% 50%";
+      bg.style.backgroundPosition = ["0% 50%", "50% 50%", "100% 50%"][pick.third] ?? "50% 50%";
     }
     art.prepend(bg);
   }
   if (tier.key !== "n") {
     // the foil lives inside the picture only, so the text beside it stays readable
-    art.append(el("div", "pc-holo"), el("div", "pc-glare"));
-    if (tier.full) art.append(el("div", "pc-sparkle"));
+    // layers, bottom to top: base foil, texture, glitter that only shows near the light, glare
+    art.append(el("div", "pc-foil"), el("div", "pc-holo"), el("div", "pc-sparkle"), el("div", "pc-glare"));
   }
   const lv = el("div", "pc-lv");
   lv.append(el("small", "", "Lv."), el("b", "", s.level === null ? "-" : String(s.level)));
@@ -174,9 +246,9 @@ function buildCard(s, meta, ctx, rank, animate) {
   band.append(art);
 
   const types = el("div", "pc-types");
-  if (s.role) types.append(tag(ROLE[s.role] ?? s.role));
-  if (s.attack) types.append(tag("공격 " + name.attack(meta, s.attack), attackColor(s.attack)));
-  if (s.armor) types.append(tag("방어 " + name.armor(meta, s.armor), armorColor(s.armor)));
+  if (s.role) types.append(chip(glyph(s.role, 16), ROLE[s.role] ?? s.role, "role"));
+  if (det.position) types.append(chip(positionGlyph(det.position, 16), POSITION_KO[det.position] ?? det.position, "pos"));
+  if (s.attack || s.armor) types.append(typePill(s, meta));
   if (s.uw_stars) {
     const w = el("span", "pc-weapon");
     w.append(el("small", "", "전용 무기"), stars(s.uw_stars, "weapon", 4), el("small", "", s.uw_level ? `Lv.${s.uw_level}` : ""));
@@ -205,43 +277,84 @@ function buildCard(s, meta, ctx, rank, animate) {
   flip.type = "button";
   const body = el("div", "pc-body");
   body.append(types, moves, foot, marks, flip);
+  if (tier.label) {
+    // the grade and the overall place, at the very bottom of the card
+    const grade = el("div", "pc-grade");
+    grade.append(el("b", "", tier.label), el("span", "", `전체 ${rank + 1}위`));
+    body.append(grade);
+  }
   front.append(band, head, body);
 
-  const back = el("div", "pc-face pc-back");
-  const bh = el("div", "pc-back-head");
-  bh.append(el("h2", "", s.name), el("small", "", "상세 능력치"));
-  const specs = el("div", "pc-specs");
-  specs.append(...detailSections(s.detail));
-  const unflip = el("button", "pc-flip", "카드 앞면으로");
-  unflip.type = "button";
-  back.append(bh, specs, unflip);
+  const back = backFace(s, meta, tier, rank, () => turn());
   inner.append(front, back);
   card.append(inner);
 
   let flipped = false;
   const turn = () => { flipped = !flipped; card.classList.toggle("flipped", flipped); };
   flip.addEventListener("click", turn);
-  unflip.addEventListener("click", turn);
 
-  // tilt and light follow the pointer
-  card.addEventListener("pointermove", (e) => {
-    const r = card.getBoundingClientRect();
-    const x = clamp01((e.clientX - r.left) / r.width);
-    const y = clamp01((e.clientY - r.top) / r.height);
-    card.style.setProperty("--mx", (x * 100).toFixed(1) + "%");
-    card.style.setProperty("--my", (y * 100).toFixed(1) + "%");
-    card.style.setProperty("--ry", ((x - 0.5) * 16).toFixed(1) + "deg");
-    card.style.setProperty("--rx", ((0.5 - y) * 12).toFixed(1) + "deg");
-    card.classList.add("live");
-  });
-  card.addEventListener("pointerleave", () => {
-    card.classList.remove("live");
-    for (const k of ["--mx", "--my", "--rx", "--ry"]) card.style.removeProperty(k);
-  });
+  card.append(el("div", "pc-edge"));
+  lightEngine(card);
   return card;
 }
 
 const clamp01 = (v) => Math.min(Math.max(v, 0), 1);
+
+/**
+ * The light and tilt of a held card. The pointer sets a target; the card follows it with a damped spring, so
+ * motion is smooth and has weight. With no pointer the card drifts on a slow figure-eight, so the foil is alive
+ * even on a phone. The state is published as CSS variables the stylesheet turns into tilt, parallax and foil:
+ *   --px --py   light position in percent      --nx --ny   the same, -1 to 1
+ *   --rx --ry   tilt in degrees                --o         light intensity, 0 to 1
+ *   --hyp       distance of the light from the card centre, 0 to 1
+ */
+function lightEngine(card) {
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    card.style.setProperty("--o", "0.5");
+    return;
+  }
+  const s = { x: 50, y: 50, vx: 0, vy: 0, o: 0.5, vo: 0 };
+  let tx = 50, ty = 50, to = 0.5, pointer = false;
+  const t0 = performance.now();
+  const onMove = (e) => {
+    const r = card.getBoundingClientRect();
+    tx = clamp01((e.clientX - r.left) / r.width) * 100;
+    ty = clamp01((e.clientY - r.top) / r.height) * 100;
+    to = 1;
+    pointer = true;
+  };
+  card.addEventListener("pointermove", onMove);
+  card.addEventListener("pointerleave", () => { pointer = false; });
+  let last = t0;
+  const frame = (now) => {
+    if (!card.isConnected) return;
+    const dt = Math.min((now - last) / 1000, 0.05);
+    last = now;
+    if (!pointer) {
+      const t = (now - t0) / 1000;
+      tx = 50 + 30 * Math.sin(t * 0.8);
+      ty = 50 + 22 * Math.sin(t * 1.6 + 0.6);
+      to = 0.5;
+    }
+    // critically damped spring: x'' = k (target - x) - c x'
+    const k = 90, c = 2 * Math.sqrt(k);
+    s.vx += (k * (tx - s.x) - c * s.vx) * dt; s.x += s.vx * dt;
+    s.vy += (k * (ty - s.y) - c * s.vy) * dt; s.y += s.vy * dt;
+    s.vo += (60 * (to - s.o) - 2 * Math.sqrt(60) * s.vo) * dt; s.o += s.vo * dt;
+    const nx = (s.x - 50) / 50, ny = (s.y - 50) / 50;
+    const st = card.style;
+    st.setProperty("--px", s.x.toFixed(2) + "%");
+    st.setProperty("--py", s.y.toFixed(2) + "%");
+    st.setProperty("--nx", nx.toFixed(3));
+    st.setProperty("--ny", ny.toFixed(3));
+    st.setProperty("--rx", (-ny * 9).toFixed(2) + "deg");
+    st.setProperty("--ry", (nx * 11).toFixed(2) + "deg");
+    st.setProperty("--o", clamp01(s.o).toFixed(3));
+    st.setProperty("--hyp", clamp01(Math.hypot(nx, ny) / 1.2).toFixed(3));
+    requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
+}
 
 /** The picked outfit's siblings: one small button per owned outfit of the same character. */
 function outfitPicker(list, current, onPick) {

@@ -98,3 +98,31 @@ fn locked_slots_not_equipped() {
         }
     }
 }
+
+#[test]
+fn a_lost_t_leaves_the_digit_and_that_is_enough() {
+    assert_eq!(equipment_tier("6"), Some(6));
+    assert_eq!(equipment_tier(" 10 "), Some(10));
+    assert_eq!(equipment_tier("ㄲ"), None);
+    assert_eq!(equipment_tier("0"), None);
+    assert_eq!(equipment_tier("T7"), Some(7));
+    assert_eq!(equipment_tier("4 5 6"), None, "more than a tier is not a tier");
+}
+
+#[test]
+fn a_level_limits_the_tier() {
+    assert_eq!(min_tier_for_level(55), Some(7));
+    assert_eq!(min_tier_for_level(50), Some(6));
+    assert_eq!(min_tier_for_level(10), Some(1));
+    assert_eq!(min_tier_for_level(70), Some(10));
+    assert_eq!(min_tier_for_level(71), None);
+}
+
+#[test]
+fn nothing_is_claimed_for_a_slot_without_a_gold_level_badge() {
+    let img = RgbImage::new(1280, 960);
+    let kinds = ["Hat".to_string(), "Hairpin".to_string(), "Watch".to_string()];
+    let ocr = Fake { tier: "T6", level: "Lv.50", state: "EMPTY" };
+    let (eq, _) = detect_equipment_for(&img, &ocr, &kinds).unwrap();
+    assert!(eq.iter().take(3).all(|e| e.kind.is_none() && e.item_name.is_none()));
+}

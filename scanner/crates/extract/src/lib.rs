@@ -239,9 +239,6 @@ impl<'a> Extractor<'a> {
         s.combat_role = combat_role(img);
         s.badges = px::read_badges(img);
         s.locks = px::read_locks(img);
-        let (equipment, raw) = baocr_equipment::detect_equipment(img, self.ocr)?;
-        s.equipment = equipment;
-        s.raw_ocr.extend(raw);
         s.identity = baocr_names::parse_name(&s.name);
 
         // fixed stage: dictionary, optionally audited against pixels
@@ -260,6 +257,11 @@ impl<'a> Extractor<'a> {
             s.reference = baocr_names::lookup_reference(&s.name, &s.loadout);
         }
         baocr_names::level_from_exp(&mut s);
+        // equipment last: the dictionary says which item type each slot takes, which narrows the icon match
+        let slot_kinds = s.fixed_meta.as_ref().map(|f| f.equipment_slots.clone()).unwrap_or_default();
+        let (equipment, raw) = baocr_equipment::detect_equipment_for(img, self.ocr, &slot_kinds)?;
+        s.equipment = equipment;
+        s.raw_ocr.extend(raw);
         Ok(s)
     }
 

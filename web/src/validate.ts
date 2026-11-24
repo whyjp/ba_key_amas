@@ -71,6 +71,7 @@ function bools(v: unknown, keys: string[]): Obj | null {
   return Object.keys(out).length ? out : null;
 }
 
+const TIER_LEVEL_CAP = [10, 20, 30, 40, 45, 50, 55, 60, 65, 70];
 const POSITIONS = new Set(["FRONT", "MIDDLE", "BACK"]);
 const STAT_KEYS = ["max_hp", "attack", "defense", "healing"];
 const DETAIL_KEYS = ["accuracy", "evasion", "critical", "critical_damage_pct", "defense_pierce", "stability", "range", "cost_recovery", "cc_power", "cc_resist", "type_bonus_pct", "max_cost_bonus"];
@@ -92,10 +93,11 @@ function parseEquipment(v: unknown): Obj[] {
     if (kind) row.type = kind;
     const name = str(e.item_name, 60);
     if (name) row.item_name = name;
-    const tier = int(e.tier, 1, 12);
+    const tier = int(e.tier, 1, 10);
     if (tier !== null) row.tier = tier;
+    // an item stops levelling at its tier's cap, so a level above it is a misread and is dropped
     const level = int(e.level, 1, 100);
-    if (level !== null) row.level = level;
+    if (level !== null && (tier === null || level <= (TIER_LEVEL_CAP[tier - 1] ?? 100))) row.level = level;
     out.push(row);
   }
   return out;
@@ -171,6 +173,47 @@ function parseAccount(v: unknown): Obj | null {
   return out;
 }
 
+function distance(a: string, b: string): number {
+  const x = [...a], y = [...b];
+  let prev = Array.from({ length: y.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= x.length; i++) {
+    const row = [i];
+    for (let j = 1; j <= y.length; j++) row[j] = Math.min((prev[j] ?? 0) + 1, (row[j - 1] ?? 0) + 1, (prev[j - 1] ?? 0) + (x[i - 1] === y[j - 1] ? 0 : 1));
+    prev = row;
+  }
+  return prev[y.length] ?? 0;
+}
+
+/**
+ * The progress scan reads names off other screens than the roster scan did, so a name can be one character off
+ * (`순` for `숲`). Each name is matched to the owned student it is nearest to: exactly, else within a small edit
+ * distance and only when one student is clearly nearest. A name with two equally near students is left alone.
+ */
+export function canonicalName(name: string, owned: string[]): string {
+  const clean = name.normalize("NFC").replace(/^[\s'"`‘’“”]+|[\s'"`‘’“”]+$/g, "");
+  if (owned.includes(clean)) return clean;
+  const limit = Math.max(1, Math.floor([...clean].length / 4));
+  let best: string | null = null, bestD = Infinity, tie = false;
+  for (const o of owned) {
+    const d = distance(clean, o);
+    if (d < bestD) { best = o; bestD = d; tie = false; } else if (d === bestD) tie = true;
+  }
+  return best !== null && bestD <= limit && !tie ? best : clean;
+}
+
+function reconcileNames(progress: unknown, owned: string[]): void {
+  if (!isObj(progress)) return;
+  const fix = (list: unknown) => {
+    if (!Array.isArray(list)) return;
+    for (const e of list) if (isObj(e) && typeof e.name === "string") e.name = canonicalName(e.name, owned);
+  };
+  if (isObj(progress.duty)) fix(progress.duty.students);
+  if (isObj(progress.momotalk)) {
+    fix(progress.momotalk.students);
+    fix(progress.momotalk.unread);
+  }
+}
+
 /** The duty menu scan lists every owned student with the memorial lobby icon state. */
 function memorialByName(progress: unknown): Map<string, boolean> {
   const out = new Map<string, boolean>();
@@ -206,6 +249,7 @@ export function parseUpload(body: unknown): Upload {
     if (JSON.stringify(body.progress).length > MAX_PROGRESS_BYTES) throw new Invalid("progress 가 너무 큽니다");
     progress = body.progress;
   }
+  reconcileNames(progress, students.map((s) => s.name));
   const memorial = memorialByName(progress);
   for (const s of students) s.memorial = memorial.get(s.name) ?? null;
   return { nickname, key, public: body.public === true, students, account: parseAccount(roster.account), progress };

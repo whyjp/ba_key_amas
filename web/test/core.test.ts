@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { foldNickname, hashKey, keyMatches, newTag, normalizeNickname, parseKey } from "../src/keys.ts";
-import { Invalid, parseUpload } from "../src/validate.ts";
+import { canonicalName, Invalid, parseUpload } from "../src/validate.ts";
 
 test("a key is nickname#hex6, split at the last #", () => {
   assert.deepEqual(parseKey("소다팝#A1b2C3"), { nickname: "소다팝", tag: "a1b2c3" });
@@ -79,4 +79,27 @@ test("scanned detail is whitelisted and ranged; terrain falls back to the dictio
     stat_detail: { accuracy: 100, critical: 200, range: 650 },
     mystic: { stars: 2 },
   });
+});
+
+test("names the progress scan misread are matched to the owned student they are nearest to", () => {
+  const owned = ["숲", "시로코*테러", "아야네", "아카리", "하레", "세리카(새해)", "모에"];
+  assert.equal(canonicalName("순", owned), "숲");
+  assert.equal(canonicalName("시로코츠테러", owned), "시로코*테러");
+  assert.equal(canonicalName("이카리", owned), "아카리");
+  assert.equal(canonicalName("하례", owned), "하레");
+  assert.equal(canonicalName("‘세리카(새해)", owned), "세리카(새해)");
+  assert.equal(canonicalName("전혀다른이름", owned), "전혀다른이름", "far names are left alone");
+  assert.equal(canonicalName("아네", ["아야네", "아카네"]), "아네", "two equally near students: no guess");
+});
+
+test("equipment keeps a tier only up to 10 and drops a level above the tier's cap", () => {
+  const up = parseUpload({ nickname: "x", roster: { entries: [{ student: { name: "케이", equipment: [
+    { slot: 1, slot_kind: "standard", equipped: true, type: "Shoes", item_name: "Casual Sneakers", tier: 7, level: 55 },
+    { slot: 2, slot_kind: "standard", equipped: true, type: "Hairpin", tier: 6, level: 55 },
+    { slot: 3, slot_kind: "standard", equipped: true, tier: 12, level: 40 },
+  ] } }] } });
+  const eq = (up.students[0]?.detail?.equipment ?? []) as { tier?: number; level?: number }[];
+  assert.deepEqual([eq[0]?.tier, eq[0]?.level], [7, 55]);
+  assert.deepEqual([eq[1]?.tier, eq[1]?.level], [6, undefined], "55 is above the T6 cap of 50");
+  assert.deepEqual([eq[2]?.tier, eq[2]?.level], [undefined, 40], "T12 does not exist");
 });

@@ -94,6 +94,7 @@ def main() -> int:
         "attack": loc["BulletType"],
         "armor": loc["ArmorType"],
         "events": [{"id": e, "name": loc["EventName"].get(str(e), str(e))} for e in event_ids],
+        "backgrounds": names,
         "bond_max": config["Regions"][GLOBAL_FLAG]["BondMaxLevel"],
         "level_max": config["Regions"][GLOBAL_FLAG]["StudentMaxLevel"],
     }
