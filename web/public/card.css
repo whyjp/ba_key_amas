@@ -444,10 +444,10 @@
 .pc-chip.tactic { border-color: var(--tc); }
 .pc-chip.tactic svg { color: var(--tc); filter: drop-shadow(0 0 2px rgba(0, 0, 0, .8)); }
 
-/* the front is still: no idle drift, the text does not slide with the light. Larger type with an outline for legibility. */
+/* the front is still: no idle drift, the text does not slide with the light. Larger type, shadowed for legibility. */
 .full .pc-body { transform: none; }
-.pc-front { --ol: rgba(6, 10, 22, .9); }
-.pc-front :is(h2, small, b, span, em, .skill-name, .tag) { paint-order: stroke fill; -webkit-text-stroke: 3px var(--ol); }
+/* legibility by shadow, not outline: a tight dark core plus a soft wide halo */
+.pc-front :is(h2, small, b, span, em, .skill-name, .tag) { text-shadow: 0 1px 1px rgba(0, 0, 0, .85), 0 0 6px rgba(0, 0, 0, .6), 0 2px 12px rgba(0, 0, 0, .5); }
 .pc-front .pc-chip svg, .pc-front .type-pill svg { filter: drop-shadow(0 0 1.5px rgba(0, 0, 0, .9)); }
 .pc-title small { font-size: 12px; }
 .pc-title h2 { font-size: 24px; }
@@ -463,4 +463,3 @@
 .full .pc-stat b { font-size: 18px; }
 .full .pc-marks .tag { font-size: 12px; }
 .full .pc-flip { font-size: 12px; }
-.pc-front .pc-flip { -webkit-text-stroke: 0; }
