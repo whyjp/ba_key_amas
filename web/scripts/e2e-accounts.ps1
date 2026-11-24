@@ -23,7 +23,7 @@ function Check([string]$name, [bool]$ok, [string]$detail = "") {
 }
 
 function AccountId([string]$code) {
-    $norm = ($code.Trim() -creplace 'l', '1').ToUpper() -creplace 'O', '0' -creplace 'I', '1' -replace '[^A-Z0-9]', ''
+    $norm = (($code.Trim() -replace '[^A-Za-z0-9]', '').ToUpperInvariant() -creplace 'O', '0') -creplace 'I', '1'
     $bytes = [System.Text.Encoding]::UTF8.GetBytes("ba-key-amas/account/v1`0" + $norm)
     -join ([System.Security.Cryptography.SHA256]::HashData($bytes) | ForEach-Object { $_.ToString("x2") })
 }
