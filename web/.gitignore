@@ -1,19 +1,7 @@
 node_modules/
 .wrangler/
 .dev.vars
-src/catalog.json
-public/portraits/
-public/icons/
-public/schools/
-public/meta.json
+# raw inputs of the card crops: regenerable, large, never needed at deploy time
 public/standing/
 public/lobby/
-public/halos/
-public/halos.json
-public/card/
-public/card-lobby/
 scripts/.cache/
-public/backgrounds/
-src/backgrounds.json
-public/card-lobby.json
-public/faces.json
