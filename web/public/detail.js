@@ -90,23 +90,26 @@ function detailSections(d) {
 }
 
 // Card tiers by the character's place in the teacher's overall ranking. The top three are special
-// illustration cards (the memorial lobby art, full foil), four and five are foil cards, the rest plain.
+// illustration cards (the memorial lobby art over the whole card; SAR has no frame, UR a gold one, SR a silver one),
+// four and five are framed foil cards, the rest plain.
 const TIERS = [
-  { key: "sar", label: "SAR", art: "lobby", special: true },
-  { key: "sr", label: "SR", art: "lobby", special: true },
-  { key: "ur", label: "UR", art: "lobby", special: true },
-  { key: "ar", label: "AR", art: "standing", special: false },
-  { key: "rr", label: "RR", art: "standing", special: false },
+  { key: "sar", label: "SAR", art: "lobby", full: true, frame: "none" },
+  { key: "ur", label: "UR", art: "lobby", full: true, frame: "gold" },
+  { key: "sr", label: "SR", art: "lobby", full: true, frame: "silver" },
+  { key: "ar", label: "AR", art: "standing", full: false },
+  { key: "rr", label: "RR", art: "standing", full: false },
 ];
-const PLAIN = { key: "n", label: "", art: "standing", special: false };
+const PLAIN = { key: "n", label: "", art: "standing", full: false };
 const CARD_W = 380;
 const CARD_H = 640;
 
 /** The cut artwork first, then the uncut one, then the small portrait; a card never ends up without a picture. */
-function artFor(s, tier) {
+function artFor(s, tier, art) {
   const id = encodeURIComponent(s.student_id);
   const chain = (tier.art === "lobby" ? [`/card-lobby/${id}.webp`, `/lobby/${id}.webp`] : [`/card/${id}.webp`, `/standing/${id}.webp`]).concat(`/portraits/${id}.webp`);
   const img = el("img", "pc-art-img " + tier.art);
+  // full-art cards continue the picture, blurred, behind the text area
+  img.addEventListener("load", () => art.style.setProperty("--art", `url("${img.src}")`));
   let i = 0;
   img.addEventListener("error", () => { if (++i < chain.length) img.src = chain[i]; else img.replaceWith(el("div", "pc-art-none", "일러스트 없음")); });
   img.src = chain[0];
@@ -124,7 +127,7 @@ function stat(label, value) {
 function buildCard(s, meta, ctx, rank, animate) {
   const tier = TIERS[rank] ?? PLAIN;
   const det = s.detail ?? {};
-  const card = el("div", "pcard tier-" + tier.key + (tier.special ? " special" : "") + (animate ? "" : " quick"));
+  const card = el("div", "pcard tier-" + tier.key + (tier.full ? " full frame-" + tier.frame : "") + (animate ? "" : " quick"));
   card.setAttribute("role", "dialog");
   card.setAttribute("aria-modal", "true");
   card.setAttribute("aria-label", s.name);
@@ -140,14 +143,14 @@ function buildCard(s, meta, ctx, rank, animate) {
 
   const band = el("div", "pc-band");
   const art = el("div", "pc-art");
-  if (s.student_id) art.append(artFor(s, tier));
+  if (s.student_id) art.append(artFor(s, tier, art));
   else art.append(el("div", "pc-art-none", "일러스트 없음"));
   const ring = halo(meta, s.student_id, "pc-halo");
   if (ring) art.append(ring);
   if (tier.key !== "n") {
     // the foil lives inside the picture only, so the text beside it stays readable
     art.append(el("div", "pc-holo"), el("div", "pc-glare"));
-    if (tier.special) art.append(el("div", "pc-sparkle"));
+    if (tier.full) art.append(el("div", "pc-sparkle"));
   }
   const lv = el("div", "pc-lv");
   lv.append(el("small", "", "Lv."), el("b", "", s.level === null ? "-" : String(s.level)));
@@ -189,7 +192,9 @@ function buildCard(s, meta, ctx, rank, animate) {
 
   const flip = el("button", "pc-flip", "상세 능력치 보기");
   flip.type = "button";
-  front.append(head, band, types, moves, foot, marks, flip);
+  const body = el("div", "pc-body");
+  body.append(types, moves, foot, marks, flip);
+  front.append(band, head, body);
 
   const back = el("div", "pc-face pc-back");
   const bh = el("div", "pc-back-head");

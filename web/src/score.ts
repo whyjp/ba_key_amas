@@ -1,7 +1,7 @@
 // Leaderboard scoring. Pure: a list of owned students in, characters and totals out.
 //
-// A character is the name without its outfit, so `리오` and `리오(무장)` are one character whose points
-// add up. The weights below are a judgement about effort, not a game formula. Bond rank, the pinned flag and
+// A character is the name without its outfit, so `리오` and `리오(무장)` are one character. The outfits' points
+// are added with a falling coefficient (OUTFIT_DECAY), best outfit at full weight. The weights below are a judgement about effort, not a game formula. Bond rank, the pinned flag and
 // the memorial lobby count in full. Growth (level, stars, unique weapon, skills) counts at GROWTH_WEIGHT,
 // because the leaderboard is meant to reward long relationships over raw investment.
 //
@@ -10,7 +10,10 @@
 // and every rank above it is worth 6. Unique weapon is the hardest growth item, so owning one adds a flat
 // 30 on top of 15 per weapon star and 0.6 per weapon level.
 
-export const SCORE_VERSION = 1;
+export const SCORE_VERSION = 2;
+/** Each further outfit of a character counts DECAY times the one before it (best outfit first), so a wardrobe adds
+ *  credit without letting a student with many outfits run away from one with a single, well loved outfit. */
+export const OUTFIT_DECAY = 0.4;
 export const GROWTH_WEIGHT = 0.6;
 export const PIN_POINTS = 40;
 export const MEMORIAL_POINTS = 50;
@@ -101,19 +104,26 @@ export function analyze(students: OwnedStudent[]): Analysis {
   }
   const characters: Character[] = [];
   for (const [base, list] of groups) {
+    const own = list
+      .map((s) => {
+        const part = { bondPoints: bondPoints(s.bond ?? 0), pinPoints: s.pinned ? PIN_POINTS : 0, memorialPoints: s.memorial ? MEMORIAL_POINTS : 0, growthPoints: growthPoints(s) };
+        return { s, part, total: weighted(part) };
+      })
+      .sort((a, b) => b.total - a.total || (b.s.bond ?? 0) - (a.s.bond ?? 0) || a.s.name.localeCompare(b.s.name, "ko"));
+    const sum = { bondPoints: 0, pinPoints: 0, memorialPoints: 0, growthPoints: 0 };
+    let total = 0;
+    own.forEach((o, i) => {
+      const w = OUTFIT_DECAY ** i;
+      total += w * o.total;
+      for (const k of Object.keys(sum) as (keyof typeof sum)[]) sum[k] += w * o.part[k];
+    });
     const ordered = [...list].sort((a, b) => Number(a.name !== base) - Number(b.name !== base) || (b.bond ?? 0) - (a.bond ?? 0) || a.name.localeCompare(b.name, "ko"));
-    const part = {
-      bondPoints: list.reduce((n, s) => n + bondPoints(s.bond ?? 0), 0),
-      pinPoints: list.reduce((n, s) => n + (s.pinned ? PIN_POINTS : 0), 0),
-      memorialPoints: list.reduce((n, s) => n + (s.memorial ? MEMORIAL_POINTS : 0), 0),
-      growthPoints: list.reduce((n, s) => n + growthPoints(s), 0),
-    };
     characters.push({
       base,
       outfits: ordered.map((s) => ({ name: s.name, id: s.student_id })),
       bond: Math.max(...list.map((s) => s.bond ?? 0)),
-      ...part,
-      total: Math.round(weighted(part) * 10) / 10,
+      ...sum,
+      total: Math.round(total * 10) / 10,
       pinned: list.some((s) => s.pinned),
       memorial: list.some((s) => s.memorial),
       maxLevel: Math.max(...list.map((s) => s.level ?? 0)),

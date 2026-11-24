@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { analyze, baseName, bondPoints, type OwnedStudent } from "../src/score.ts";
+import { analyze, baseName, bondPoints, OUTFIT_DECAY, type OwnedStudent } from "../src/score.ts";
 import { parseUpload } from "../src/validate.ts";
 
 const s = (name: string, o: Partial<OwnedStudent> = {}): OwnedStudent => ({
@@ -22,12 +22,25 @@ test("bond points grow with rank and jump at 60", () => {
   assert.ok(bondPoints(61) - bondPoints(60) > bondPoints(31) - bondPoints(30));
 });
 
-test("outfits add up under one name, with the plain outfit first", () => {
+test("outfits share one character, the plain outfit first", () => {
   const a = analyze([s("리오(무장)", { bond: 10, student_id: 2 }), s("리오", { bond: 20, student_id: 1 }), s("아루", { bond: 5 })]);
   const rio = a.characters.find((c) => c.base === "리오");
   assert.deepEqual(rio?.outfits.map((o) => o.name), ["리오", "리오(무장)"]);
-  assert.equal(rio?.bondPoints, bondPoints(10) + bondPoints(20));
   assert.equal(a.stats.characters, 2);
+});
+
+test("a further outfit adds credit with a coefficient, not in full and not as an average", () => {
+  const single = analyze([s("리오", { bond: 20 })]).characters[0]?.total ?? 0;
+  const second = analyze([s("리오", { bond: 20 }), s("리오(무장)", { bond: 20 })]).characters[0]?.total ?? 0;
+  assert.ok(second > single, "the second outfit still counts");
+  assert.ok(second < single * 1.5, "but far less than doubling");
+  assert.ok(Math.abs(second - single * (1 + OUTFIT_DECAY)) < 0.2);
+});
+
+test("many outfits cannot outrun one deeply loved outfit", () => {
+  const wardrobe = analyze(Array.from({ length: 6 }, (_, i) => s(`옷장(${i})`, { bond: 12 })));
+  const loved = analyze([s("한벌", { bond: 40, pinned: true, memorial: true })]);
+  assert.ok((loved.characters[0]?.total ?? 0) > (wardrobe.characters[0]?.total ?? 0));
 });
 
 test("relationship counts more than growth", () => {

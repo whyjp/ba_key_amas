@@ -493,3 +493,65 @@ a.nick:hover { background: var(--sky); }
 @keyframes spark { 0% { opacity: 0; transform: rotate(var(--a)) translateX(0) scale(var(--s)); } 20% { opacity: 1; } 100% { opacity: 0; transform: rotate(var(--a)) translateX(var(--d)) scale(0); } }
 .pi-sar .pi-halo { filter: drop-shadow(0 0 18px #ffd45e) drop-shadow(0 0 44px #ff6ec7); }
 @media (prefers-reduced-motion: reduce) { .pc-intro { display: none; } .pcard { animation-delay: 0s; } }
+
+/* ---- card layout v3: body wrapper, and full-art tiers ---- */
+.pc-front { display: flex; flex-direction: column; gap: 8px; }
+.pc-front > .pc-head { order: 1; }
+.pc-front > .pc-band { order: 2; }
+.pc-front > .pc-body { order: 3; flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
+.pc-body .pc-flip { margin-top: auto; }
+
+/* full art: the picture is the card. No band, no paper; the text sits on the picture. */
+.full .pc-face { border: 0; padding: 0; background: #0d1530; }
+.full .pc-front { display: block; }
+.full .pc-band { position: absolute; inset: 0; width: auto; height: auto; aspect-ratio: auto; padding: 0; border-radius: 0; background: none; box-shadow: none; animation: none; }
+.full .pc-band::before, .full .pc-band::after { display: none; }
+.full .pc-art { border-radius: 0; box-shadow: none; background: #0d1530; }
+.full .pc-art::before { content: ""; position: absolute; inset: -24px; background: var(--art) center / cover; filter: blur(18px) saturate(1.25) brightness(.8); z-index: -1; }
+.full .pc-art-img { height: 54%; inset: 0 0 auto 0; object-position: center 22%; -webkit-mask-image: linear-gradient(#000 80%, transparent); mask-image: linear-gradient(#000 80%, transparent); }
+.full .pc-art::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(8, 14, 32, .72) 0, rgba(8, 14, 32, 0) 20%, rgba(8, 14, 32, 0) 40%, rgba(8, 14, 32, .78) 66%, rgba(8, 14, 32, .9) 100%); pointer-events: none; z-index: 1; }
+.full .pc-halo { top: 9%; width: 32%; }
+.full .pc-head { position: absolute; left: 0; right: 0; top: 0; padding: 12px 14px; z-index: 3; color: #fff; text-shadow: 0 1px 4px rgba(0, 0, 0, .7); }
+.full .pc-title small { color: rgba(255, 255, 255, .8); }
+.full .pc-title h2 { color: #fff; }
+.full .pc-hp small { color: rgba(255, 255, 255, .75); }
+.full .pc-hp b { color: #ff9a8a; }
+.full .pc-lv { left: 14px; top: calc(54% - 34px); bottom: auto; border-radius: 10px; background: rgba(8, 14, 32, .6); backdrop-filter: blur(4px); }
+.full .pc-stars { top: auto; right: 14px; bottom: auto; top: calc(54% - 30px); background: rgba(8, 14, 32, .55); }
+.full .pc-body { position: absolute; left: 10px; right: 10px; bottom: 10px; z-index: 3; padding: 10px 12px; border-radius: 14px; color: #fff; background: rgba(10, 18, 40, .6); backdrop-filter: blur(8px); border: 1px solid rgba(255, 255, 255, .28); }
+.full .pc-moves { background: rgba(255, 255, 255, .08); border-color: rgba(255, 255, 255, .22); }
+.full .skill-name, .full .pc-stat b, .full .skill b { color: #fff; }
+.full .pc-stat span, .full .pc-bond small, .full .pc-weapon, .full .pc-weapon small { color: rgba(255, 255, 255, .72); }
+.full .meter i { background: rgba(255, 255, 255, .2); }
+.full .pc-flip { background: rgba(255, 255, 255, .92); color: var(--navy); }
+.full .pc-sparkle { z-index: 2; }
+.full .tags .tag, .full .pc-types .tag { box-shadow: 0 0 0 1px rgba(255, 255, 255, .35); }
+
+/* the three full-art grades differ in frame and foil */
+.frame-none .pc-face { box-shadow: none; }
+.frame-none { box-shadow: 0 18px 50px rgba(255, 110, 200, .42); }
+
+.tier-ur { box-shadow: 0 16px 44px rgba(255, 190, 60, .45); }
+.tier-ur .pc-face { box-shadow: inset 0 0 0 3px #f6d466, inset 0 0 0 6px #7a5408, inset 0 0 0 7px #ffeaa0; }
+.tier-ur .pc-art::after { background: linear-gradient(180deg, rgba(60, 38, 0, .65) 0, rgba(60, 38, 0, 0) 20%, rgba(60, 38, 0, 0) 40%, rgba(40, 24, 0, .78) 66%, rgba(30, 18, 0, .92) 100%); }
+.tier-ur .pc-holo { background-image: linear-gradient(120deg, rgba(255, 224, 120, .9), rgba(255, 150, 40, .7) 35%, rgba(255, 245, 190, .9) 55%, rgba(255, 190, 70, .8)); mix-blend-mode: overlay; opacity: .55; }
+.tier-ur .pc-title h2, .tier-ur .pc-title small { color: #ffe9a0; }
+.tier-ur .pc-body { border-color: rgba(246, 212, 102, .6); background: rgba(40, 26, 4, .66); }
+
+.tier-sr { box-shadow: 0 16px 40px rgba(150, 180, 255, .4); }
+.tier-sr .pc-face { box-shadow: inset 0 0 0 2px #dfe7f3, inset 0 0 0 4px #4b5a77; }
+.tier-sr .pc-holo { background-image: repeating-linear-gradient(135deg, rgba(255, 255, 255, .55) 0 1px, transparent 1px 7px), conic-gradient(from calc(var(--ry) * 6) at var(--mx) var(--my), #ff5ea8, #ffd45e, #5effa0, #5ec8ff, #b45eff, #ff5ea8); mix-blend-mode: soft-light; opacity: .6; }
+
+.tier-sar .pc-holo { background-image: conic-gradient(from calc(var(--ry) * 8) at var(--mx) var(--my), #ff4d9d, #ffb84d, #f5ff4d, #4dffb0, #4db8ff, #9d4dff, #ff4d9d), repeating-linear-gradient(115deg, rgba(255, 255, 255, .5) 0 3%, transparent 3% 9%); mix-blend-mode: soft-light; opacity: .6; }
+.tier-sar .pc-front::after { content: none; }
+.tier-sar .pc-title h2 { background: linear-gradient(90deg, #fff, #ffd1ef, #d9e8ff); -webkit-background-clip: text; background-clip: text; color: transparent; text-shadow: none; filter: drop-shadow(0 1px 3px rgba(0, 0, 0, .6)); }
+
+/* AR and RR keep the framed layout: AR with a bigger window and an etched foil, RR with a plain foil */
+.tier-ar .pc-band { aspect-ratio: 1.16 / 1; }
+.tier-ar .pc-holo { background-image: repeating-linear-gradient(125deg, rgba(255, 90, 160, .7) 0 8%, rgba(255, 220, 90, .7) 8% 16%, rgba(90, 255, 180, .7) 16% 24%, rgba(90, 160, 255, .7) 24% 32%), repeating-linear-gradient(45deg, rgba(255, 255, 255, .4) 0 1px, transparent 1px 6px); }
+
+.full::after { content: ""; position: absolute; inset: 0; border-radius: 18px; pointer-events: none; z-index: 4; background: linear-gradient(105deg, transparent 40%, rgba(255, 255, 255, .28) 50%, transparent 60%); background-size: 250% 100%; animation: sweep 1.2s ease-out 1.7s 1 both; }
+.quick.full::after { animation-delay: .3s; }
+.full .pc-band { animation: none; }
+.full .meter i.on { background: linear-gradient(180deg, #7fe0ff, #3d8fe8); }
+.tier-ur .meter i.on { background: linear-gradient(180deg, #ffe9a0, #e0a020); }
