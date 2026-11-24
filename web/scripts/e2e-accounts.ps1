@@ -7,6 +7,7 @@
 # and exits 1 on any failure.
 param(
     [string]$Exe = "D:\scan-run\member-key\ba-key-AMAS.exe",
+    [string]$SigningKey = "e2e-signing-key-0123456789abcdef",
     [int]$Port = 8799,
     [string]$Work = "D:\scan-run\member-key\e2e"
 )
@@ -35,16 +36,30 @@ function Api([string]$method, [string]$path, $body = $null, [hashtable]$headers 
     [pscustomobject]@{ Status = [int]$r.StatusCode; Json = ($r.Content | ConvertFrom-Json -ErrorAction SilentlyContinue); Text = $r.Content }
 }
 
-function Upload([string]$code, [string[]]$more) {
+function Upload([string]$code, [string[]]$more, [string]$key = $SigningKey) {
     $env:BAOCR_MEMBER_CODE = $code
+    if ($key) { $env:BAOCR_ADDON_SIGNING_KEY = $key }
     $realAppData = $env:APPDATA
     $env:APPDATA = Join-Path $Work "appdata"
     $out = Join-Path $Work "upload.out"
     $err = Join-Path $Work "upload.err"
     $p = Start-Process -FilePath $Exe -ArgumentList (@("--upload", $base, "--out", (Join-Path $Work "students")) + $more) -Wait -PassThru -NoNewWindow -RedirectStandardOutput $out -RedirectStandardError $err
     Remove-Item Env:BAOCR_MEMBER_CODE
+    Remove-Item Env:BAOCR_ADDON_SIGNING_KEY -ErrorAction SilentlyContinue
     $env:APPDATA = $realAppData
     [pscustomobject]@{ Exit = $p.ExitCode; Text = ((Get-Content $out -Raw -ErrorAction SilentlyContinue) + (Get-Content $err -Raw -ErrorAction SilentlyContinue)) }
+}
+
+# HMAC-SHA256(key, "ts\npath\nsha256(body)") in hex: what the add-on adds to every request that changes an account
+function SignedApi([string]$path, $body, [string]$key = $SigningKey, [hashtable]$extra = @{}) {
+    $json = ($body | ConvertTo-Json -Depth 10 -Compress)
+    $ts = [string][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    $digest = -join ([System.Security.Cryptography.SHA256]::HashData([System.Text.Encoding]::UTF8.GetBytes($json)) | ForEach-Object { $_.ToString("x2") })
+    $hmac = [System.Security.Cryptography.HMACSHA256]::new([System.Text.Encoding]::UTF8.GetBytes($key))
+    $sig = -join ($hmac.ComputeHash([System.Text.Encoding]::UTF8.GetBytes("$ts`n$path`n$digest")) | ForEach-Object { $_.ToString("x2") })
+    $h = @{ "x-amas-protocol" = "2"; "x-amas-addon" = "e2e"; "x-amas-ts" = $ts; "x-amas-sig" = $sig } + $extra
+    $r = Invoke-WebRequest -Uri "$base$path" -Method POST -Body $json -ContentType "application/json" -Headers $h -SkipHttpErrorCheck
+    [pscustomobject]@{ Status = [int]$r.StatusCode; Json = ($r.Content | ConvertFrom-Json -ErrorAction SilentlyContinue); Text = $r.Content }
 }
 
 function Sql([string]$sql) {
@@ -67,7 +82,7 @@ New-Item -ItemType Directory -Force (Join-Path $Work "students"), (Join-Path $Wo
     @{ student = @{ name = "하루"; level = 70; rarity_stars = 2 } }) } | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $Work "students\students.json") -Encoding utf8
 @{ schema_version = 2; account = @{ nickname = "소다팝" } } | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $Work "appdata\baocr\progress\latest.json") -Encoding utf8
 foreach ($f in @(@("catalog.json", "{}"), @("backgrounds.json", "[]"))) { $p = Join-Path $web "src\$($f[0])"; if (-not (Test-Path $p)) { Set-Content $p $f[1] } }
-Set-Content (Join-Path $web ".dev.vars") "KEY_PEPPER=e2e-only-pepper"
+Set-Content (Join-Path $web ".dev.vars") "KEY_PEPPER=e2e-only-pepper`nADDON_SIGNING_KEY=$SigningKey"
 
 Push-Location $web
 npx wrangler d1 migrations apply ba-key-amas --local --persist-to $state 2>&1 | Out-Null
@@ -115,21 +130,29 @@ try {
     $page = Api GET "/api/public?id=$pid1"
     Check "a profile opens by public_id" ($page.Status -eq 200 -and $page.Json.nickname -eq "새이름")
 
-    $h = Api POST "/api/visibility" @{ account_id = $idA; public = $false } @{ "x-amas-protocol" = "2"; "x-amas-addon" = "e2e" }
-    Check "visibility by account_id (add-on headers)" ($h.Status -eq 200 -and $h.Json.public -eq $false) $h.Text
+    $forged = Api POST "/api/visibility" @{ account_id = $idA; public = $false } @{ "x-amas-protocol" = "2"; "x-amas-addon" = "e2e" }
+    Check "the add-on headers alone are not enough: no signature gets 401" ($forged.Status -eq 401) $forged.Text
+    $wrong = SignedApi "/api/visibility" @{ account_id = $idA; public = $false } "some-other-key-0123456789abcdef"
+    Check "a signature made with another key gets 401" ($wrong.Status -eq 401) $wrong.Text
+    $stillListed = Api GET ("/api/search?q=" + [uri]::EscapeDataString("새이"))
+    Check "the refused requests changed nothing: both accounts are still public and listed" (@($stillListed.Json.matches).Count -eq 2) $stillListed.Text
+    $unsignedBuild = Upload $codeA @() ""
+    Check "an add-on build without the signing key cannot upload (exit code is not 0, the message says why)" ($unsignedBuild.Exit -ne 0 -and $unsignedBuild.Text -match "signing key") $unsignedBuild.Text
+    $h = SignedApi "/api/visibility" @{ account_id = $idA; public = $false }
+    Check "visibility by account_id (signed like the add-on)" ($h.Status -eq 200 -and $h.Json.public -eq $false) $h.Text
     $s2 = Api GET ("/api/search?q=" + [uri]::EscapeDataString("새이"))
     Check "a private account is no longer a candidate but its link still opens" (@($s2.Json.matches).Count -eq 1 -and (Api GET "/api/public?id=$pid1").Status -eq 200)
 
     $old = Api POST "/api/upload" @{ account_id = $idA; nickname = "x"; roster = @{} } @{ "x-amas-protocol" = "1"; "x-amas-addon" = "0.1.0" }
     Check "protocol 1 gets 426 and the download link" ($old.Status -eq 426 -and $old.Json.download -like "https://*") $old.Text
-    $bad = Api POST "/api/visibility" @{ account_id = "nope"; public = $true } @{ "x-amas-protocol" = "2"; "x-amas-addon" = "e2e" }
+    $bad = SignedApi "/api/visibility" @{ account_id = "nope"; public = $true }
     Check "a malformed account_id is refused" ($bad.Status -eq 400)
 
     $saved = Get-Content (Join-Path $Work "appdata\baocr\upload.json") -Raw -ErrorAction SilentlyContinue
     Check "scripted codes are not saved to upload.json" ([string]::IsNullOrEmpty($saved))
 
     Start-Sleep -Seconds 1
-    $logText = (Get-Content $log -Raw) + $r1.Text + $r2.Text + $r3.Text + $s.Text + $s2.Text + $page.Text + $h.Text + $old.Text + $bad.Text
+    $logText = (Get-Content $log -Raw) + $r1.Text + $r2.Text + $r3.Text + $s.Text + $s2.Text + $page.Text + $h.Text + $old.Text + $bad.Text + $forged.Text + $wrong.Text + $unsignedBuild.Text
     $leak = @($codeA, $codeB, $idA, $idB) | Where-Object { $logText -match [regex]::Escape($_) }
     Check "no member code or account_id in the server log, any response or the add-on output" (@($leak).Count -eq 0) ($leak -join ",")
     $db = (Sql "SELECT * FROM users") + (Sql "SELECT * FROM students")

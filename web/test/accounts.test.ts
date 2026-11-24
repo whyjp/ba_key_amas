@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { prepareWorkerImport, MemoryD1 } from "./helpers/d1.ts";
 import { MIN_PROTOCOL, PROTOCOL } from "../src/version.ts";
+import { addonSignature, SIGNATURE_WINDOW_SECONDS } from "../src/security.ts";
 
 prepareWorkerImport();
 const { default: worker } = await import("../src/index.ts");
@@ -9,6 +10,7 @@ const { default: worker } = await import("../src/index.ts");
 const A = "a1".repeat(32);
 const B = "b2".repeat(32);
 const PEPPER = "test-pepper";
+const SIGNING_KEY = "test-signing-key-0123456789abcdef";
 const ADDON = { "content-type": "application/json", "x-amas-protocol": String(PROTOCOL), "x-amas-addon": "0.1.0" };
 
 function roster(...names: string[]) {
@@ -40,12 +42,21 @@ class Server {
   constructor(pepper = PEPPER) {
     this.pepper = pepper;
   }
+  /** Server settings for the add-on signature; a test changes them per case. */
+  signing: Record<string, string | undefined> = { ADDON_SIGNING_KEY: SIGNING_KEY };
+  /** `call` signs like the official add-on unless the headers already carry a signature or `sign` is false. */
+  sign = true;
   async call(method: string, path: string, body?: unknown, headers: Record<string, string> = ADDON): Promise<{ status: number; text: string; json: any }> {
-    const env = { DB: this.d1, ASSETS: { fetch: async () => new Response("asset") }, KEY_PEPPER: this.pepper, LIMITER: this.limiter, CREATE_LIMITER: this.createLimiter } as never;
+    const env = { DB: this.d1, ASSETS: { fetch: async () => new Response("asset") }, KEY_PEPPER: this.pepper, LIMITER: this.limiter, CREATE_LIMITER: this.createLimiter, ...this.signing } as never;
+    const payload = body === undefined ? undefined : JSON.stringify(body);
+    if (method !== "GET" && this.sign && payload !== undefined && headers["x-amas-addon"] && !headers["x-amas-sig"]) {
+      const ts = String(Math.floor(Date.now() / 1000));
+      headers = { ...headers, "x-amas-ts": ts, "x-amas-sig": await addonSignature(SIGNING_KEY, ts, path, new TextEncoder().encode(payload)) };
+    }
     const orig = [console.error, console.log, console.warn];
     console.error = console.log = console.warn = (...a: unknown[]) => void this.logs.push(a.map(String).join(" "));
     try {
-      const req = new Request("http://srv.test" + path, { method, headers: method === "GET" ? {} : headers, body: body === undefined ? undefined : JSON.stringify(body) });
+      const req = new Request("http://srv.test" + path, { method, headers: method === "GET" ? {} : headers, body: payload });
       const res = await (worker as { fetch(r: Request, e: never): Promise<Response> }).fetch(req, env);
       const text = await res.text();
       return { status: res.status, text, json: text.startsWith("{") ? JSON.parse(text) : null };
@@ -298,4 +309,102 @@ test("visibility makes the account private unless the request says public: true"
     assert.equal(s.users()[0]?.public, 0, `stored private for ${JSON.stringify(body)}`);
   }
   assert.equal((await s.call("POST", "/api/visibility", { account_id: A, public: true })).json.public, true);
+});
+
+/** A signed request built by hand, so a test can break one part of it. */
+async function signed(path: string, body: unknown, over: { ts?: number; key?: string; path?: string; body?: unknown } = {}) {
+  const payload = JSON.stringify(body);
+  const ts = String(over.ts ?? Math.floor(Date.now() / 1000));
+  const sig = await addonSignature(over.key ?? SIGNING_KEY, ts, over.path ?? path, new TextEncoder().encode(JSON.stringify(over.body ?? body)));
+  return { payload, headers: { ...ADDON, "x-amas-ts": ts, "x-amas-sig": sig } };
+}
+
+async function post(s: Server, path: string, h: Record<string, string>, payload: string) {
+  const env = { DB: s.d1, ASSETS: { fetch: async () => new Response("asset") }, KEY_PEPPER: PEPPER, ...s.signing } as never;
+  const res = await (worker as { fetch(r: Request, e: never): Promise<Response> }).fetch(new Request("http://srv.test" + path, { method: "POST", headers: h, body: payload }), env);
+  const text = await res.text();
+  return { status: res.status, json: text.startsWith("{") ? JSON.parse(text) : null };
+}
+
+test("a request with the add-on headers but no signature is refused: the headers alone prove nothing", async () => {
+  const s = new Server();
+  s.sign = false;
+  for (const path of ["/api/upload", "/api/visibility", "/api/delete"]) {
+    const r = await s.call("POST", path, { account_id: A, nickname: "a", roster: roster("아루") }, ADDON);
+    assert.equal(r.status, 401, `${path} without a signature`);
+    assert.match(r.json.error, /서명/);
+  }
+  assert.equal(s.users().length, 0, "nothing was written");
+});
+
+test("only a signature made with the server key is accepted", async () => {
+  const s = new Server();
+  const body = { account_id: A, nickname: "a", roster: roster("아루") };
+  const good = await signed("/api/upload", body);
+  assert.equal((await post(s, "/api/upload", good.headers, good.payload)).status, 201);
+  const wrongKey = await signed("/api/upload", body, { key: "another-key-0123456789abcdef" });
+  assert.equal((await post(s, "/api/upload", wrongKey.headers, wrongKey.payload)).status, 401, "a different key");
+  const otherPath = await signed("/api/upload", body, { path: "/api/delete" });
+  assert.equal((await post(s, "/api/upload", otherPath.headers, otherPath.payload)).status, 401, "a signature for another endpoint");
+  const tampered = await signed("/api/upload", body, { body: { ...body, nickname: "someone else" } });
+  assert.equal((await post(s, "/api/upload", tampered.headers, tampered.payload)).status, 401, "a body changed after signing");
+  const junk = { ...good.headers, "x-amas-sig": "0".repeat(64) };
+  assert.equal((await post(s, "/api/upload", junk, good.payload)).status, 401, "a made-up signature");
+  assert.equal((await post(s, "/api/upload", { ...good.headers, "x-amas-sig": "xyz" }, good.payload)).status, 401, "a malformed signature");
+});
+
+test("a signed request is only good for five minutes either side of the server clock", async () => {
+  const s = new Server();
+  const body = { account_id: A, nickname: "a", roster: roster("아루") };
+  const now = Math.floor(Date.now() / 1000);
+  for (const [label, ts, want] of [["old", now - SIGNATURE_WINDOW_SECONDS - 30, 401], ["future", now + SIGNATURE_WINDOW_SECONDS + 30, 401], ["fresh", now - 60, 201]] as const) {
+    const r = await signed("/api/upload", body, { ts });
+    const res = await post(s, "/api/upload", r.headers, r.payload);
+    assert.equal(res.status, want, label);
+    if (want === 401) assert.match(res.json.error, /시각/);
+  }
+});
+
+test("the server fails closed: no signing key configured refuses every add-on request", async () => {
+  const s = new Server();
+  s.signing = {};
+  const r = await s.call("POST", "/api/upload", { account_id: A, nickname: "a", roster: roster("아루") });
+  assert.equal(r.status, 500);
+  assert.match(r.json.error, /서명 키/);
+  assert.equal(s.users().length, 0);
+});
+
+test("a key that is too short counts as no key", async () => {
+  const s = new Server();
+  s.signing = { ADDON_SIGNING_KEY: "short" };
+  assert.equal((await s.call("POST", "/api/upload", { account_id: A, nickname: "a", roster: roster("아루") })).status, 500);
+});
+
+test("the previous key is accepted while a new one is rolled out", async () => {
+  const s = new Server();
+  s.signing = { ADDON_SIGNING_KEY: "the-new-key-0123456789abcdef", ADDON_SIGNING_KEY_PREV: SIGNING_KEY };
+  const body = { account_id: A, nickname: "a", roster: roster("아루") };
+  const old = await signed("/api/upload", body);
+  assert.equal((await post(s, "/api/upload", old.headers, old.payload)).status, 201, "signed with the previous key");
+  const fresh = await signed("/api/upload", body, { key: "the-new-key-0123456789abcdef" });
+  assert.equal((await post(s, "/api/upload", fresh.headers, fresh.payload)).status, 200, "signed with the new key");
+});
+
+test("unsigned requests are only accepted when local development says so", async () => {
+  const s = new Server();
+  s.sign = false;
+  s.signing = { ALLOW_UNSIGNED_ADDON: "1" };
+  assert.equal((await s.call("POST", "/api/upload", { account_id: A, nickname: "a", roster: roster("아루") }, ADDON)).status, 201);
+  const t = new Server();
+  t.sign = false;
+  t.signing = { ALLOW_UNSIGNED_ADDON: "true", ADDON_SIGNING_KEY: SIGNING_KEY };
+  assert.equal((await t.call("POST", "/api/upload", { account_id: A, nickname: "a", roster: roster("아루") }, ADDON)).status, 401, "only the exact value 1 opens it");
+});
+
+test("the signature does not replace the other checks: a browser origin and an old protocol are still refused", async () => {
+  const s = new Server();
+  const body = { account_id: A, nickname: "a", roster: roster("아루") };
+  const good = await signed("/api/upload", body);
+  assert.equal((await post(s, "/api/upload", { ...good.headers, origin: "http://evil.test" }, good.payload)).status, 403);
+  assert.equal((await post(s, "/api/upload", { ...good.headers, "x-amas-protocol": "1" }, good.payload)).status, 426);
 });

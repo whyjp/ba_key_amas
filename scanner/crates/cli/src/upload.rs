@@ -6,8 +6,10 @@
 //! so only https (or a loopback address for local testing) is accepted.
 use crate::account_key;
 use anyhow::{anyhow, bail, Context, Result};
+use hmac_sha256::{Hash, HMAC};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// The upload contract this add-on speaks. The server accepts a range of contracts (see web/src/version.ts);
 /// raise this when the uploaded data changes shape and the server has learned the new one.
@@ -172,19 +174,57 @@ pub fn manage(req: &Manage, src: &Sources, ask: &mut dyn FnMut(&str) -> Result<S
     Ok(format!("leaderboard: {}{link}", if out["public"].as_bool().unwrap_or(false) { "public" } else { "private" }))
 }
 
+/// The key the official release build signs its requests with. CI injects it at build time (the environment
+/// variable `BAOCR_ADDON_SIGNING_KEY` while compiling), so it is not in the source: a build made from the source has
+/// none and the server refuses its requests. The same variable read at run time lets a developer talk to a local
+/// server that was started with a key of their own.
+fn signing_key() -> Option<String> {
+    std::env::var("BAOCR_ADDON_SIGNING_KEY")
+        .ok()
+        .or_else(|| option_env!("BAOCR_ADDON_SIGNING_KEY").map(str::to_string))
+        .filter(|k| k.len() >= 16)
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// `HMAC-SHA256(key, "{ts}\n{path}\n{sha256(body)}")` in hex: the same value the server computes (web/src/security.ts).
+pub fn signature(key: &str, ts: &str, path: &str, body: &[u8]) -> String {
+    let digest = hex(&Hash::hash(body));
+    hex(&HMAC::mac(format!("{ts}{n}{path}{n}{digest}", n = '\n').as_bytes(), key.as_bytes()))
+}
+
+/// `/api/upload` of `https://host:port/api/upload?x#y`.
+fn path_of(url: &str) -> String {
+    let rest = url.split_once("://").map_or(url, |(_, r)| r);
+    let path = rest.find('/').map_or("/", |i| &rest[i..]);
+    path.split(['?', '#']).next().unwrap_or("/").to_string()
+}
+
 fn post_json(url: &str, body: Value) -> Result<Value> {
-    let res = match ureq::post(url)
+    // the exact bytes that are signed are the bytes that are sent
+    let bytes = serde_json::to_vec(&body)?;
+    let mut request = ureq::post(url)
         .set("content-type", "application/json")
         .set("x-amas-protocol", &UPLOAD_PROTOCOL.to_string())
-        .set("x-amas-addon", env!("CARGO_PKG_VERSION"))
-        .send_json(body)
-    {
+        .set("x-amas-addon", env!("CARGO_PKG_VERSION"));
+    let signed = match signing_key() {
+        Some(key) => {
+            let ts = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs().to_string();
+            request = request.set("x-amas-sig", &signature(&key, &ts, &path_of(url), &bytes)).set("x-amas-ts", &ts);
+            true
+        }
+        None => false,
+    };
+    let res = match request.send_bytes(&bytes) {
         Ok(r) => r,
         Err(ureq::Error::Status(code, r)) => {
             let v = r.into_json::<Value>().unwrap_or(Value::Null);
             let msg = v["error"].as_str().unwrap_or_default();
             match v["download"].as_str() {
                 Some(url) if code == 426 => bail!("server answered {code}: {msg}\nupdate the add-on: {url}"),
+                _ if code == 401 && !signed => bail!("server answered {code}: {msg}\nthis build has no signing key; only the official release of the add-on can upload"),
                 _ => bail!("server answered {code}: {msg}"),
             }
         }
@@ -311,5 +351,22 @@ mod tests {
     #[test]
     fn the_page_link_uses_the_public_id() {
         assert_eq!(profile_url("http://127.0.0.1:8787/", "0123456789abcdef"), "http://127.0.0.1:8787/#/u/0123456789abcdef");
+    }
+
+    #[test]
+    fn the_signature_matches_an_independent_hmac() {
+        // node -e 'const c=require("crypto");const d=c.createHash("sha256").update("{\"a\":1}").digest("hex");console.log(c.createHmac("sha256","test-signing-key-0123456789abcdef").update("1700000000\n/api/upload\n"+d).digest("hex"))'
+        let got = signature("test-signing-key-0123456789abcdef", "1700000000", "/api/upload", br#"{"a":1}"#);
+        assert_eq!(got, "ef7245b4c0b83655a1f80281e721a9b347b49e29d9bce309b98ac16975d8f421");
+        assert_ne!(got, signature("test-signing-key-0123456789abcdef", "1700000000", "/api/delete", br#"{"a":1}"#), "the path is part of it");
+        assert_ne!(got, signature("test-signing-key-0123456789abcdef", "1700000001", "/api/upload", br#"{"a":1}"#), "so is the time");
+        assert_ne!(got, signature("test-signing-key-0123456789abcdef", "1700000000", "/api/upload", br#"{"a":2}"#), "and the body");
+    }
+
+    #[test]
+    fn the_signed_path_is_the_path_of_the_url() {
+        assert_eq!(path_of("https://key-amas.cxx.co.kr/api/upload"), "/api/upload");
+        assert_eq!(path_of("http://127.0.0.1:8787/api/visibility?x=1#y"), "/api/visibility");
+        assert_eq!(path_of("https://host"), "/");
     }
 }

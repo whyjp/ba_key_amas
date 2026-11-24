@@ -2,12 +2,12 @@ import backgrounds from "./backgrounds.json";
 import catalog from "./catalog.json";
 import { entryFor, indexByName, type Catalog } from "./catalog.ts";
 import { accountHash, foldNickname, normalizeNickname, parseAccountId, parsePublicId, publicId } from "./keys.ts";
-import { BadJson, json, readJson, sameOriginJson, TooLarge } from "./security.ts";
+import { BadJson, json, parseJsonBytes, readBody, sameOriginJson, TooLarge, verifyAddonSignature, type SigningEnv } from "./security.ts";
 import { aggregate, analyze, SCORE_VERSION, summarize, type Analysis, type CharSummary, type OwnedStudent } from "./score.ts";
 import { checkClient, checkSchemas, MIN_PROTOCOL, PROTOCOL, SERVER_VERSION, type Client } from "./version.ts";
 import { Invalid, MAX_BODY_BYTES, parseUpload, type StudentRow, type Upload } from "./validate.ts";
 
-interface Env {
+interface Env extends SigningEnv {
   DB: D1Database;
   ASSETS: Fetcher;
   /** `wrangler secret put KEY_PEPPER`: account ids are stored only as HMACs under this secret. */
@@ -237,7 +237,13 @@ async function handleApi(req: Request, env: Env, path: string): Promise<Response
   if (tooMany) return tooMany;
   let body: unknown;
   try {
-    body = await readJson(req, MAX_BODY_BYTES);
+    const bytes = await readBody(req, MAX_BODY_BYTES);
+    // only the official add-on can sign: the key is in its release build, not in the source
+    if (client) {
+      const refused = await verifyAddonSignature(env, req.headers, path, bytes);
+      if (refused) return json(refused.status, { error: refused.error, server_time: Math.floor(Date.now() / 1000) });
+    }
+    body = parseJsonBytes(bytes);
   } catch (e) {
     return e instanceof TooLarge ? json(413, { error: "본문이 너무 큽니다" }) : json(400, { error: "JSON 이 아닙니다" });
   }

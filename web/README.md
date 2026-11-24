@@ -30,7 +30,8 @@
 ### 위협 모델
 
 - **회원코드는 업로드의 열쇠 구실을 한다.** 회원코드를 아는 사람은 누구나 그 계정으로 올려 데이터를 덮어쓸 수 있고, 공개 여부를 바꾸거나 지울 수 있다. 서버는 코드를 갖고 있지 않아 이를 막을 수 없다. 코드는 친구나 고객센터가 볼 수 있는 값이라 비밀 번호만큼 강하지 않다는 점을 알고 쓴다.
-- **애드온 전용 헤더는 인증이 아니다.** `x-amas-*` 헤더는 누구나 보낼 수 있다. 브라우저의 우발적 요청, 옛 애드온, 실수를 막을 뿐이다.
+- **애드온 전용 헤더는 인증이 아니다.** `x-amas-protocol`, `x-amas-addon` 헤더는 누구나 보낼 수 있다. 브라우저의 우발적 요청, 옛 애드온, 실수를 막을 뿐이다. 그래서 상태를 바꾸는 요청에는 아래 서명이 더해진다.
+- **요청 서명(`x-amas-ts`, `x-amas-sig`).** `/api/upload`, `/api/visibility`, `/api/delete`는 `HMAC-SHA256(키, "{ts}\n{경로}\n{본문의 SHA-256}")`를 요구한다. 키는 공식 릴리스 빌드를 만들 때 CI 비밀(`BAOCR_ADDON_SIGNING_KEY`)에서 실행 파일에 들어가고 소스에는 없다. 서버는 같은 값을 비밀 `ADDON_SIGNING_KEY`로 계산해 비교한다(시간이 일정한 비교). 시각은 서버와 5분 넘게 다르면 거부하고, 경로와 본문이 서명에 들어가 다른 곳에 재사용하거나 본문을 바꾸면 맞지 않는다. 소스에서 직접 빌드한 애드온은 키가 없어 서버가 401로 거부한다. 서버에 키가 없으면 모두 허용하지 않고 모두 거부한다(500). **한계:** 실행 파일 안의 키는 역공학으로 꺼낼 수 있다. 이 서명은 "헤더 두 개를 흉내 내면 되는" 수준을 "공식 빌드를 분석해야 하는" 수준으로 올릴 뿐 완전한 보장이 아니다. 키가 새면 새 키로 릴리스를 내고 `ADDON_SIGNING_KEY_PREV`에 옛 키를 잠시 두었다가 지운다. 같은 요청을 5분 안에 다시 보내는 재생은 막지 못한다(업로드는 같은 내용을 덮어쓸 뿐이다).
 - **저장 시 보호.** 데이터베이스에는 `account_hash`와 `public_id`만 있다. 둘 다 pepper 없이는 계산할 수 없어, 데이터베이스 유출만으로는 회원코드나 `account_id`를 추측할 수 없다.
 - **pepper가 새면.** 코드 공간이 작아서 유출된 데이터베이스의 `account_hash`에 대해 회원코드를 대입해 계정을 알아낼 수 있게 된다(회원코드 13자 전수 대입은 비싸지만 불가능하지 않다). pepper를 바꾸면 모든 `account_hash`와 `public_id`가 달라져 기존 계정이 모두 끊기므로, 바꿀 때는 데이터를 지우고 다시 올리게 한다. 정해서 유지한다.
 - **`account_id`가 새면.** `account_id`는 회원코드의 해시일 뿐이지만 업로드에는 그것만 있으면 된다. 가진 사람은 그 계정을 덮어쓰거나 지울 수 있다. 회원코드 자체는 알 수 없다(SHA-256의 역산이 필요하다). 코드 공간이 작아 `account_id`로 코드를 대입해 찾아내는 일은 가능하다. `account_id`는 요청 본문으로만 보내고(URL, 로그, Referer에 남지 않는다) 서버는 응답과 로그에 싣지 않는다. 사용자의 PC에서는 `upload.json`이 곧 열쇠이므로 남에게 주지 않는다.
@@ -145,13 +146,20 @@ ba-key-AMAS --forget-account
 ```
 npm ci
 npm run assets          # 학생 카탈로그와 초상화를 SchaleDB에서 받는다 (커밋하지 않는다)
-echo KEY_PEPPER=dev-only > .dev.vars
+printf "KEY_PEPPER=dev-only\nALLOW_UNSIGNED_ADDON=1\n" > .dev.vars   # 로컬 개발만: 서명 없는 요청을 받는다. 운영에는 절대 두지 않는다
 npm run db:local
 npm run dev
 ba-key-AMAS --upload http://127.0.0.1:8787 --public   # 처음에는 회원코드를 묻는다
 npm test ; npm run typecheck
 pwsh -File scripts/e2e-accounts.ps1          # wrangler dev 위에서 올려 보는 종단 시험
 ```
+
+## 애드온 서명 키 설정
+
+1. 키를 한 번 만든다. `openssl rand -hex 32`
+2. 서버: 대시보드의 변수 및 비밀에 `ADDON_SIGNING_KEY`를 Secret으로 넣는다(`KEY_PEPPER`와 다른 값). 없으면 업로드가 모두 500으로 거부된다.
+3. 애드온: GitHub 저장소 Settings, Secrets and variables, Actions에 `ADDON_SIGNING_KEY`로 같은 값을 넣고, 릴리스 워크플로가 `BAOCR_ADDON_SIGNING_KEY`로 컴파일 때 넘긴다(`cargo build` 환경 변수). 로컬 개발에서는 같은 변수를 실행할 때 줄 수 있다.
+4. 키를 바꿀 때: 새 키로 릴리스를 내고, 서버에는 새 키를 `ADDON_SIGNING_KEY`, 옛 키를 `ADDON_SIGNING_KEY_PREV`로 둔다. 옛 애드온이 업데이트될 시간을 준 뒤 `ADDON_SIGNING_KEY_PREV`를 지운다.
 
 ## Cloudflare 깃 연결 배포
 
