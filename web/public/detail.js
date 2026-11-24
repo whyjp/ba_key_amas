@@ -343,12 +343,86 @@ function buildCard(s, meta, ctx, rank, animate) {
   card.append(inner);
 
   let flipped = false;
-  const turn = () => { flipped = !flipped; card.classList.toggle("flipped", flipped); };
+  let turning = 0;
+  const turn = () => {
+    flipped = !flipped;
+    card.classList.toggle("flipped", flipped);
+    // the frame and the shine are flat layers over the card: they step aside while it turns
+    card.classList.add("turning");
+    clearTimeout(turning);
+    turning = setTimeout(() => card.classList.remove("turning"), 750);
+  };
   flip.addEventListener("click", turn);
 
   card.append(el("div", "pc-edge"));
   lightEngine(card);
+  dragFlip(card, inner, () => flipped, turn);
   return card;
+}
+
+const FLIP_AT = 55; // degrees of drag after which the card turns over; less than this and it settles back
+const PX_TO_DEG = 0.55; // sideways: a drag of 330 px turns the card 180 degrees
+const TILT_MAX = 35; // an up or down part of the drag only tilts the card, up to this
+
+/**
+ * Turn the card by hand. Dragging sideways follows the pointer one to one (left to right, right to left); an up or
+ * down part tilts it, so a diagonal drag turns and tilts together. On release, past FLIP_AT degrees the card finishes
+ * the turn in the direction it was dragged and shows the other face, otherwise it settles back. Buttons, links and the
+ * outfit picker are left alone, and a drag never ends as a click on what is under the pointer.
+ */
+function dragFlip(card, inner, isFlipped, turn) {
+  const SKIP = "a, button, input, select, textarea, [role=tab]";
+  let drag = null;
+  let swallow = false;
+  card.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0 || drag || e.target.closest(SKIP)) return;
+    drag = { id: e.pointerId, x: e.clientX, y: e.clientY, base: isFlipped() ? 180 : 0, ry: 0, rx: 0, moved: false };
+  });
+  card.addEventListener("pointermove", (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const dx = e.clientX - drag.x;
+    const dy = e.clientY - drag.y;
+    if (!drag.moved) {
+      if (Math.hypot(dx, dy) < 6) return;
+      drag.moved = true;
+      try { card.setPointerCapture(e.pointerId); } catch { /* a pointer that is already gone */ }
+      card.classList.add("dragging");
+      inner.style.transition = "none";
+    }
+    drag.ry = Math.max(-180, Math.min(180, dx * PX_TO_DEG));
+    drag.rawTilt = -dy * 0.4;
+    drag.rx = Math.max(-TILT_MAX, Math.min(TILT_MAX, drag.rawTilt));
+    inner.style.transform = `rotateX(${drag.rx}deg) rotateY(${drag.base + drag.ry}deg)`;
+  });
+  const release = (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const d = drag;
+    drag = null;
+    if (!d.moved) return;
+    swallow = true;
+    setTimeout(() => { swallow = false; }, 0);
+    const over = Math.hypot(d.ry, d.rawTilt ?? 0) > FLIP_AT && e.type !== "pointercancel";
+    const sign = Math.abs(d.ry) >= Math.abs(d.rawTilt ?? 0) ? Math.sign(d.ry) || 1 : Math.sign(-(d.rawTilt ?? 0)) || 1;
+    inner.style.transition = "transform .5s cubic-bezier(.3, .8, .3, 1)";
+    inner.style.transform = `rotateX(0deg) rotateY(${d.base + (over ? sign * 180 : 0)}deg)`;
+    let done = false;
+    const settle = () => {
+      if (done) return;
+      done = true;
+      // hand the pose back to the stylesheet: same picture, no inline state left behind
+      inner.style.transition = "none";
+      inner.style.transform = "";
+      if (over) turn();
+      void inner.offsetWidth;
+      inner.style.transition = "";
+      card.classList.remove("dragging");
+    };
+    inner.addEventListener("transitionend", settle, { once: true });
+    setTimeout(settle, 600);
+  };
+  card.addEventListener("pointerup", release);
+  card.addEventListener("pointercancel", release);
+  card.addEventListener("click", (e) => { if (swallow) { e.stopPropagation(); e.preventDefault(); } }, true);
 }
 
 const clamp01 = (v) => Math.min(Math.max(v, 0), 1);

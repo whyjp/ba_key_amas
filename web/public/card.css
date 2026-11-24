@@ -463,3 +463,11 @@
 .full .pc-stat b { font-size: 18px; }
 .full .pc-marks .tag { font-size: 12px; }
 .full .pc-flip { font-size: 12px; }
+
+/* turn by dragging: the card follows the pointer, so it must not scroll or select text under it */
+.pcard { touch-action: none; user-select: none; -webkit-user-select: none; cursor: grab; }
+.pcard.dragging { cursor: grabbing; }
+.pcard .pc-flip, .pcard .pc-outfits button { cursor: pointer; }
+.pc-edge, .full::after { transition: opacity .15s; }
+.pcard.dragging .pc-edge, .pcard.turning .pc-edge, .pcard.dragging.full::after, .pcard.turning.full::after { opacity: 0; }
+.pcard.dragging { box-shadow: none; }
