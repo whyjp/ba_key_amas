@@ -197,8 +197,8 @@ fn real_main() -> Result<()> {
     let args = Args::parse();
     if args.build_info {
         let signed = option_env!("BAOCR_ADDON_SIGNING_KEY").is_some_and(|k| k.len() >= 16);
-        println!("ba-key-AMAS {}
-signed build: {}", env!("CARGO_PKG_VERSION"), if signed { "yes" } else { "no" });
+        println!("ba-key-AMAS {}", env!("CARGO_PKG_VERSION"));
+        println!("signed build: {}", if signed { "yes" } else { "no" });
         return Ok(());
     }
     if args.doctor {

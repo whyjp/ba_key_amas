@@ -2,6 +2,11 @@ name: release
 
 # Builds the Windows add-on and publishes it as a GitHub Release.
 # Push a tag v<version> (the version in scanner/Cargo.toml) or run it by hand with that tag name.
+#
+# Only tag pushes and manual runs trigger it: there is no pull_request trigger, so a fork pull request can neither run
+# it nor receive secrets. Both jobs also refuse to run outside whyjp/ba_key_amas, and a manual run only from main or a v* tag.
+# ADDON_SIGNING_KEY (a repository secret) is compiled into the shipped exe as BAOCR_ADDON_SIGNING_KEY. It is given to
+# exactly two steps, the length check and the package build, both plain pwsh that run no third-party action.
 
 on:
   push:
@@ -32,6 +37,7 @@ env:
 
 jobs:
   build:
+    if: github.repository == 'whyjp/ba_key_amas' && (startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main')
     runs-on: windows-latest
     timeout-minutes: 90
     defaults:
@@ -45,6 +51,14 @@ jobs:
       - name: Release contract (tag, version, download URL, protocol, migrations)
         run: ./scripts/release-check.ps1 -Tag $env:TAG
 
+      - name: Signing key is set (length only, the value is never printed)
+        env:
+          BAOCR_ADDON_SIGNING_KEY: ${{ secrets.ADDON_SIGNING_KEY }}
+        run: |
+          $n = "$env:BAOCR_ADDON_SIGNING_KEY".Length
+          if ($n -lt 16) { throw "secret ADDON_SIGNING_KEY is missing or shorter than 16 characters (length $n)" }
+          "ADDON_SIGNING_KEY length $n"
+
       - name: Rust toolchain
         run: |
           rustup toolchain install stable --profile minimal
@@ -52,13 +66,13 @@ jobs:
           rustc --version
           cargo --version
 
+      # Not scanner/target: the shipped build embeds the signing key, and a cache would keep that build around.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
-            scanner/target
           key: cargo-${{ runner.os }}-${{ hashFiles('scanner/Cargo.lock') }}
           restore-keys: cargo-${{ runner.os }}-
 
@@ -97,18 +111,25 @@ jobs:
           cargo test --release --workspace --locked
           if ($LASTEXITCODE -ne 0) { throw "cargo test failed ($LASTEXITCODE)" }
 
-      - name: Portable package, zip and SHA256SUMS
+      - name: Portable package, zip and SHA256SUMS (the only compile with the signing key)
+        env:
+          BAOCR_ADDON_SIGNING_KEY: ${{ secrets.ADDON_SIGNING_KEY }}
         run: |
           ./scripts/package-portable.ps1 -Out "$env:RUNNER_TEMP/pkg" -Zip "$env:GITHUB_WORKSPACE/dist/$env:ASSET"
 
-      - name: Smoke test of the packaged exe
+      - name: Smoke test of the packaged exe (no secret in this step)
         run: |
+          if ($env:BAOCR_ADDON_SIGNING_KEY) { throw "the signing key must not be in this step's environment" }
           $exe = "$env:RUNNER_TEMP/pkg/ba-key-AMAS.exe"
           $v = (& $exe --version | Out-String).Trim()
           if ($LASTEXITCODE -ne 0) { throw "--version exited $LASTEXITCODE" }
           $v
           $want = "ba-key-AMAS " + $env:TAG.TrimStart("v")
           if ($v -ne $want) { throw "version output '$v', expected '$want'" }
+          $info = & $exe --build-info
+          if ($LASTEXITCODE -ne 0) { throw "--build-info exited $LASTEXITCODE" }
+          $info
+          if (($info -join "`n") -notmatch "(?m)^signed build: yes$") { throw "the shipped exe carries no signing key" }
           & $exe --help | Select-Object -First 5
           if ($LASTEXITCODE -ne 0) { throw "--help exited $LASTEXITCODE" }
           Get-Content "$env:GITHUB_WORKSPACE/dist/SHA256SUMS"
@@ -123,6 +144,7 @@ jobs:
           retention-days: 7
 
   publish:
+    if: github.repository == 'whyjp/ba_key_amas'
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10
