@@ -78,7 +78,7 @@ function cell(c, rank, byName, meta, ctx) {
   // a portrait wherever there is room for a face; only a sliver gets none
   const showArt = Math.min(c.w, c.h) >= 16 && a >= 400;
   const owned = (o) => byName.get(o.name);
-  const shown = showArt ? ch.outfits.filter((o) => o.id).slice(0, c.w >= 200 ? 3 : c.w >= 120 ? 2 : 1) : [];
+  const shown = showArt ? ch.outfits.filter((o) => o.id).slice(0, Math.max(1, Math.min(3, Math.floor((c.w - 2) / PIECE_MIN)))) : [];
   // a character whose outfits share the cell is split into left / middle / right pieces; each piece is its own button
   const split = shown.length > 1;
   if (showArt) {
@@ -130,6 +130,13 @@ function cell(c, rank, byName, meta, ctx) {
   return t;
 }
 
+/** The narrowest a piece of a split cell may be, so a face still fits in it. */
+const PIECE_MIN = 50;
+/** Layout bonus per extra outfit: a character with outfits takes more room than its score alone gives, so its pieces stay
+ *  big enough to pick. It changes only the size of the cell, never the score shown. */
+const OUTFIT_ROOM = 0.45;
+const outfitRoom = (ch) => 1 + OUTFIT_ROOM * (Math.min(ch.outfits.filter((o) => o.id).length, 3) - 1);
+
 /** Area (px squared) the map aims to give each character. Below about 60 x 60 a face is hard to read, so a narrow window
  *  gets a taller map (and scrolls) instead of a crowd of slivers. */
 const CELL_AREA = 3800;
@@ -155,7 +162,7 @@ function mountTreemap(frame, chars, byName, meta, ctx, fit) {
     else frame.style.height = Math.max(380, innerHeight - 330, need) + "px";
     const { height } = frame.getBoundingClientRect();
     if (height < 10) return;
-    const tiles = squarify(chars.map((character) => ({ value: character.total, character })), 0, 0, width, height);
+    const tiles = squarify(chars.map((character) => ({ value: character.total * outfitRoom(character), character })), 0, 0, width, height);
     frame.replaceChildren(...tiles.map((c, i) => cell(c, i, byName, meta, ctx)));
   };
   new ResizeObserver(draw).observe(frame);
@@ -165,7 +172,7 @@ function mountTreemap(frame, chars, byName, meta, ctx, fit) {
 /** One teacher's characters. `top` (summary and favourites) sits above the map. */
 export function heatmapView(d, ctx, meta, top) {
   const root = el("div", "main-view");
-  const note = el("p", "hint", "넓을수록 점수가 높은 학생입니다. 의상이 다른 같은 학생은 한 칸에 모았습니다. 한 칸에 의상이 여럿이면 칸이 조각으로 나뉘며, 마음에 드는 조각을 눌러 그 의상의 카드를 엽니다.");
+  const note = el("p", "hint", "넓을수록 점수가 높은 학생입니다. 의상이 다른 같은 학생은 한 칸에 모았습니다. 한 칸에 의상이 여럿이면 칸이 조각으로 나뉘고 의상이 많을수록 칸이 조금 더 넓어지며, 마음에 드는 조각을 눌러 그 의상의 카드를 엽니다.");
   const frame = el("div", "hm-frame");
   if (top) root.append(top);
   root.append(note, frame);

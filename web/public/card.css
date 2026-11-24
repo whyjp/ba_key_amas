@@ -315,7 +315,6 @@
 
 /* every student thumbnail opens the card */
 .clickable { cursor: pointer; }
-.face.clickable:hover .face-img, .face.clickable:focus-visible .face-img { box-shadow: 0 0 0 2px var(--cyan); }
 .momo.clickable:hover, .momo.clickable:focus-visible { background: #ffeef4; }
 .fav.clickable { cursor: pointer; }
 .pi-generic { color: rgba(255, 255, 255, .92); filter: drop-shadow(0 0 8px rgba(255, 255, 255, .35)); }
