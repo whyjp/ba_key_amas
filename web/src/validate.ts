@@ -8,7 +8,7 @@ export const MAX_PROGRESS_BYTES = 200_000;
 
 export interface StudentRow {
   name: string;
-  /** The student id the scanner resolved from the screen (`reference.id`), when it did. */
+  /** The id of the mode the scanner resolved from the screen (`reference.id`), when it did. */
   student_id: number | null;
   level: number | null;
   stars: number | null;
@@ -241,9 +241,8 @@ export function parseUpload(body: unknown): Upload {
   const seen = new Set<string>();
   for (const e of roster.entries) {
     const s = isObj(e) ? parseStudent(e.student) : null;
-    const key = s ? `${s.name}|${s.student_id ?? ""}` : "";
-    if (s && !seen.has(key)) {
-      seen.add(key);
+    if (s && !seen.has(s.name)) {
+      seen.add(s.name);
       students.push(s);
     }
   }

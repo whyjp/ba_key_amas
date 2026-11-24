@@ -1,6 +1,6 @@
 import backgrounds from "./backgrounds.json";
 import catalog from "./catalog.json";
-import { entryFor, indexByName, uniqueNames, type Catalog } from "./catalog.ts";
+import { entryFor, indexByName, type Catalog } from "./catalog.ts";
 import { formatKey, foldNickname, hashKey, keyMatches, newTag, normalizeNickname, parseKey, type ParsedKey } from "./keys.ts";
 import { BadJson, json, readJson, sameOriginJson, TooLarge } from "./security.ts";
 import { aggregate, analyze, SCORE_VERSION, summarize, type Analysis, type CharSummary, type OwnedStudent } from "./score.ts";
@@ -95,8 +95,7 @@ function studentStatements(env: Env, userId: number, students: StudentRow[], kep
   });
 }
 
-async function upload(env: Env, upload_: Upload, client: Client): Promise<Response> {
-  const up: Upload = { ...upload_, students: uniqueNames(upload_.students, CATALOG) };
+async function upload(env: Env, up: Upload, client: Client): Promise<Response> {
   const nickname = normalizeNickname(up.nickname);
   if (!nickname) return json(400, { error: "닉네임은 1~16자이며 # 과 제어 문자를 쓸 수 없습니다" });
   const nick = foldNickname(nickname);
