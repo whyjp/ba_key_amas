@@ -10,7 +10,7 @@ import pathlib
 import subprocess
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-RUST = ROOT / "rust"
+RUST = ROOT / "scanner"
 DOCS = ROOT / "docs"
 
 ROLE = {
