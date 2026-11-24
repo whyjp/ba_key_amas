@@ -94,6 +94,13 @@ impl Nav<'_> {
     }
 
     fn read(&self, img: RgbImage) -> Result<Look> {
+        // BAOCR_PROGRESS_FRAMES=<dir> keeps every screen this scan reads, to study the OCR offline (`--boxes`)
+        if let Some(dir) = std::env::var_os("BAOCR_PROGRESS_FRAMES") {
+            static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+            let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let _ = std::fs::create_dir_all(&dir);
+            let _ = img.save(std::path::Path::new(&dir).join(format!("frame-{n:03}.png")));
+        }
         let boxes = self.ocr.boxes(&img)?;
         let scene = classify_in(&boxes, None, self.layout);
         Ok(Look { img, boxes, scene })
@@ -537,19 +544,20 @@ fn duty_section(nav: &Nav, lobby: &Look, snap: &mut ProgressSnapshot) -> Result<
     std::thread::sleep(Duration::from_millis(800));
     look = nav.settled()?;
     let mut cards: BTreeMap<String, DutyStudent> = BTreeMap::new();
+    let owned = owned_count();
     let (mut counted, mut limit) = (first.value.selected_count, first.value.limit);
+    // one pass down the whole list; a pass that read fewer students than the account has is repeated from the top
+    for pass in 0..3 {
     let mut quiet = 0;
     for _page in 0..60 {
+        reread_plates(nav.ocr, &mut look);
         let page = duty::parse_duty(&look.boxes, &look.img);
         counted = page.value.selected_count.or(counted);
         limit = page.value.limit.or(limit);
         let before = cards.len();
         for mut c in page.value.cards {
             c.name = canonical_name(&c.name);
-            // a one-character reading is the list's heading or an icon, not a student (no name is that short)
-            if c.name.chars().filter(|ch| !ch.is_whitespace()).count() >= 2 {
-                cards.insert(squash(&c.name), c);
-            }
+            cards.insert(squash(&c.name), c);
         }
         quiet = if cards.len() == before { quiet + 1 } else { 0 };
         if std::env::var_os("BAOCR_PROGRESS_DEBUG").is_some() {
@@ -570,6 +578,16 @@ fn duty_section(nav: &Nav, lobby: &Look, snap: &mut ProgressSnapshot) -> Result<
         std::thread::sleep(Duration::from_millis(700));
         look = nav.settled()?;
     }
+    if owned.is_none_or(|n| cards.len() >= n) {
+        break;
+    }
+    if std::env::var_os("BAOCR_PROGRESS_DEBUG").is_some() {
+        eprintln!("  duty pass {pass}: {} of {} students, again from the top", cards.len(), owned.unwrap_or(0));
+    }
+    nav.scroll_list(gx, gy, false, 12)?;
+    std::thread::sleep(Duration::from_millis(1200));
+    look = nav.settled()?;
+    }
     if let Some((x, y)) = close_button(&look, &title) {
         nav.click_at(x, y)?;
         std::thread::sleep(Duration::from_millis(800));
@@ -583,9 +601,113 @@ fn duty_section(nav: &Nav, lobby: &Look, snap: &mut ProgressSnapshot) -> Result<
     Ok(())
 }
 
+/// How many students the account has, from the last student scan saved in the add-on's folder (best effort).
+fn owned_count() -> Option<usize> {
+    let path = std::env::var_os("BAOCR_ROSTER_JSON").map(std::path::PathBuf::from).or_else(|| {
+        std::env::var_os("APPDATA").map(|d| std::path::PathBuf::from(d).join("baocr").join("students").join("students.json"))
+    })?;
+    let v: serde_json::Value = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
+    v.get("entries")?.as_array().map(|a| a.len()).filter(|n| *n > 0)
+}
+
+/// Reads every student plate of the duty grid again (see `reread_plate`), in place.
+fn reread_plates(ocr: &dyn Ocr, look: &mut Look) {
+    let header = look.boxes.iter().find(|b| b.text.replace(' ', "") == "당번선택").map(|b| b.y1);
+    let bottom = look.boxes.iter().find(|b| b.text.replace(' ', "") == "취소").map(|b| b.y0 - 45.0);
+    let Some(header) = header else { return };
+    let img = &look.img;
+    for b in look.boxes.iter_mut() {
+        let hangul = b.text.chars().any(|c| ('가'..='힣').contains(&c));
+        let plate = b.y0 > header + 60.0 && bottom.is_none_or(|lim| b.y1 < lim) && hangul && b.x1 - b.x0 < 200.0 && b.y1 - b.y0 < 40.0;
+        if plate {
+            b.text = reread_plate(ocr, img, b);
+        }
+    }
+    // a student plate is a dark slate-blue pill; text over the lobby behind the window (a lone "글") is not one. The
+    // test is on the picture, not on the letters, so a one-letter name such as 슌 stays.
+    let (hdr, lim) = (header, bottom);
+    look.boxes.retain(|b| {
+        let in_grid = b.y0 > hdr + 60.0 && lim.is_none_or(|l| b.y1 < l) && b.x1 - b.x0 < 200.0 && b.y1 - b.y0 < 40.0;
+        !in_grid || on_plate(&look.img, b)
+    });
+}
+
+/// Is the box on a student plate (dark slate blue behind the letters)?
+fn on_plate(img: &RgbImage, b: &TextBox) -> bool {
+    let (x0, y0) = (b.x0.max(0.0) as u32, b.y0.max(0.0) as u32);
+    let (x1, y1) = ((b.x1 as u32).min(img.width()), (b.y1 as u32).min(img.height()));
+    let (mut hit, mut n) = (0u32, 0u32);
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let p = img.get_pixel(x, y).0;
+            let d = (p[0] as i32 - 70).abs() + (p[1] as i32 - 86).abs() + (p[2] as i32 - 108).abs();
+            hit += (d < 70) as u32;
+            n += 1;
+        }
+    }
+    n > 0 && hit as f32 / n as f32 >= 0.3
+}
+
+/// Scales a name plate is read again at. The game window is only about 480 x 360 screen pixels, so the 1280 x 960 frame
+/// is that picture enlarged 2.7 times and a plate's letters are 5 to 8 pixels tall in the original. The recogniser
+/// reads such letters better when they are enlarged again (measured: "아야네(수영복)" and "시로코*테러" came out right at
+/// 3x and 4x and wrong at 1x). The profile screen, whose name is set in a large font, reads 106 of 106 exactly.
+const PLATE_SCALES: [u32; 3] = [2, 3, 4];
+
+/// What the whole pipeline (detector and recogniser) reads on one enlarged crop of a plate, with its mean confidence.
+fn read_enlarged(ocr: &dyn Ocr, crop: &RgbImage, k: u32) -> Option<(String, f32)> {
+    let big = image::imageops::resize(crop, crop.width() * k, crop.height() * k, image::imageops::FilterType::CatmullRom);
+    let mut canvas = RgbImage::from_pixel(big.width() + 80, big.height() + 80, image::Rgb([255, 255, 255]));
+    image::imageops::overlay(&mut canvas, &big, 40, 40);
+    let mut boxes = ocr.boxes(&canvas).ok()?;
+    if boxes.is_empty() {
+        return None;
+    }
+    boxes.sort_by(|a, b| a.x0.total_cmp(&b.x0));
+    let text: String = boxes.iter().map(|b| b.text.as_str()).collect::<Vec<_>>().join("").split_whitespace().collect();
+    let conf = boxes.iter().map(|b| b.score).sum::<f32>() / boxes.len() as f32;
+    (!text.is_empty()).then_some((text, conf))
+}
+
+/// The text of one plate box read again at several enlargements. A reading that two or more of the readings (the
+/// original included) agree on wins; with no agreement the most confident one stays.
+fn reread_plate(ocr: &dyn Ocr, img: &RgbImage, b: &TextBox) -> String {
+    let (w, h) = (img.width() as i32, img.height() as i32);
+    let (x0, y0) = ((b.x0 as i32 - 4).max(0), (b.y0 as i32 - 4).max(0));
+    let (x1, y1) = ((b.x1 as i32 + 4).min(w), (b.y1 as i32 + 4).min(h));
+    if x1 - x0 < 8 || y1 - y0 < 8 {
+        return b.text.clone();
+    }
+    let crop = image::imageops::crop_imm(img, x0 as u32, y0 as u32, (x1 - x0) as u32, (y1 - y0) as u32).to_image();
+    let mut readings: Vec<(String, f32)> = vec![(squash(&b.text), b.score)];
+    for k in PLATE_SCALES {
+        if let Some(r) = read_enlarged(ocr, &crop, k) {
+            if std::env::var_os("BAOCR_PROGRESS_DEBUG").is_some() {
+                eprintln!("  plate {:?} ({:.3}) at {k}x -> {:?} ({:.3})", b.text, b.score, r.0, r.1);
+            }
+            readings.push(r);
+        }
+    }
+    let mut best: Option<(usize, f32, &str)> = None;
+    for (text, conf) in &readings {
+        let votes = readings.iter().filter(|(o, _)| o == text).count();
+        let top = readings.iter().filter(|(o, _)| o == text).map(|(_, c)| *c).fold(0.0, f32::max);
+        if best.is_none_or(|(v, c, _)| votes > v || (votes == v && top > c)) {
+            best = Some((votes, top, text));
+        }
+    }
+    match best {
+        Some((votes, _, text)) if votes >= 2 => text.to_string(),
+        _ => b.text.clone(),
+    }
+}
+
 /// A student name read off a list, set to the dictionary's spelling when the dictionary is sure of it: the list font
 /// gave "순" for 슌, "시로코테러" for 시로코*테러 and "우네" for 아야네. An ambiguous or unknown reading stays as read.
 fn canonical_name(raw: &str) -> String {
+    if std::env::var_os("BAOCR_NO_SNAP").is_some() {
+        return raw.to_string();
+    }
     let (name, m) = baocr_names::resolve(raw);
     match m.status.as_str() {
         "exact" | "corrected" if !name.is_empty() => name,
