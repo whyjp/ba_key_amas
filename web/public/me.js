@@ -13,7 +13,10 @@ function context(d) {
   // place of each character in the overall ranking (the analysis lists them best first)
   const place = new Map(d.analysis.characters.map((c, i) => [c.base, i]));
   const rankOf = (studentName) => place.get(studentName.replace(/\s*\([^)]*\)\s*$/, "").trim() || studentName) ?? -1;
-  return { duty, unread, byName, rankOf };
+  const baseOf = (n) => n.replace(/\s*\([^)]*\)\s*$/, "").trim() || n;
+  /** Every owned outfit of the same character, the plain one first. */
+  const siblings = (n) => d.students.filter((s) => baseOf(s.name) === baseOf(n)).sort((a, b) => Number(a.name !== baseOf(a.name)) - Number(b.name !== baseOf(b.name)) || a.name.localeCompare(b.name, "ko"));
+  return { duty, unread, byName, rankOf, siblings };
 }
 
 function tile(s, ctx, meta, showInfo) {

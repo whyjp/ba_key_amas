@@ -1,5 +1,5 @@
 // The detail sheet of one owned student: opens over the tiles, closes with its button, Esc or a click outside.
-import { armorColor, attackColor, bondBadge, halo, meter, name, ROLE, schoolLogo, stars } from "./domain.js";
+import { armorColor, attackColor, bondBadge, halo, icon, meter, name, ROLE, schoolLogo, stars } from "./domain.js";
 import { el, num, portrait } from "./ui.js";
 
 function tag(text, color) {
@@ -90,23 +90,27 @@ function detailSections(d) {
 }
 
 // Card tiers by the character's place in the teacher's overall ranking. The top three are special
-// illustration cards (the memorial lobby art on a prism foil), four and five are foil cards, the rest plain.
+// illustration cards (the memorial lobby art, full foil), four and five are foil cards, the rest plain.
 const TIERS = [
-  { key: "sar", label: "SAR", name: "특별 일러스트", art: "lobby" },
-  { key: "sr", label: "SR", name: "특별 일러스트", art: "lobby" },
-  { key: "ur", label: "UR", name: "특별 일러스트", art: "lobby" },
-  { key: "ar", label: "AR", name: "아트 레어", art: "standing" },
-  { key: "rr", label: "RR", name: "더블 레어", art: "standing" },
+  { key: "sar", label: "SAR", art: "lobby", special: true },
+  { key: "sr", label: "SR", art: "lobby", special: true },
+  { key: "ur", label: "UR", art: "lobby", special: true },
+  { key: "ar", label: "AR", art: "standing", special: false },
+  { key: "rr", label: "RR", art: "standing", special: false },
 ];
-const PLAIN = { key: "n", label: "", name: "", art: "standing" };
+const PLAIN = { key: "n", label: "", art: "standing", special: false };
+const CARD_W = 380;
+const CARD_H = 640;
 
+/** The cut artwork first, then the uncut one, then the small portrait; a card never ends up without a picture. */
 function artFor(s, tier) {
-  const dir = tier.art === "lobby" ? "lobby" : "standing";
-  const img = el("img", "pc-art-img " + dir);
-  // both are cut to the card's 6:5 window around the face when the assets are built
-  img.src = `/${dir === "lobby" ? "card-lobby" : "card"}/${encodeURIComponent(s.student_id)}.webp`;
+  const id = encodeURIComponent(s.student_id);
+  const chain = (tier.art === "lobby" ? [`/card-lobby/${id}.webp`, `/lobby/${id}.webp`] : [`/card/${id}.webp`, `/standing/${id}.webp`]).concat(`/portraits/${id}.webp`);
+  const img = el("img", "pc-art-img " + tier.art);
+  let i = 0;
+  img.addEventListener("error", () => { if (++i < chain.length) img.src = chain[i]; else img.replaceWith(el("div", "pc-art-none", "일러스트 없음")); });
+  img.src = chain[0];
   img.alt = "";
-  img.addEventListener("error", () => { img.src = `/portraits/${encodeURIComponent(s.student_id)}.webp`; img.classList.remove("lobby", "standing"); }, { once: true });
   return img;
 }
 
@@ -116,38 +120,16 @@ function stat(label, value) {
   return d;
 }
 
-const INTRO_MS = 1100;
-
-/** The halo spins up over the dark scrim and throws sparkles, then shrinks away as the card turns into view. */
-function intro(s, meta, tier) {
-  const box = el("div", "pc-intro pi-" + tier.key);
-  const ring = halo(meta, s.student_id, "pi-halo") ?? el("div", "pi-halo pi-ring");
-  box.append(ring);
-  for (let i = 0; i < 18; i++) {
-    const p = el("i", "pi-spark");
-    p.style.setProperty("--a", Math.round((360 / 18) * i + Math.random() * 14) + "deg");
-    p.style.setProperty("--d", 90 + Math.round(Math.random() * 90) + "px");
-    p.style.setProperty("--s", (0.6 + Math.random() * 0.9).toFixed(2));
-    p.style.setProperty("--t", (0.35 + Math.random() * 0.45).toFixed(2) + "s");
-    box.append(p);
-  }
-  return box;
-}
-
-export function openDetail(s, meta, ctx) {
-  const prev = document.activeElement;
-  const rank = ctx.rankOf ? ctx.rankOf(s.name) : -1;
+/** One card. `animate` plays the landing motion; switching outfits skips the long intro. */
+function buildCard(s, meta, ctx, rank, animate) {
   const tier = TIERS[rank] ?? PLAIN;
   const det = s.detail ?? {};
-
-  const scrim = el("div", "scrim");
-  const card = el("div", "pcard tier-" + tier.key);
+  const card = el("div", "pcard tier-" + tier.key + (tier.special ? " special" : "") + (animate ? "" : " quick"));
   card.setAttribute("role", "dialog");
   card.setAttribute("aria-modal", "true");
   card.setAttribute("aria-label", s.name);
   const inner = el("div", "pc-inner");
 
-  // front
   const front = el("div", "pc-face pc-front");
   const head = el("div", "pc-head");
   const title = el("div", "pc-title");
@@ -157,19 +139,25 @@ export function openDetail(s, meta, ctx) {
   head.append(schoolLogo(s.school), title, hp);
 
   const band = el("div", "pc-band");
-  const window_ = el("div", "pc-art");
-  if (s.student_id) window_.append(artFor(s, tier));
-  const h = halo(meta, s.student_id, "pc-halo");
-  if (h) window_.append(h);
+  const art = el("div", "pc-art");
+  if (s.student_id) art.append(artFor(s, tier));
+  else art.append(el("div", "pc-art-none", "일러스트 없음"));
+  const ring = halo(meta, s.student_id, "pc-halo");
+  if (ring) art.append(ring);
+  if (tier.key !== "n") {
+    // the foil lives inside the picture only, so the text beside it stays readable
+    art.append(el("div", "pc-holo"), el("div", "pc-glare"));
+    if (tier.special) art.append(el("div", "pc-sparkle"));
+  }
   const lv = el("div", "pc-lv");
   lv.append(el("small", "", "Lv."), el("b", "", s.level === null ? "-" : String(s.level)));
-  window_.append(lv);
+  art.append(lv);
   if (s.stars) {
     const st = stars(s.stars, "student");
     st.classList.add("pc-stars");
-    window_.append(st);
+    art.append(st);
   }
-  band.append(window_);
+  band.append(art);
 
   const types = el("div", "pc-types");
   if (s.role) types.append(tag(ROLE[s.role] ?? s.role));
@@ -203,7 +191,6 @@ export function openDetail(s, meta, ctx) {
   flip.type = "button";
   front.append(head, band, types, moves, foot, marks, flip);
 
-  // back: every scanned spec
   const back = el("div", "pc-face pc-back");
   const bh = el("div", "pc-back-head");
   bh.append(el("h2", "", s.name), el("small", "", "상세 능력치"));
@@ -212,46 +199,104 @@ export function openDetail(s, meta, ctx) {
   const unflip = el("button", "pc-flip", "카드 앞면으로");
   unflip.type = "button";
   back.append(bh, specs, unflip);
-
   inner.append(front, back);
-  const holo = el("div", "pc-holo");
-  const glare = el("div", "pc-glare");
-  card.append(inner, holo, glare);
-  if (tier.key === "sar" || tier.key === "sr" || tier.key === "ur") {
-    const sp = el("div", "pc-sparkle");
-    card.append(sp);
-  }
-  const close = el("button", "ghost pc-close", "닫기");
-  close.type = "button";
-  scrim.append(intro(s, meta, tier), card, close);
-  document.body.append(scrim);
-  setTimeout(() => scrim.querySelector(".pc-intro")?.remove(), INTRO_MS + 700);
+  card.append(inner);
 
   let flipped = false;
   const turn = () => { flipped = !flipped; card.classList.toggle("flipped", flipped); };
   flip.addEventListener("click", turn);
   unflip.addEventListener("click", turn);
 
-  // pointer tilt and light: the prism follows the pointer like a held foil card
-  const move = (e) => {
+  // tilt and light follow the pointer
+  card.addEventListener("pointermove", (e) => {
     const r = card.getBoundingClientRect();
-    const x = Math.min(Math.max((e.clientX - r.left) / r.width, 0), 1);
-    const y = Math.min(Math.max((e.clientY - r.top) / r.height, 0), 1);
+    const x = clamp01((e.clientX - r.left) / r.width);
+    const y = clamp01((e.clientY - r.top) / r.height);
     card.style.setProperty("--mx", (x * 100).toFixed(1) + "%");
     card.style.setProperty("--my", (y * 100).toFixed(1) + "%");
-    card.style.setProperty("--ry", ((x - 0.5) * 22).toFixed(1) + "deg");
-    card.style.setProperty("--rx", ((0.5 - y) * 18).toFixed(1) + "deg");
+    card.style.setProperty("--ry", ((x - 0.5) * 16).toFixed(1) + "deg");
+    card.style.setProperty("--rx", ((0.5 - y) * 12).toFixed(1) + "deg");
     card.classList.add("live");
-  };
-  const rest = () => {
+  });
+  card.addEventListener("pointerleave", () => {
     card.classList.remove("live");
     for (const k of ["--mx", "--my", "--rx", "--ry"]) card.style.removeProperty(k);
+  });
+  return card;
+}
+
+const clamp01 = (v) => Math.min(Math.max(v, 0), 1);
+
+/** The picked outfit's siblings: one small button per owned outfit of the same character. */
+function outfitPicker(list, current, onPick) {
+  const bar = el("div", "pc-outfits");
+  bar.setAttribute("role", "tablist");
+  bar.setAttribute("aria-label", "의상 선택");
+  for (const o of list) {
+    const b = el("button", "pc-outfit", "");
+    b.type = "button";
+    b.setAttribute("role", "tab");
+    b.setAttribute("aria-selected", String(o.name === current.name));
+    b.title = o.name;
+    b.append(icon(o.student_id, "ico"), el("span", "", o.name));
+    b.addEventListener("click", () => onPick(o));
+    bar.append(b);
+  }
+  return bar;
+}
+
+const INTRO_MS = 1100;
+
+/** The halo spins up over the dark scrim and throws sparkles, then shrinks away as the card turns into view. */
+function intro(s, meta, tier) {
+  const box = el("div", "pc-intro pi-" + tier.key);
+  const ring = halo(meta, s.student_id, "pi-halo") ?? el("div", "pi-halo pi-ring");
+  box.append(ring);
+  for (let i = 0; i < 18; i++) {
+    const p = el("i", "pi-spark");
+    p.style.setProperty("--a", Math.round((360 / 18) * i + Math.random() * 14) + "deg");
+    p.style.setProperty("--d", 90 + Math.round(Math.random() * 90) + "px");
+    p.style.setProperty("--s", (0.6 + Math.random() * 0.9).toFixed(2));
+    p.style.setProperty("--t", (0.35 + Math.random() * 0.45).toFixed(2) + "s");
+    box.append(p);
+  }
+  return box;
+}
+
+export function openDetail(s, meta, ctx) {
+  const prev = document.activeElement;
+  const rank = ctx.rankOf ? ctx.rankOf(s.name) : -1;
+  const tier = TIERS[rank] ?? PLAIN;
+  const outfits = ctx.siblings ? ctx.siblings(s.name) : [s];
+
+  const scrim = el("div", "scrim");
+  const stage = el("div", "pc-stage");
+  const close = el("button", "ghost pc-close", "닫기");
+  close.type = "button";
+
+  // the card is laid out at one size and scaled to whatever window it is shown in
+  const fit = () => stage.style.setProperty("--fit", Math.min(1, (innerWidth - 24) / CARD_W, (innerHeight - (outfits.length > 1 ? 150 : 100)) / CARD_H).toFixed(3));
+  fit();
+  addEventListener("resize", fit);
+
+  let currentCard = null;
+  const show = (student, animate) => {
+    currentCard = buildCard(student, meta, ctx, rank, animate);
+    stage.replaceChildren(currentCard);
+    picker?.querySelectorAll("button").forEach((b) => b.setAttribute("aria-selected", String(b.title === student.name)));
   };
-  card.addEventListener("pointermove", move);
-  card.addEventListener("pointerleave", rest);
+  const picker = outfits.length > 1 ? outfitPicker(outfits, s, (o) => show(o, false)) : null;
+
+  show(s, true);
+  scrim.append(intro(s, meta, tier), stage);
+  if (picker) scrim.append(picker);
+  scrim.append(close);
+  document.body.append(scrim);
+  setTimeout(() => scrim.querySelector(".pc-intro")?.remove(), INTRO_MS + 700);
 
   const shut = () => {
     document.removeEventListener("keydown", onKey);
+    removeEventListener("resize", fit);
     scrim.classList.add("out");
     setTimeout(() => scrim.remove(), 160);
     prev?.focus?.();
