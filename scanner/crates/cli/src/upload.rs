@@ -1,57 +1,102 @@
 //! `--upload <server>`: sends the last student scan and progress scan to the ba-key-AMAS web server.
 //!
-//! The nickname is the account nickname the progress scan read. The server answers a new nickname with a key
-//! (`nickname#hex6`); it is saved beside the other add-on files so the next upload updates the same entry.
-//! The key travels in the request body, so only https (or a loopback address for local testing) is accepted.
+//! The account is the hash of the member code the player typed (`account_key`). It is asked for once, and only the
+//! hash is kept, in `upload.json` beside the other add-on files. The server recognises the account by it, so every
+//! later upload updates the same entry. The nickname is only a display name. The hash travels in the request body,
+//! so only https (or a loopback address for local testing) is accepted.
+use crate::account_key;
 use anyhow::{anyhow, bail, Context, Result};
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 /// The upload contract this add-on speaks. The server accepts a range of contracts (see web/src/version.ts);
 /// raise this when the uploaded data changes shape and the server has learned the new one.
-pub const UPLOAD_PROTOCOL: u32 = 1;
+/// 2: accounts are identified by `account_id`; contract 1 sent a nickname and a key.
+pub const UPLOAD_PROTOCOL: u32 = 2;
 
 pub struct Request {
     pub server: String,
     pub nickname: Option<String>,
+    /// `--public`: show this account on the leaderboard. Without it the server keeps what it has (new accounts are private).
     pub public: bool,
     pub students_dir: PathBuf,
     pub progress_dir: PathBuf,
     pub store: PathBuf,
 }
 
-/// The saved keys, by `server|nickname`.
+/// Where an account id can come from without asking: scripts and tests.
 #[derive(Default)]
-pub struct KeyStore(BTreeMap<String, String>);
+pub struct Sources {
+    /// `BAOCR_ACCOUNT_ID_FOR_TESTING`: an account id as it is (64 hex digits), for local tests.
+    pub testing_id: Option<String>,
+    /// `BAOCR_MEMBER_CODE`: the member code, for scripted use. Never a command-line argument (shell history).
+    pub member_code: Option<String>,
+}
 
-impl KeyStore {
-    pub fn load(path: &Path) -> Self {
-        let map = std::fs::read_to_string(path).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
-        KeyStore(map)
+impl Sources {
+    pub fn from_env() -> Sources {
+        Sources { testing_id: std::env::var("BAOCR_ACCOUNT_ID_FOR_TESTING").ok(), member_code: std::env::var("BAOCR_MEMBER_CODE").ok() }
     }
+}
 
-    pub fn get(&self, server: &str, nickname: &str) -> Option<&str> {
-        self.0.get(&slot(server, nickname)).map(String::as_str)
+/// The saved account id, if `upload.json` has one. Anything else in the file (the keys of the older format) is ignored.
+pub fn saved_account_id(path: &Path) -> Option<String> {
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()?;
+    v["account_id"].as_str().filter(|s| account_key::is_account_id(s)).map(str::to_string)
+}
+
+fn save_account_id(path: &Path, id: &str) -> Result<()> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
     }
+    std::fs::write(path, serde_json::to_string_pretty(&json!({ "account_id": id }))?).with_context(|| format!("writing {}", path.display()))
+}
 
-    pub fn set(&mut self, server: &str, nickname: &str, key: &str) {
-        self.0.insert(slot(server, nickname), key.to_string());
+/// `--forget-account`: the next upload asks for a member code again.
+pub fn forget_account(path: &Path) -> Result<String> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok("저장된 계정 값을 지웠습니다. 다음 업로드에서 회원코드를 다시 입력합니다".into()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok("저장된 계정 값이 없습니다".into()),
+        Err(e) => Err(e).with_context(|| format!("removing {}", path.display())),
     }
+}
 
-    pub fn save(&self, path: &Path) -> Result<()> {
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)?;
+const ATTEMPTS: usize = 3;
+
+/// The account id to upload under: the testing id, the scripted code, the saved id, or the player's typed code
+/// (twice, hidden). Only a typed code is saved, and only as its hash.
+pub fn resolve_account_id(store: &Path, src: &Sources, ask: &mut dyn FnMut(&str) -> Result<String>) -> Result<String> {
+    if let Some(id) = &src.testing_id {
+        let id = id.trim().to_ascii_lowercase();
+        if !account_key::is_account_id(&id) {
+            bail!("BAOCR_ACCOUNT_ID_FOR_TESTING 은 64자리 16진수여야 합니다");
         }
-        std::fs::write(path, serde_json::to_string_pretty(&self.0)?).with_context(|| format!("writing {}", path.display()))
+        return Ok(id);
     }
+    if let Some(raw) = &src.member_code {
+        return Ok(account_key::account_id(&account_key::parse_member_code(raw).context("BAOCR_MEMBER_CODE")?));
+    }
+    if let Some(id) = saved_account_id(store) {
+        return Ok(id);
+    }
+    println!("{}", account_key::GUIDE);
+    for attempt in 1..=ATTEMPTS {
+        let first = ask("회원코드: ")?;
+        let second = ask("한 번 더: ")?;
+        match account_key::confirmed(&first, &second) {
+            Ok(code) => {
+                let id = account_key::account_id(&code);
+                save_account_id(store, &id)?;
+                return Ok(id);
+            }
+            Err(e) if attempt < ATTEMPTS => println!("{e:#}. 다시 입력해 주세요"),
+            Err(e) => return Err(e),
+        }
+    }
+    unreachable!("the last attempt returns")
 }
 
-fn slot(server: &str, nickname: &str) -> String {
-    format!("{}|{}", server.trim_end_matches('/'), nickname)
-}
-
-/// https always; plain http only for this machine, where a key cannot cross a network.
+/// https always; plain http only for this machine, where the account id cannot cross a network.
 pub fn check_server(server: &str) -> Result<()> {
     let rest = server.strip_prefix("https://").map(|_| true).or_else(|| server.strip_prefix("http://").map(|_| false));
     let Some(secure) = rest else { bail!("server must start with https:// (or http://localhost for testing): {server}") };
@@ -62,7 +107,7 @@ pub fn check_server(server: &str) -> Result<()> {
     if matches!(host, "localhost" | "127.0.0.1" | "[::1]") {
         Ok(())
     } else {
-        bail!("refusing to send a key over plain http to {host}; use https")
+        bail!("refusing to send an account id over plain http to {host}; use https")
     }
 }
 
@@ -70,10 +115,10 @@ pub fn nickname_of(progress: &Option<Value>) -> Option<String> {
     progress.as_ref()?.pointer("/account/nickname")?.as_str().map(str::trim).filter(|s| !s.is_empty()).map(str::to_string)
 }
 
-pub fn build_body(nickname: &str, key: Option<&str>, public: bool, roster: Value, progress: Option<Value>) -> Value {
-    let mut body = json!({ "nickname": nickname, "public": public, "roster": roster });
-    if let Some(k) = key {
-        body["key"] = json!(k);
+pub fn build_body(account_id: &str, nickname: &str, public: bool, roster: Value, progress: Option<Value>) -> Value {
+    let mut body = json!({ "account_id": account_id, "nickname": nickname, "roster": roster });
+    if public {
+        body["public"] = json!(true);
     }
     if let Some(p) = progress {
         body["progress"] = p;
@@ -86,77 +131,41 @@ fn read_json(path: &Path) -> Result<Value> {
     serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))
 }
 
-pub fn run(req: &Request) -> Result<String> {
+fn profile_url(server: &str, public_id: &str) -> String {
+    format!("{}/#/u/{public_id}", server.trim_end_matches('/'))
+}
+
+pub fn run(req: &Request, src: &Sources, ask: &mut dyn FnMut(&str) -> Result<String>) -> Result<String> {
     check_server(&req.server)?;
     let roster = read_json(&req.students_dir.join("students.json")).context("run the student scan first")?;
     let progress = read_json(&req.progress_dir.join("latest.json")).ok();
     let nickname = req.nickname.clone().or_else(|| nickname_of(&progress)).ok_or_else(|| anyhow!("no account nickname: run the progress scan or pass --nickname"))?;
-    let mut store = KeyStore::load(&req.store);
-    let body = build_body(&nickname, store.get(&req.server, &nickname), req.public, roster, progress);
-    let url = format!("{}/api/upload", req.server.trim_end_matches('/'));
-    let res = match ureq::post(&url)
-        .set("content-type", "application/json")
-        .set("x-amas-protocol", &UPLOAD_PROTOCOL.to_string())
-        .set("x-amas-addon", env!("CARGO_PKG_VERSION"))
-        .send_json(body) {
-        Ok(r) => r,
-        Err(ureq::Error::Status(code, r)) => {
-            let v = r.into_json::<Value>().unwrap_or(Value::Null);
-            let msg = v["error"].as_str().unwrap_or_default();
-            match v["download"].as_str() {
-                Some(url) if code == 426 => bail!("server answered {code}: {msg}
-update the add-on: {url}"),
-                _ => bail!("server answered {code}: {msg}"),
-            }
-        }
-        Err(e) => return Err(e.into()),
-    };
-    let out: Value = res.into_json()?;
-    let key = out["key"].as_str().ok_or_else(|| anyhow!("the server sent no key"))?;
-    store.set(&req.server, &nickname, key);
-    store.save(&req.store)?;
-    let new = out["created"].as_bool().unwrap_or(false);
-    Ok(format!("{} {} ({} students, score {})", if new { "new key" } else { "updated" }, key, out["students"], out["score"]))
-}
-
-/// What to change on the account the saved key opens.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Action {
-    /// Show this teacher on the leaderboard, or stop showing.
-    Visibility(bool),
-    /// Replace the key with a new one (the old one stops working).
-    Rekey,
+    let id = resolve_account_id(&req.store, src, ask)?;
+    let out = post_json(&format!("{}/api/upload", req.server.trim_end_matches('/')), build_body(&id, &nickname, req.public, roster, progress))?;
+    let public_id = out["public_id"].as_str().ok_or_else(|| anyhow!("the server sent no public_id"))?;
+    Ok(format!(
+        "{} ({} students, score {}, {})\nyour page: {}",
+        if out["created"].as_bool().unwrap_or(false) { "new account" } else { "updated" },
+        out["students"],
+        out["score"],
+        if out["public"].as_bool().unwrap_or(false) { "public" } else { "private" },
+        profile_url(&req.server, public_id)
+    ))
 }
 
 pub struct Manage {
     pub server: String,
-    pub nickname: Option<String>,
-    pub action: Action,
-    pub progress_dir: PathBuf,
+    pub public: bool,
     pub store: PathBuf,
 }
 
-/// Public or private, and a new key, are changed here and nowhere on the website.
-pub fn manage(req: &Manage) -> Result<String> {
+/// Public or private is changed here and nowhere on the website.
+pub fn manage(req: &Manage, src: &Sources, ask: &mut dyn FnMut(&str) -> Result<String>) -> Result<String> {
     check_server(&req.server)?;
-    let progress = read_json(&req.progress_dir.join("latest.json")).ok();
-    let nickname = req.nickname.clone().or_else(|| nickname_of(&progress)).ok_or_else(|| anyhow!("no account nickname: pass --nickname"))?;
-    let mut store = KeyStore::load(&req.store);
-    let key = store.get(&req.server, &nickname).ok_or_else(|| anyhow!("no saved key for {nickname} on {}: upload once first", req.server))?.to_string();
-    let (path, body) = match req.action {
-        Action::Visibility(on) => ("/api/visibility", json!({ "key": key, "public": on })),
-        Action::Rekey => ("/api/rekey", json!({ "key": key })),
-    };
-    let out = post_json(&format!("{}{path}", req.server.trim_end_matches('/')), body)?;
-    match req.action {
-        Action::Visibility(_) => Ok(format!("leaderboard: {}", if out["public"].as_bool().unwrap_or(false) { "public" } else { "private" })),
-        Action::Rekey => {
-            let new = out["key"].as_str().ok_or_else(|| anyhow!("the server sent no key"))?;
-            store.set(&req.server, &nickname, new);
-            store.save(&req.store)?;
-            Ok(format!("new key {new} (the old one no longer works)"))
-        }
-    }
+    let id = resolve_account_id(&req.store, src, ask)?;
+    let out = post_json(&format!("{}/api/visibility", req.server.trim_end_matches('/')), json!({ "account_id": id, "public": req.public }))?;
+    let link = out["public_id"].as_str().map(|p| format!("\nyour page: {}", profile_url(&req.server, p))).unwrap_or_default();
+    Ok(format!("leaderboard: {}{link}", if out["public"].as_bool().unwrap_or(false) { "public" } else { "private" }))
 }
 
 fn post_json(url: &str, body: Value) -> Result<Value> {
@@ -184,6 +193,20 @@ fn post_json(url: &str, body: Value) -> Result<Value> {
 mod tests {
     use super::*;
 
+    const FAKE: &str = "AB12CD34EF56G";
+    const FAKE_ID: &str = "c3b695e22c163896b1d76d133b9cb0ddf56296451f1ae5ff6af982828e73a7d3";
+
+    fn temp(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("baocr-upload-{}-{name}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.join("upload.json")
+    }
+
+    fn typing(lines: &[&str]) -> impl FnMut(&str) -> Result<String> {
+        let mut it: std::vec::IntoIter<String> = lines.iter().map(|s| s.to_string()).collect::<Vec<_>>().into_iter();
+        move |_| it.next().ok_or_else(|| anyhow!("asked more than expected"))
+    }
+
     #[test]
     fn https_and_loopback_only() {
         assert!(check_server("https://ba.example.workers.dev").is_ok());
@@ -203,29 +226,74 @@ mod tests {
     }
 
     #[test]
-    fn the_body_carries_the_key_only_when_there_is_one() {
-        let a = build_body("a", None, false, json!({"entries": []}), None);
-        assert!(a.get("key").is_none() && a.get("progress").is_none());
-        assert_eq!(a["public"], json!(false));
-        let b = build_body("a", Some("a#123456"), true, json!({}), Some(json!({"x": 1})));
-        assert_eq!((b["key"].as_str(), b["public"].as_bool(), b["progress"]["x"].as_i64()), (Some("a#123456"), Some(true), Some(1)));
+    fn the_body_carries_the_account_id_and_public_only_when_asked() {
+        let a = build_body(FAKE_ID, "a", false, json!({"entries": []}), None);
+        assert_eq!(a["account_id"], json!(FAKE_ID));
+        assert!(a.get("public").is_none() && a.get("progress").is_none() && a.get("key").is_none());
+        let b = build_body(FAKE_ID, "a", true, json!({}), Some(json!({"x": 1})));
+        assert_eq!((b["public"].as_bool(), b["progress"]["x"].as_i64()), (Some(true), Some(1)));
+        assert!(!a.to_string().contains(FAKE) && !b.to_string().contains(FAKE), "the member code is not in the body");
     }
 
     #[test]
-    fn the_protocol_is_a_positive_number() {
-        assert!(UPLOAD_PROTOCOL >= 1);
+    fn the_protocol_moved_past_the_key_contract() {
+        assert!(UPLOAD_PROTOCOL >= 2);
     }
 
     #[test]
-    fn keys_are_kept_per_server_and_nickname() {
-        let dir = std::env::temp_dir().join(format!("baocr-upload-{}", std::process::id()));
-        let path = dir.join("upload.json");
-        let mut s = KeyStore::default();
-        s.set("https://a.example/", "소다팝", "소다팝#aaaaaa");
-        s.save(&path).unwrap();
-        let back = KeyStore::load(&path);
-        assert_eq!(back.get("https://a.example", "소다팝"), Some("소다팝#aaaaaa"));
-        assert_eq!(back.get("https://b.example", "소다팝"), None);
-        std::fs::remove_dir_all(dir).ok();
+    fn the_first_upload_asks_twice_and_saves_only_the_hash() {
+        let store = temp("first");
+        let id = resolve_account_id(&store, &Sources::default(), &mut typing(&[FAKE, " ab12-cd34ef56g "])).unwrap();
+        assert_eq!(id, FAKE_ID);
+        let file = std::fs::read_to_string(&store).unwrap();
+        assert!(file.contains(FAKE_ID) && !file.to_uppercase().contains(FAKE), "only the hash is on disk");
+        assert_eq!(resolve_account_id(&store, &Sources::default(), &mut typing(&[])).unwrap(), FAKE_ID, "the next time nothing is asked");
+        std::fs::remove_dir_all(store.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn a_typo_is_caught_by_the_second_entry_and_asked_again() {
+        let store = temp("typo");
+        let id = resolve_account_id(&store, &Sources::default(), &mut typing(&[FAKE, "AB12CD34EF56H", FAKE, FAKE])).unwrap();
+        assert_eq!(id, FAKE_ID);
+        let store2 = temp("typo3");
+        let err = resolve_account_id(&store2, &Sources::default(), &mut typing(&["a", "a", "b", "b", "c", "c"])).unwrap_err();
+        assert!(format!("{err:#}").contains("회원코드"));
+        assert!(saved_account_id(&store2).is_none(), "nothing is saved from a bad entry");
+        std::fs::remove_dir_all(store.parent().unwrap()).ok();
+        std::fs::remove_dir_all(store2.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn scripted_sources_win_and_are_not_saved() {
+        let store = temp("env");
+        let code = Sources { testing_id: None, member_code: Some("ab12cd34ef56g".into()) };
+        assert_eq!(resolve_account_id(&store, &code, &mut typing(&[])).unwrap(), FAKE_ID);
+        assert!(!store.exists(), "a scripted code is not saved");
+        let bad = Sources { testing_id: None, member_code: Some("short".into()) };
+        assert!(resolve_account_id(&store, &bad, &mut typing(&[])).is_err());
+        let id = Sources { testing_id: Some(FAKE_ID.to_uppercase()), member_code: None };
+        assert_eq!(resolve_account_id(&store, &id, &mut typing(&[])).unwrap(), FAKE_ID);
+        let junk = Sources { testing_id: Some("nope".into()), member_code: None };
+        assert!(resolve_account_id(&store, &junk, &mut typing(&[])).is_err());
+        std::fs::remove_dir_all(store.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn forgetting_the_account_asks_again_and_the_old_key_file_is_ignored() {
+        let store = temp("forget");
+        std::fs::write(&store, r#"{"http://x|소다팝": "소다팝#aaaaaa"}"#).unwrap();
+        assert_eq!(saved_account_id(&store), None, "the older key format is not an account");
+        save_account_id(&store, FAKE_ID).unwrap();
+        assert!(!std::fs::read_to_string(&store).unwrap().contains("소다팝"), "saving drops the old keys");
+        assert!(forget_account(&store).unwrap().contains("지웠습니다"));
+        assert_eq!(saved_account_id(&store), None);
+        assert!(forget_account(&store).unwrap().contains("없습니다"));
+        std::fs::remove_dir_all(store.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn the_page_link_uses_the_public_id() {
+        assert_eq!(profile_url("http://127.0.0.1:8787/", "0123456789abcdef"), "http://127.0.0.1:8787/#/u/0123456789abcdef");
     }
 }

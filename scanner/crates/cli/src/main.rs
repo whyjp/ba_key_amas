@@ -7,6 +7,7 @@
 //!   --scan-arrows        scan student profiles with the right arrow (drives the game via HCU)
 //!   --watch              passive updater: screenshots only, stores changed values
 //!   --grab <png>         save the current game region (no input)
+mod account_key;
 mod assist;
 mod dump;
 mod profile;
@@ -27,7 +28,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 #[derive(Parser)]
-#[command(name = "ba-key-AMAS", about = "Read Blue Archive student profile screens into data (4:3 or 16:9, windowed; the student scan needs 4:3)")]
+#[command(
+    name = "ba-key-AMAS",
+    about = "Read Blue Archive student profile screens into data (4:3 or 16:9, windowed; the student scan needs 4:3)",
+    after_help = "회원코드 (--upload, --manage):
+  게임 메뉴 모음 > 계정 > 고객센터 > 회원코드 (13자)를 입력하면 같은 계정을 다음 업로드에서 알아봅니다.
+  입력한 회원코드는 이 PC에서 변환(해시)된 값으로만 서버에 올라가며, 원본은 저장되거나 전송되지 않습니다. 서버는 그 값을 다시 비밀 값으로 변환해 저장합니다.
+  입력은 화면에 보이지 않고 두 번 묻습니다. 스크립트에서는 BAOCR_MEMBER_CODE 환경 변수를 쓰며(명령줄 인자는 받지 않습니다), --forget-account 로 저장한 값을 지웁니다."
+)]
 struct Args {
     /// Parse an existing 1280x960 profile screenshot (no desktop input).
     #[arg(long)]
@@ -50,18 +58,18 @@ struct Args {
     /// Read the account progress (schedule ranks, event story stamps) by walking the game's screens (HCU).
     #[arg(long)]
     scan_progress: bool,
-    /// Send the last student scan and progress scan to a ba-key-AMAS web server (https, or http://localhost). No game input.
+    /// Send the last student scan and progress scan to a ba-key-AMAS web server (https, or http://localhost). No game input. The first time it asks for the member code (see the note below).
     #[arg(long, value_name = "SERVER_URL")]
     upload: Option<String>,
-    /// Change the account the saved key opens: --visibility public|private, or --rekey. Add-on only; the website cannot.
+    /// Show this account on the server's leaderboard or not: --manage <SERVER_URL> --visibility public|private. Add-on only; the website cannot.
     #[arg(long, value_name = "SERVER_URL")]
     manage: Option<String>,
     /// --manage: show this account on the leaderboard (public) or not (private).
     #[arg(long, value_name = "public|private")]
     visibility: Option<String>,
-    /// --manage: replace the key with a new one.
+    /// Forget the saved account value (the hash of the member code), so the next --upload asks for a member code again.
     #[arg(long)]
-    rekey: bool,
+    forget_account: bool,
     /// --upload: show this account on the server's leaderboard (default: private).
     #[arg(long)]
     public: bool,
@@ -188,33 +196,32 @@ fn real_main() -> Result<()> {
         println!("{}", report.render());
         return Ok(());
     }
-    let modes = [args.boxes.is_some(), args.image.is_some(), args.reextract.is_some(), args.scan_arrows, args.scan_progress, args.upload.is_some(), args.manage.is_some(), args.watch, args.grab.is_some(), args.learn.is_some(), args.assist];
+    let modes = [args.boxes.is_some(), args.image.is_some(), args.reextract.is_some(), args.scan_arrows, args.scan_progress, args.upload.is_some(), args.manage.is_some(), args.forget_account, args.watch, args.grab.is_some(), args.learn.is_some(), args.assist];
     let chosen = modes.iter().filter(|m| **m).count();
     if chosen > 1 {
-        bail!("choose one of --image, --reextract, --scan-arrows, --scan-progress, --upload, --manage, --watch, --grab, --learn, --assist (none starts the add-on)");
+        bail!("choose one of --image, --reextract, --scan-arrows, --scan-progress, --upload, --manage, --forget-account, --watch, --grab, --learn, --assist (none starts the add-on)");
     }
     if args.from_first && !args.scan_arrows {
         bail!("--from-first requires --scan-arrows");
     }
     let opts = Options { verify_fixed: args.verify_fixed };
+    if args.forget_account {
+        println!("{}", upload::forget_account(&upload_store())?);
+        return Ok(());
+    }
     if let Some(server) = &args.upload {
-        let progress = progress_dir();
-        let store = progress.parent().map(|p| p.join("upload.json")).unwrap_or_else(|| PathBuf::from("upload.json"));
-        let req = upload::Request { server: server.clone(), nickname: args.nickname.clone(), public: args.public, students_dir: args.out_dir(), progress_dir: progress, store };
-        println!("{}", upload::run(&req)?);
+        let req = upload::Request { server: server.clone(), nickname: args.nickname.clone(), public: args.public, students_dir: args.out_dir(), progress_dir: progress_dir(), store: upload_store() };
+        println!("{}", upload::run(&req, &upload::Sources::from_env(), &mut account_key::read_hidden)?);
         return Ok(());
     }
     if let Some(server) = &args.manage {
-        let action = match (args.visibility.as_deref(), args.rekey) {
-            (Some("public"), false) => upload::Action::Visibility(true),
-            (Some("private"), false) => upload::Action::Visibility(false),
-            (None, true) => upload::Action::Rekey,
-            _ => bail!("--manage needs exactly one of --visibility public|private or --rekey"),
+        let public = match args.visibility.as_deref() {
+            Some("public") => true,
+            Some("private") => false,
+            _ => bail!("--manage needs --visibility public|private"),
         };
-        let progress = progress_dir();
-        let store = progress.parent().map(|p| p.join("upload.json")).unwrap_or_else(|| PathBuf::from("upload.json"));
-        let req = upload::Manage { server: server.clone(), nickname: args.nickname.clone(), action, progress_dir: progress, store };
-        println!("{}", upload::manage(&req)?);
+        let req = upload::Manage { server: server.clone(), public, store: upload_store() };
+        println!("{}", upload::manage(&req, &upload::Sources::from_env(), &mut account_key::read_hidden)?);
         return Ok(());
     }
     if let Some(png) = &args.boxes {
@@ -315,6 +322,11 @@ fn run_progress(args: &Args, session: &HcuSession, region: [f64; 4]) -> Result<(
         println!("  warning: {w}");
     }
     Ok(())
+}
+
+/// `upload.json`: the saved account value (the hash of the member code), beside the progress folder.
+fn upload_store() -> PathBuf {
+    progress_dir().parent().map(|p| p.join("upload.json")).unwrap_or_else(|| PathBuf::from("upload.json"))
 }
 
 /// Where the progress scan writes: %APPDATA%\baocr\progress.
