@@ -44,3 +44,26 @@ Wrong readings of the scan plate path (label, read):
 Wrong readings of the detector alone: 시로코*테러 read 시로코테러 (2), 슌 read 순 (2), 유우카(파자마) read 유우캐(파자마), 히나 read 하나, 아야네 read 아네, 아야네(수영복) read 아이네(수영복).
 
 The researcher's Python measurement with the PP-OCRv5 mobile recogniser on tight crops gave 152/160 on raw colour and 157/160 as 3-channel grayscale. That is a different input (tight crop, recogniser only) from the scan path measured here, and it was measured outside the Rust engine, so it is a lead and not a result.
+
+## Experiment: 3-channel grayscale (U1)
+
+Grayscale (BT.601 luma copied into all three channels) was applied at four places and each was scored with the harness on the same 160 plates, against the baseline above. Experiment builds switched the variants by an environment variable that is not kept in the code.
+
+| Variant | Detector alone | Scan plate path |
+| --- | --- | --- |
+| baseline, colour everywhere | 152 | 155 |
+| grayscale in the enlarged re-reads | 152 | 153 |
+| grayscale on the plate before detection (whole-frame analog), colour re-reads | 155 | 154 |
+| colour re-reads plus the same three gray re-reads as extra votes | 152 | 155 (169 ms, twice the time) |
+
+Verdict: not verified. No variant raised the scan plate path above 155, so the code keeps colour and is unchanged.
+
+What each variant did:
+
+- Gray re-reads lost 시로코*테러 (2 plates, read 시로코테러) and 준코(새해), and fixed 츠루기(수영복). Net 153.
+- Gray detection fixed 유우카(파자마), 히나 and 아야네(수영복) in the detector alone (152 to 155), but it reads the asterisk of 시로코*테러 as 츠 (시로코츠테러, 2 plates), which is the error the scan already had on that plate. The scan path then starts from that reading, so it ends at 154.
+- Gray as extra votes swaps 츠루기(수영복) for 준코(새해), at double the time.
+
+Because grayscale was not kept, the large-font path (profile frames, 106 names) was not changed and its re-extraction check was not run.
+
+Wrong in every variant: 슌 read 순 (2 plates), 아야네 read 아네 and 이즈미(새해) read 이즈미(새해 (a dropped closing bracket). A colour or luma change does not move the first three. The researcher's 157/160 from Python was on tight crops with the recogniser alone, so the Rust scan path (detect, then re-read through the full pipeline) is not reproduced by a tight-crop gray recognition. A harness mode that reads a tight crop with the recogniser only (`Ocr::line`) would be the next measurement.
