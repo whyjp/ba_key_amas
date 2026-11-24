@@ -111,9 +111,9 @@ pub const MIN_MARGIN: f32 = 0.10;
 
 /// A clear picture (this score) is believed with a smaller lead: over another student, `LOOSE_MARGIN`; over another
 /// costume of the same character, which looks alike by nature, `KIN_MARGIN`.
-pub const STRONG_SCORE: f32 = 0.70;
-pub const LOOSE_MARGIN: f32 = 0.03;
-pub const KIN_MARGIN: f32 = 0.08;
+pub const STRONG_SCORE: f32 = 0.65;
+pub const LOOSE_MARGIN: f32 = 0.0;
+pub const KIN_MARGIN: f32 = 0.05;
 
 /// The character a student name stands for, without the costume: "아루(드레스)" and "시로코*테러" are "아루" and "시로코".
 pub fn base_name(name: &str) -> &str {
