@@ -20,6 +20,12 @@ const SHAPES = {
   ElasticArmor: [["path", { d: SHIELD, fill: "none", stroke: "currentColor", "stroke-width": "2" }], ["path", { d: "M7.5 11l2.2-2.4 2.3 4.8 2.3-4.8 2.2 2.4", fill: "none", stroke: "currentColor", "stroke-width": "1.8", "stroke-linecap": "round", "stroke-linejoin": "round" }]],
   CompositeArmor: [["path", { d: SHIELD, fill: "none", stroke: "currentColor", "stroke-width": "2" }], ["path", { d: "M12 2.5v19c-4.5-1.7-8-5.5-8-10.5v-6z", fill: "currentColor" }]],
   Structure: [["rect", { x: "5", y: "5", width: "14", height: "14", rx: "2", fill: "none", stroke: "currentColor", "stroke-width": "2.2" }]],
+  // tactic roles (what the student does in a fight)
+  Tanker: [["path", { d: SHIELD, fill: "currentColor" }], ["path", { d: "M12 7v9M8.5 11.5h7", stroke: "#0b1428", "stroke-width": "2", "stroke-linecap": "round" }]],
+  DamageDealer: [["circle", { cx: "12", cy: "12", r: "7", fill: "none", stroke: "currentColor", "stroke-width": "2" }], ["path", { d: "M12 2v6M12 16v6M2 12h6M16 12h6", stroke: "currentColor", "stroke-width": "2", "stroke-linecap": "round" }], ["circle", { cx: "12", cy: "12", r: "1.8", fill: "currentColor" }]],
+  Supporter: [["path", { d: "M12 3l2.2 5.4 5.8.5-4.4 3.8 1.4 5.7L12 15.4 7 18.4l1.4-5.7L4 8.9l5.8-.5z", fill: "currentColor" }]],
+  Healer: [["path", { d: "M9.5 3h5v6.5H21v5h-6.5V21h-5v-6.5H3v-5h6.5z", fill: "currentColor" }]],
+  Vehicle: [["rect", { x: "3", y: "9", width: "18", height: "7", rx: "2", fill: "currentColor" }], ["circle", { cx: "8", cy: "18", r: "2.2", fill: "currentColor" }], ["circle", { cx: "16", cy: "18", r: "2.2", fill: "currentColor" }]],
   // roles
   STRIKER: [["path", { d: "M19.5 3.5l1 1-8.2 8.2-2.2-2.2z", fill: "currentColor" }], ["path", { d: "M8.6 11.6l3.8 3.8-3.4 3.4-2.1.3-.3-2.1z", fill: "currentColor" }], ["path", { d: "M4 20l3-3", stroke: "currentColor", "stroke-width": "2", "stroke-linecap": "round" }]],
   SPECIAL: [["path", { d: "M13 2l1.6 4.6L19 8l-4.4 1.4L13 14l-1.6-4.6L7 8l4.4-1.4z", fill: "currentColor" }], ["path", { d: "M6 21l9-9", stroke: "currentColor", "stroke-width": "2.2", "stroke-linecap": "round" }]],

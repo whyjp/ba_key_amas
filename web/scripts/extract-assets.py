@@ -58,6 +58,7 @@ def main() -> int:
             "attack": s.get("BulletType"),
             "armor": s.get("ArmorType"),
             "squad": s.get("SquadType"),
+            "position": (s.get("Position") or "").upper() or None,
             "equipment": s.get("Equipment"),
         }
     (ROOT / "src").mkdir(exist_ok=True)

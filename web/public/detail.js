@@ -1,5 +1,5 @@
 // The detail sheet of one owned student: opens over the tiles, closes with its button, Esc or a click outside.
-import { ARMOR_HUE, armorColor, ATTACK_HUE, attackColor, bondBadge, EQUIP_KO, halo, icon, meter, name, pinBadge, POSITION_KO, ROLE, schoolLogo, stars } from "./domain.js";
+import { ARMOR_HUE, armorColor, ATTACK_HUE, attackColor, bondBadge, EQUIP_KO, halo, icon, meter, name, pinBadge, POSITION_KO, ROLE, schoolLogo, stars, TACTIC_KO } from "./domain.js";
 import { glyph, positionGlyph } from "./icons.js";
 import { el, num, portrait } from "./ui.js";
 
@@ -84,12 +84,13 @@ function artFor(s, tier, art) {
 }
 
 /** An icon in a round chip. The words show on hover or keyboard focus. */
-function chip(svg, text, cls) {
-  const c = el("span", "pc-chip " + (cls ?? ""));
+function chip(svg, text, cls, label = false) {
+  const c = el("span", "pc-chip " + (cls ?? "") + (label ? " lab" : ""));
   c.tabIndex = 0;
   c.dataset.tip = text;
   c.setAttribute("aria-label", text);
   c.append(svg);
+  if (label) c.append(el("em", "", text));
   return c;
 }
 
@@ -283,8 +284,11 @@ function buildCard(s, meta, ctx, rank, animate) {
   band.append(art);
 
   const types = el("div", "pc-types");
+  // tank / dealer / supporter / healer, and front / middle / back: both written out, they matter most in a fight
+  if (s.tactic) types.append(chip(glyph(s.tactic, 16), TACTIC_KO[s.tactic] ?? s.tactic, "tactic " + s.tactic, true));
+  const position = det.position ?? s.position;
+  if (position) types.append(chip(positionGlyph(position, 16), POSITION_KO[position] ?? position, "pos", true));
   if (s.role) types.append(chip(glyph(s.role, 16), ROLE[s.role] ?? s.role, "role"));
-  if (det.position) types.append(chip(positionGlyph(det.position, 16), POSITION_KO[det.position] ?? det.position, "pos"));
   if (s.attack || s.armor) types.append(typePill(s, meta));
   if (s.uw_stars) {
     const w = el("span", "pc-weapon");
@@ -351,8 +355,7 @@ const clamp01 = (v) => Math.min(Math.max(v, 0), 1);
 
 /**
  * The light and tilt of a held card. The pointer sets a target; the card follows it with a damped spring, so
- * motion is smooth and has weight. With no pointer the card drifts on a slow figure-eight, so the foil is alive
- * even on a phone. The state is published as CSS variables the stylesheet turns into tilt, parallax and foil:
+ * motion is smooth and has weight. With no pointer the card rests: nothing moves by itself, so the text stays still. The state is published as CSS variables the stylesheet turns into tilt, parallax and foil:
  *   --px --py   light position in percent      --nx --ny   the same, -1 to 1
  *   --rx --ry   tilt in degrees                --o         light intensity, 0 to 1
  *   --hyp       distance of the light from the card centre, 0 to 1
@@ -380,9 +383,8 @@ function lightEngine(card) {
     const dt = Math.min((now - last) / 1000, 0.05);
     last = now;
     if (!pointer) {
-      const t = (now - t0) / 1000;
-      tx = 50 + 30 * Math.sin(t * 0.8);
-      ty = 50 + 22 * Math.sin(t * 1.6 + 0.6);
+      tx = 50;
+      ty = 50;
       to = 0.5;
     }
     // critically damped spring: x'' = k (target - x) - c x'

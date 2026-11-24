@@ -83,6 +83,7 @@ export function bondBadge(rank, cls = "bond") {
 /** Hue (0-360) of each attack and armor type: the card's colour template is chosen by these. */
 export const ATTACK_HUE = { Explosion: 4, Pierce: 42, Mystic: 214, Sonic: 272, Chemical: 150, Normal: 220 };
 export const ARMOR_HUE = { LightArmor: 4, HeavyArmor: 42, Unarmed: 214, ElasticArmor: 272, CompositeArmor: 150, Normal: 220, Structure: 30 };
+export const TACTIC_KO = { Tanker: "탱커", DamageDealer: "딜러", Supporter: "서포터", Healer: "힐러", Vehicle: "차량" };
 export const POSITION_KO = { FRONT: "전열", MIDDLE: "중열", BACK: "후열" };
 export const EQUIP_KO = { Hat: "모자", Gloves: "장갑", Shoes: "신발", Bag: "가방", Badge: "배지", Hairpin: "헤어핀", Charm: "부적", Watch: "시계", Necklace: "목걸이" };
 

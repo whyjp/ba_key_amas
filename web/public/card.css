@@ -435,3 +435,32 @@
 .bk-pop .bk-sec:first-child { padding-top: 0; }
 .bk-pop .bk-rows { grid-template-columns: 1fr 1fr; gap: 0 18px; }
 .bk-body:has(.bk-hot:hover) ~ .bk-pop, .bk-body:has(.bk-hot:focus) ~ .bk-pop, .bk-pop:hover { display: block; }
+
+/* role and position: icon with the word, as a pill */
+.pc-chip.lab { width: auto; height: 26px; grid-auto-flow: column; gap: 5px; padding: 0 10px 0 7px; border-radius: 13px; }
+.pc-chip.lab em { font-style: normal; font-size: 13px; font-weight: 800; letter-spacing: .2px; }
+.pc-chip.lab::after, .pc-chip.lab::before { display: none !important; }
+.pc-chip.tactic.Tanker { --tc: #6fb2ff; } .pc-chip.tactic.DamageDealer { --tc: #ff7d6e; } .pc-chip.tactic.Supporter { --tc: #6fe0a0; } .pc-chip.tactic.Healer { --tc: #ffd45e; } .pc-chip.tactic.Vehicle { --tc: #c0c8d8; }
+.pc-chip.tactic { border-color: var(--tc); }
+.pc-chip.tactic svg { color: var(--tc); filter: drop-shadow(0 0 2px rgba(0, 0, 0, .8)); }
+
+/* the front is still: no idle drift, the text does not slide with the light. Larger type with an outline for legibility. */
+.full .pc-body { transform: none; }
+.pc-front { --ol: rgba(6, 10, 22, .9); }
+.pc-front :is(h2, small, b, span, em, .skill-name, .tag) { paint-order: stroke fill; -webkit-text-stroke: 3px var(--ol); }
+.pc-front .pc-chip svg, .pc-front .type-pill svg { filter: drop-shadow(0 0 1.5px rgba(0, 0, 0, .9)); }
+.pc-title small { font-size: 12px; }
+.pc-title h2 { font-size: 24px; }
+.pc-hp small { font-size: 11px; }
+.pc-hp b { font-size: 22px; }
+.pc-weapon, .pc-bond small, .pc-stat span { font-size: 12px; }
+.pc-stat b { font-size: 16px; }
+.pc-grade b { font-size: 14px; }
+.pc-grade span { font-size: 12px; }
+.full .pc-lv small { font-size: 13px; }
+.full .skill-name { font-size: 12px; }
+.full .skill b { font-size: 20px; }
+.full .pc-stat b { font-size: 18px; }
+.full .pc-marks .tag { font-size: 12px; }
+.full .pc-flip { font-size: 12px; }
+.pc-front .pc-flip { -webkit-text-stroke: 0; }

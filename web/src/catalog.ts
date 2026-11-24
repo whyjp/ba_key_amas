@@ -10,6 +10,7 @@ export interface Entry {
   school: string | null;
   attack: string | null;
   armor: string | null;
+  position?: string | null;
   squad: string | null;
   equipment?: string[] | null;
 }

@@ -143,7 +143,7 @@ async function profile(env: Env, user: UserRow, view: "owner" | "public"): Promi
   const students = rows.results.map((r) => {
     const c = studentEntry(String(r.name), (r.student_id as number | null) ?? null);
     const detail = typeof r.detail_json === "string" ? JSON.parse(r.detail_json) : null;
-    return { ...r, user_id: undefined, detail_json: undefined, detail, school: c?.school ?? null, attack: c?.attack ?? null, armor: c?.armor ?? null, equipment_slots: c?.equipment ?? null };
+    return { ...r, user_id: undefined, detail_json: undefined, detail, school: c?.school ?? null, attack: c?.attack ?? null, armor: c?.armor ?? null, tactic: c?.role ?? null, position: c?.position ?? null, equipment_slots: c?.equipment ?? null };
   });
   const analysis = analyze(ownedFromRows(rows.results));
   return json(200, {
