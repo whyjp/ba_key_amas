@@ -255,3 +255,47 @@ test("a failing update keeps the previous students", async () => {
   assert.deepEqual(s.d1.rows("SELECT name FROM students ORDER BY name").map((r) => r.name), ["아루", "하루"]);
   assert.equal(s.users()[0]?.nickname, "a");
 });
+
+test("visibility and delete are for the add-on only: no add-on headers or a browser origin changes nothing", async () => {
+  const s = new Server();
+  await s.upload(A, "a", ["아루"], { public: true });
+  const before = JSON.stringify(s.users());
+  const jsonOnly = { "content-type": "application/json" };
+  const browser = { ...ADDON, origin: "http://srv.test" };
+  const fetchMode = { ...ADDON, "sec-fetch-site": "same-origin" };
+  for (const path of ["/api/visibility", "/api/delete"]) {
+    const body = { account_id: A, public: false };
+    assert.equal((await s.call("POST", path, body, jsonOnly)).status, 426, `${path} without the add-on headers`);
+    assert.equal((await s.call("POST", path, body, { ...ADDON, "x-amas-protocol": "1" })).status, 426, `${path} with an old protocol`);
+    assert.equal((await s.call("POST", path, body, browser)).status, 403, `${path} from a page of this site`);
+    assert.equal((await s.call("POST", path, body, { ...ADDON, origin: "http://evil.test" })).status, 403, `${path} from another site`);
+    assert.equal((await s.call("POST", path, body, fetchMode)).status, 403, `${path} with browser fetch metadata`);
+    assert.equal((await s.call("POST", path, body, { ...ADDON, "content-type": "text/plain" })).status, 400, `${path} with a form content type`);
+  }
+  assert.equal(JSON.stringify(s.users()), before, "the account is exactly as it was");
+  assert.equal(s.d1.rows("SELECT * FROM students").length, 1);
+});
+
+test("a body over the size cap is refused with 413 and creates nothing", async () => {
+  const s = new Server();
+  const big = await s.call("POST", "/api/upload", { account_id: A, nickname: "a", roster: roster("아루"), pad: "x".repeat(3_100_000) });
+  assert.equal(big.status, 413);
+  const declared = await s.call("POST", "/api/upload", { account_id: A }, { ...ADDON, "content-length": "3000001" });
+  assert.equal(declared.status, 413, "a declared length over the cap is refused before the body is read");
+  assert.equal((await s.call("POST", "/api/visibility", { account_id: A, pad: "x".repeat(3_100_000) })).status, 413);
+  assert.equal(s.users().length, 0);
+  assert.equal((await s.upload(A, "a", ["아루"])).status, 201, "a normal upload still works");
+});
+
+test("visibility makes the account private unless the request says public: true", async () => {
+  const s = new Server();
+  await s.upload(A, "a", ["아루"], { public: true });
+  for (const body of [{ account_id: A }, { account_id: A, public: false }, { account_id: A, public: null }, { account_id: A, public: "true" }, { account_id: A, public: 1 }]) {
+    await s.call("POST", "/api/visibility", { account_id: A, public: true });
+    assert.equal(s.users()[0]?.public, 1);
+    const r = await s.call("POST", "/api/visibility", body);
+    assert.equal(r.json.public, false, JSON.stringify(body));
+    assert.equal(s.users()[0]?.public, 0, `stored private for ${JSON.stringify(body)}`);
+  }
+  assert.equal((await s.call("POST", "/api/visibility", { account_id: A, public: true })).json.public, true);
+});
