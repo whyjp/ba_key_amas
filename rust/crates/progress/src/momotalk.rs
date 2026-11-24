@@ -7,11 +7,12 @@
 //! inside the heart it is used directly. The list scrolls, so a read returns the rows visible and the caller
 //! merges reads by name.
 use crate::geom::{cx, cy, digits, h, squashed, text, w};
-use crate::schema::MomoStudent;
+use crate::schema::{MomoStudent, UnreadStudent};
 use crate::vision::{blobs, is_pink, Rect};
 use crate::Read;
 use baocr_core::ocr_api::TextBox;
 use image::RgbImage;
+use regex::Regex;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MomoRow {
@@ -32,6 +33,42 @@ impl MomoRow {
 pub fn parse_bond(raw: &str) -> Option<u32> {
     let s: String = raw.chars().filter(|c| !c.is_whitespace()).collect();
     (!s.is_empty() && s.len() <= 3 && s.bytes().all(|c| c.is_ascii_digit())).then(|| s.parse().ok()).flatten().filter(|n| (1..=100).contains(n))
+}
+
+/// The unread view of MomoTalk (messages tab, sorted by 안읽음): the header's total and one row per student with
+/// the red count box at the right end of the row. The header reads `안 읽은 메시지(22)`; the rows' counts add up
+/// to it when the whole list was seen, which the caller can check. The list scrolls: merge reads by name.
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnreadView {
+    pub total: Option<u32>,
+    pub rows: Vec<UnreadStudent>,
+}
+
+pub fn parse_unread(boxes: &[TextBox]) -> Read<UnreadView> {
+    let mut warnings = Vec::new();
+    let total_re = Regex::new(r"^안읽은메시지\((\d+)\)$").unwrap();
+    let Some((header, total)) = boxes.iter().find_map(|b| total_re.captures(&squashed(b)).map(|c| (b, c[1].parse::<u32>().ok()))) else {
+        warnings.push("momotalk: no 안 읽은 메시지 header, not the unread view".into());
+        return Read { value: UnreadView { total: None, rows: vec![] }, warnings };
+    };
+    let mut rows: Vec<UnreadStudent> = Vec::new();
+    // the count boxes lie far right of the names; the badge on the tab rail is left of the header
+    for count in boxes.iter().filter(|b| b.x0 > header.x1 + 150.0 && b.y0 > header.y1 + 10.0 && digits(b, 3).is_some()) {
+        // the student's name is the upper of the two text lines at the left of the count
+        let name = boxes
+            .iter()
+            .filter(|b| b.x0 > header.x0 + 20.0 && b.x1 < count.x0 - 20.0 && (cy(b) - cy(count)).abs() < 45.0 && !text(b).is_empty())
+            .min_by(|a, b| cy(a).total_cmp(&cy(b)));
+        match (name, digits(count, 3)) {
+            (Some(n), Some(c)) if c >= 1 => {
+                if !rows.iter().any(|r| r.name == text(n)) {
+                    rows.push(UnreadStudent { name: text(n).to_string(), count: c });
+                }
+            }
+            _ => warnings.push("momotalk: a count box without a name beside it".into()),
+        }
+    }
+    Read { value: UnreadView { total, rows }, warnings }
 }
 
 pub fn parse_momotalk_list(boxes: &[TextBox], img: &RgbImage) -> Read<Vec<MomoRow>> {
@@ -126,5 +163,18 @@ mod tests {
     fn other_screens_are_not_the_list() {
         let r = parse_momotalk_list(&boxes("w169-lobby"), &png("w169-lobby"));
         assert!(r.value.is_empty());
+    }
+
+    #[test]
+    fn unread_view_reads_the_header_total_and_each_students_count() {
+        let r = parse_unread(&crate::testutil::boxes("menu-momotalk-unread-4x3"));
+        assert_eq!(r.value.total, Some(22));
+        let rows: Vec<(&str, u32)> = r.value.rows.iter().map(|s| (s.name.as_str(), s.count)).collect();
+        assert_eq!(&rows[..5], &[("리오", 1), ("나구사(수영복)", 1), ("아리스", 2), ("토키(바니걸)", 2), ("카린(교복)", 1)]);
+    }
+
+    #[test]
+    fn the_all_students_list_is_not_the_unread_view() {
+        assert!(parse_unread(&crate::testutil::boxes("menu-momotalk-all-4x3")).value.rows.is_empty());
     }
 }

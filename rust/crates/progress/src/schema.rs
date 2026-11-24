@@ -3,7 +3,7 @@
 //! events (`events.past`) are separate records and are never merged.
 use serde::{Deserialize, Serialize};
 
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProgressSnapshot {
@@ -18,6 +18,8 @@ pub struct ProgressSnapshot {
     pub story: Story,
     pub events: Events,
     pub momotalk: Momotalk,
+    #[serde(default)]
+    pub duty: Duty,
     pub warnings: Vec<String>,
 }
 
@@ -33,6 +35,7 @@ impl ProgressSnapshot {
             story: Story::default(),
             events: Events::default(),
             momotalk: Momotalk::default(),
+            duty: Duty::default(),
             warnings: Vec::new(),
         }
     }
@@ -160,6 +163,34 @@ pub struct PastEvent {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Momotalk {
     pub students: Vec<MomoStudent>,
+    /// The total the 안 읽은 메시지 header shows, and the students that have unread messages with their counts.
+    #[serde(default)]
+    pub unread_total: Option<u32>,
+    #[serde(default)]
+    pub unread: Vec<UnreadStudent>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UnreadStudent {
+    pub name: String,
+    pub count: u32,
+}
+
+/// The duty student menu: who is picked (at most `limit`, 10 in the game) and each student's memorial lobby.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Duty {
+    pub selected_count: Option<u32>,
+    pub limit: Option<u32>,
+    pub students: Vec<DutyStudent>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DutyStudent {
+    pub name: String,
+    /// Picked as a duty student.
+    pub selected: Option<bool>,
+    /// Memorial lobby unlocked (read from the icon's colour).
+    pub memorial_lobby: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

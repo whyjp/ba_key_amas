@@ -7,6 +7,7 @@
 
 pub mod account;
 pub mod bareceipt;
+pub mod duty;
 pub mod event_open;
 pub mod event_past;
 pub mod missions;
