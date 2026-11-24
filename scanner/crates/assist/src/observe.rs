@@ -9,7 +9,7 @@ use baocr_extract::raid::{RaidRef, RaidTracker};
 use baocr_extract::scene::{classify_in, squad_names_in, Layout, MissionRef, MissionTracker, Scene};
 use crate::portrait;
 use baocr_extract::{read_card_names, CardName};
-use baocr_pixels::{quick_card_selected, quick_tab_is_striker};
+use baocr_pixels::{quick_card_labels, quick_card_selected, quick_tab_is_striker, quick_thumb_cards};
 use baocr_wikidb::{StudentBrief, Wiki};
 use image::RgbImage;
 
@@ -152,12 +152,16 @@ impl<'a> Observer<'a> {
             }
             Scene::QuickFormation => {
                 obs.grid_kind = quick_tab_is_striker(img).map(|striker| if striker { "Main" } else { "Support" });
-                obs.cards = self.cards.steady(read_card_names(self.ocr, img, boxes), obs.grid_kind);
+                // with the names hidden (the grid's thumbnail view) the cards are told by their pictures
+                let fresh = if quick_card_labels(img).is_empty() { self.thumb_cards(img, obs.grid_kind) } else { read_card_names(self.ocr, img, boxes) };
+                obs.cards = self.cards.steady(fresh, obs.grid_kind);
                 for c in &obs.cards {
                     if let Some(s) = Wiki::match_student_as(self.students, &c.text, obs.grid_kind) {
                         // a student already in the squad keeps their slot; only changes move anyone
                         let at = self.squad.iter().position(|id| *id == s.id);
-                        match (quick_card_selected(img, c.x.round() as i32, c.y0.round() as i32), at) {
+                        // the selection band is placed from the name label, which lies 106 px under a bare card's top
+                        let label_y = c.y0.round() as i32 + if c.bare { 106 } else { 0 };
+                        match (quick_card_selected(img, c.x.round() as i32, label_y), at) {
                             (true, None) => self.squad.push(s.id),
                             (false, Some(i)) => {
                                 self.squad.remove(i);
@@ -179,6 +183,22 @@ impl<'a> Observer<'a> {
         obs.slots = self.slots(img, scene, layout);
         obs.squad = if scene == Scene::QuickFormation { obs.slots.iter().flatten().copied().collect() } else { self.squad.clone() };
         obs
+    }
+
+    /// The cards of the grid's thumbnail view, each told by its picture (only what is believed is named).
+    fn thumb_cards(&self, img: &RgbImage, kind: Option<&'static str>) -> Vec<CardName> {
+        let Some(kind) = kind else { return Vec::new() };
+        let striker = kind == "Main";
+        let book = portrait::Book::bundled();
+        let same = |a: i64, b: i64| self.names.get(&a) == self.names.get(&b);
+        quick_thumb_cards(img)
+            .into_iter()
+            .filter_map(|card| {
+                let m = book.identify(&portrait::probe(img, card.cx as f32, card.picture_y() as f32), &|id| self.strikers.get(&id) == Some(&striker), &same)?;
+                let name = self.names.get(&m.id).filter(|_| m.trusted())?;
+                Some(CardName { text: name.clone(), x: card.cx as f32, y0: card.top() as f32, bare: true })
+            })
+            .collect()
     }
 
     /// The six slots of the strip. In the popup the strikers' pictures say who they are; where a picture is not
@@ -346,7 +366,7 @@ mod tests {
 
     #[test]
     fn a_card_missed_for_a_frame_keeps_its_icons_but_a_scroll_forgets_every_card() {
-        let card = |name: &str, x: f32, y0: f32| CardName { text: name.into(), x, y0 };
+        let card = |name: &str, x: f32, y0: f32| CardName { text: name.into(), x, y0, bare: false };
         let (a, b, c) = (card("a", 100.0, 400.0), card("b", 210.0, 400.0), card("c", 320.0, 400.0));
         let mut m = CardMemory::default();
         assert_eq!(m.steady(vec![a.clone(), b.clone(), c.clone()], Some("Main")).len(), 3);

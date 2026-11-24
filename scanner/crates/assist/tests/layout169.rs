@@ -45,7 +45,7 @@ fn cards_from_names(boxes: &[TextBox], rows_y: (f32, f32)) -> Vec<(String, CardN
             let column = (((b.x0 + b.x1) / 2.0 - 629.0) / 111.0).round().max(0.0);
             // the one-letter 슌 is read "순" by free text: the real reader settles it by ink width, here it is told
             let text = if b.text == "순" { "슌".to_string() } else { b.text.clone() };
-            (text.clone(), CardName { text, x: 629.0 + 111.0 * column, y0: b.y0 - 3.0 })
+            (text.clone(), CardName { text, x: 629.0 + 111.0 * column, y0: b.y0 - 3.0, bare: false })
         })
         .collect()
 }

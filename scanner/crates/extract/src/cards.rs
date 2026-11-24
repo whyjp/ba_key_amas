@@ -28,6 +28,9 @@ pub struct CardName {
     /// Horizontal centre of the card and the top of its name label, in the 1280x960 frame.
     pub x: f32,
     pub y0: f32,
+    /// The grid shows pictures only (no name labels): `y0` is then the top of the card, which is the portrait
+    /// alone, and the student was told by the picture.
+    pub bare: bool,
 }
 
 /// Fewest ink pixels a label must show to be read at all.
@@ -190,7 +193,7 @@ pub fn read_card_names(ocr: &dyn Ocr, img: &RgbImage, free: &[TextBox]) -> Vec<C
                 let show = |i: usize| format!("{}{}:{:.1}", UNIQUE_NAMES[i], if allowed[i] { "" } else { "(x)" }, scores[i]);
                 eprintln!("card x={} y={} width={} fit={} free={} top={:?}", l.cx, l.y0, evidence.width, allowed.iter().filter(|a| **a).count(), side.iter().collect::<String>(), top.iter().take(4).map(|&i| show(i)).collect::<Vec<_>>());
             }
-            decide(&evidence).map(|i| CardName { text: UNIQUE_NAMES[i].clone(), x: l.cx as f32, y0: l.y0 as f32 })
+            decide(&evidence).map(|i| CardName { text: UNIQUE_NAMES[i].clone(), x: l.cx as f32, y0: l.y0 as f32, bare: false })
         })
         .collect()
 }

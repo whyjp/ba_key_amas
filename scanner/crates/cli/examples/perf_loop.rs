@@ -174,7 +174,7 @@ fn main() -> anyhow::Result<()> {
         let overlay = Overlay::start_hidden();
         let mut a = Assistant::new(Observer::new(&ocr, &students), &wiki, &students, &types, Settings::default(), None, overlay);
         a.set_game_present(true);
-        let cards = students.iter().skip(4).take(6).enumerate().map(|(i, s)| baocr_extract::CardName { text: s.name.clone(), x: 629.0 + 120.0 * (i % 3) as f32, y0: 428.0 + 200.0 * (i / 3) as f32 }).collect();
+        let cards = students.iter().skip(4).take(6).enumerate().map(|(i, s)| baocr_extract::CardName { text: s.name.clone(), x: 629.0 + 120.0 * (i % 3) as f32, y0: 428.0 + 200.0 * (i / 3) as f32, bare: false }).collect();
         a.show(Observation { mission: Some(mission), squad: students.iter().take(4).map(|s| s.id).collect(), cards, ..Observation::new(Scene::QuickFormation) });
         std::thread::sleep(Duration::from_secs(2));
         let (c0, t0) = (cpu_seconds(), Instant::now());

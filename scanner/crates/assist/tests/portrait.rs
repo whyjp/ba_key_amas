@@ -80,3 +80,39 @@ fn the_slots_and_the_grid_cards_are_told_from_the_shipped_templates() {
     assert!(sh >= sn - 3, "most slots are right: {sh}/{sn}");
     assert!(ss >= sn / 2, "and most are trusted: {ss}/{sn}");
 }
+
+/// The grid in its thumbnail view (no names): cards are found by the class colour band and told by their pictures.
+/// Ground truth is the squad (the four green-framed cards of the first row hold the squad's strikers).
+#[test]
+fn the_thumbnail_view_is_told_by_pictures() {
+    let path = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../wikidb/wiki.db"));
+    if !path.exists() {
+        return;
+    }
+    let students = Wiki::open(&path).unwrap().students().unwrap();
+    let kind: HashMap<i64, bool> = students.iter().map(|s| (s.id, s.squad_type == "Main")).collect();
+    let name_of: HashMap<i64, String> = students.iter().map(|s| (s.id, s.name.clone())).collect();
+    let same = |a: i64, b: i64| name_of.get(&a) == name_of.get(&b);
+    let img = image::open(fixture("quick-thumbs.png")).unwrap().to_rgb8();
+    let cards = baocr_pixels::quick_thumb_cards(&img);
+    let book = Book::bundled();
+    let found: Vec<_> = cards.iter().map(|c| (c.cx, c.bar_top)).collect();
+    assert_eq!(cards.len(), 18, "three rows of six: {found:?}");
+    assert!(cards.iter().all(|c| [404, 508, 612].iter().any(|r| (c.bar_top - r).abs() <= 1)), "{found:?}");
+    let mut trusted = 0;
+    let mut first_row = Vec::new();
+    for c in &cards {
+        let m = book.identify(&probe(&img, c.cx as f32, c.picture_y() as f32), &|id| kind.get(&id) == Some(&true), &same).unwrap();
+        eprintln!("card x={} bar={} -> {} {:?} score {:.2} margin {:.2} {}", c.cx, c.bar_top, m.id, name_of.get(&m.id), m.score, m.margin, if m.trusted() { "trusted" } else { "held" });
+        trusted += usize::from(m.trusted());
+        if c.bar_top < 450 && m.trusted() {
+            first_row.push(m.id);
+        }
+    }
+    // the squad of that recording, read from its strip: these four are the first row (green frames)
+    let squad = [10133, 10100, 10098, 10074];
+    for id in squad {
+        assert!(first_row.iter().any(|f| same(*f, id)), "{id} is in the first row: {first_row:?}");
+    }
+    assert!(trusted >= 9, "at least half are believed: {trusted}/18");
+}

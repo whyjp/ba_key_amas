@@ -240,6 +240,10 @@ const CARD_HALF_WIDTH: i32 = 52;
 /// A grid card's outline relative to its name label: (left, top, right, bottom) around its centre
 /// and above/below the label's top.
 const CARD_FRAME: (i32, i32, i32, i32) = (-55, -106, 55, 41);
+/// In the thumbnail view the card is the portrait alone: the column of icons starts as far under the card's top as it
+/// does in the named view (where the label is 106 px under the card's top), and the card is this tall.
+const THUMB_LABEL_BELOW_TOP: i32 = 106;
+const THUMB_CARD_HEIGHT: i32 = 98;
 /// The grid's viewport: a card whose portrait is mostly scrolled out of it gets no icons.
 const GRID_ICONS_TOP: i32 = 322;
 const GRID_ICONS_BOTTOM: i32 = 600;
@@ -331,7 +335,9 @@ pub fn card_marks_in(cards: &[CardName], students: &[StudentBrief], brief: Optio
     cards
         .iter()
         .filter_map(|c| {
-            let top = c.y0.round() as i32 - COLUMN_TOP_ABOVE_NAME;
+            // a card without a name label is placed by its own top: the label sits THUMB_LABEL_BELOW_TOP under it in the other view
+            let y0 = c.y0.round() as i32 + if c.bare { THUMB_LABEL_BELOW_TOP } else { 0 };
+            let top = y0 - COLUMN_TOP_ABOVE_NAME;
             if !(spots.grid_icons_top..=spots.grid_icons_bottom).contains(&top) {
                 return None;
             }
@@ -340,10 +346,11 @@ pub fn card_marks_in(cards: &[CardName], students: &[StudentBrief], brief: Optio
             if icons.is_empty() {
                 return None;
             }
-            let (cx, y0) = (c.x.round() as i32, c.y0.round() as i32);
+            let cx = c.x.round() as i32;
             let mark = Mark::column_from_top(cx + CARD_HALF_WIDTH, top, icons);
+            let (frame_top, frame_bottom) = if c.bare { (y0 - THUMB_LABEL_BELOW_TOP, y0 - THUMB_LABEL_BELOW_TOP + THUMB_CARD_HEIGHT) } else { (y0 + CARD_FRAME.1, y0 + CARD_FRAME.3) };
             Some(match grade {
-                Some(grade) => mark.framed(Frame { left: cx + CARD_FRAME.0, top: y0 + CARD_FRAME.1, right: cx + CARD_FRAME.2, bottom: y0 + CARD_FRAME.3, grade }),
+                Some(grade) => mark.framed(Frame { left: cx + CARD_FRAME.0, top: frame_top, right: cx + CARD_FRAME.2, bottom: frame_bottom, grade }),
                 None => mark,
             })
         })
@@ -511,10 +518,10 @@ mod tests {
         let (b, t) = (brief(), types());
         let students = squad();
         let cards = vec![
-            CardName { text: "시로코*테러".into(), x: 736.0, y0: 429.0 },
-            CardName { text: "하나코(수영복)".into(), x: 1181.0, y0: 432.0 },
-            CardName { text: "하나코(수영복)".into(), x: 1181.0, y0: 370.0 }, // portrait mostly above the grid
-            CardName { text: "알수없음".into(), x: 900.0, y0: 430.0 },
+            CardName { text: "시로코*테러".into(), x: 736.0, y0: 429.0, bare: false },
+            CardName { text: "하나코(수영복)".into(), x: 1181.0, y0: 432.0, bare: false },
+            CardName { text: "하나코(수영복)".into(), x: 1181.0, y0: 370.0, bare: false }, // portrait mostly above the grid
+            CardName { text: "알수없음".into(), x: 900.0, y0: 430.0, bare: false },
         ];
         let marks = card_marks(&cards, &students, Some(&b), Some("Outdoor"), &t, None);
         assert_eq!(marks.len(), 2, "a row scrolled out and an unknown name get no marks");
@@ -536,7 +543,7 @@ mod tests {
     fn a_special_judged_by_skill_gets_sp_and_its_types_but_no_frame() {
         let (b, t) = (brief(), types());
         let students = squad();
-        let cards = vec![CardName { text: "아코".into(), x: 736.0, y0: 429.0 }, CardName { text: "이로하".into(), x: 847.0, y0: 429.0 }];
+        let cards = vec![CardName { text: "아코".into(), x: 736.0, y0: 429.0, bare: false }, CardName { text: "이로하".into(), x: 847.0, y0: 429.0, bare: false }];
         let marks = card_marks(&cards, &students, Some(&b), Some("Outdoor"), &t, Some("Support"));
         let (mystic, light) = (Icon::Attack(TypeTag { hue: Hue::Blue, glyph: '신' }), Icon::Armor(TypeTag { hue: Hue::Red, glyph: '경' }));
         assert_eq!(marks[0].icons, vec![Icon::Special, mystic, light]);
@@ -550,7 +557,7 @@ mod tests {
         let striker = student(10, "호시노(무장)", "Pierce", "HeavyArmor", 1, "Main", "DamageDealer");
         let special = student(11, "호시노(무장)", "Mystic", "HeavyArmor", 1, "Support", "Healer");
         let students = vec![striker, special];
-        let cards = vec![CardName { text: "호시노(무장)".into(), x: 736.0, y0: 429.0 }];
+        let cards = vec![CardName { text: "호시노(무장)".into(), x: 736.0, y0: 429.0, bare: false }];
         assert!(card_marks(&cards, &students, Some(&b), None, &t, None).is_empty(), "no tab known, two different students");
         assert_eq!(card_marks(&cards, &students, Some(&b), None, &t, Some("Support"))[0].icons[0], Icon::Special);
         assert!(matches!(card_marks(&cards, &students, Some(&b), None, &t, Some("Main"))[0].icons[0], Icon::Fit(_)));
@@ -621,7 +628,7 @@ mod tests {
         let labels = baocr_pixels::quick_card_labels(&shot.to_rgb8());
         let mut students = squad();
         students.extend((0..6).map(|i| student(20 + i, &format!("학생{i}"), ["Pierce", "Explosion", "Mystic"][i as usize % 3], ["HeavyArmor", "Unarmed", "LightArmor"][i as usize % 3], (i as u8 * 2) % 5, "Main", "DamageDealer")));
-        let cards: Vec<CardName> = labels.iter().enumerate().map(|(i, l)| CardName { text: students[i % students.len()].name.clone(), x: l.cx as f32, y0: l.y0 as f32 }).collect();
+        let cards: Vec<CardName> = labels.iter().enumerate().map(|(i, l)| CardName { text: students[i % students.len()].name.clone(), x: l.cx as f32, y0: l.y0 as f32, bare: false }).collect();
         let mut marks = card_marks(&cards, &students, Some(&b), Some("Outdoor"), &t, None);
         marks.extend(slot_marks(&team, Some(&b), Some("Outdoor"), &t));
         for w in [1280u32, 640, 458] {

@@ -709,7 +709,7 @@ mod tests {
         let (r, ocr) = (rig(), NoOcr);
         let mut a = assistant(&r, &ocr);
         let mut obs = squad_obs(Scene::QuickFormation);
-        obs.cards = vec![CardName { text: "관통학생".into(), x: 629.0, y0: 428.0 }];
+        obs.cards = vec![CardName { text: "관통학생".into(), x: 629.0, y0: 428.0, bare: false }];
         a.show(obs);
         {
             let shown = r.fake.0.borrow();
@@ -988,7 +988,7 @@ mod tests {
         let (r, ocr) = (rig(), NoOcr);
         let mut a = assistant(&r, &ocr);
         let mut obs = squad_obs(Scene::QuickFormation);
-        obs.cards = vec![CardName { text: "관통학생".into(), x: 629.0, y0: 428.0 }];
+        obs.cards = vec![CardName { text: "관통학생".into(), x: 629.0, y0: 428.0, bare: false }];
         a.show(obs.clone());
         assert!(!r.fake.0.borrow().marks.is_empty(), "icons while the popup is read");
         // the popup closes: the screen moves and the icons come down
