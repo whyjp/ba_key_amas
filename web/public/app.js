@@ -3,7 +3,6 @@ import { renderProfile } from "./me.js";
 import { card, el, get, mount, post, session } from "./ui.js";
 
 const app = document.getElementById("app");
-const q = document.getElementById("q");
 
 /** A search is a nickname (public teachers) or a key `nickname#a1b2c3` (opens that teacher whether public or not). */
 async function search(text) {
@@ -30,17 +29,12 @@ function notFound(message) {
   mount(app, card("찾을 수 없습니다", el("p", "msg", message), el("p", "hint", "공개를 선택한 선생님은 닉네임으로 검색합니다. 비공개인 선생님은 닉네임#6자리 키로 검색합니다.")));
 }
 
-document.getElementById("search").addEventListener("submit", (e) => {
-  e.preventDefault();
-  search(q.value);
-});
-
 /** The main page: the leaderboard, with a search box and a way to the add-on. */
 function main() {
   const strip = card(null);
   strip.classList.add("lead-strip");
   const text = el("div", "lead-text");
-  text.append(el("h1", "lead", "블루 아카이브 선생님 리더보드"), el("p", "hint", "선생님의 닉네임을 검색하거나, 아래 순위에서 골라 보유 학생과 진행 상태를 볼 수 있습니다."));
+  text.append(el("p", "hint", "선생님의 닉네임을 검색하거나, 아래 순위에서 골라 보유 학생과 진행 상태를 볼 수 있습니다."));
   const form = el("form", "lead-search");
   const input = el("input");
   input.type = "search";
@@ -71,14 +65,11 @@ function route() {
   app.classList.toggle("fit", profile);
   if (name === "u" && arg) {
     const nick = decodeURIComponent(arg);
-    q.value = nick;
     return void renderProfile(app, nick, notFound);
   }
   if (name === "p" && session.data) {
-    q.value = session.data.nickname;
     return void renderProfile(app, null, notFound);
   }
-  q.value = "";
   main();
 }
 

@@ -299,19 +299,25 @@ function momoView(d, ctx) {
   const m = d.progress?.momotalk;
   if (!m) return card("모모톡", empty(NOT_SCANNED));
   const wrap = el("div", "col scroll");
-  const head = el("div", "momo-head");
-  head.append(el("b", "", num(m.unread_total)), el("span", "", "읽지 않은 메시지"));
+  const app = el("div", "momo-app");
+  const bar = el("div", "momo-bar");
+  const total = el("span", "momo-total");
+  total.append(el("b", "", num(m.unread_total)), el("small", "", "읽지 않은 메시지"));
+  bar.append(el("span", "momo-logo", "MomoTalk"), total);
   const list = el("div", "momo-list");
   for (const u of m.unread ?? []) {
     const s = ctx.byName.get(u.name);
     const row = el("div", "momo");
     const text = el("div", "momo-text");
-    text.append(el("b", "", u.name), el("span", "", "새 메시지가 도착했어요"));
-    row.append(portrait(s?.student_id, "momo-img"), text, bondBadge(s?.bond ?? null, "bond"), el("span", "unread", String(u.count)));
+    const who = el("div", "momo-who");
+    who.append(el("b", "", u.name), bondBadge(s?.bond ?? null, "bond"));
+    text.append(who, el("span", "momo-bubble", "새 메시지가 도착했어요"));
+    row.append(portrait(s?.student_id, "momo-img"), text, el("span", "unread", String(u.count)));
     clickable(row, u.name, ctx);
     list.append(row);
   }
-  wrap.append(card("모모톡", head, (m.unread ?? []).length ? list : empty("읽지 않은 메시지가 있는 학생이 없습니다.")));
+  app.append(bar, (m.unread ?? []).length ? list : empty("읽지 않은 메시지가 있는 학생이 없습니다."));
+  wrap.append(app);
   return wrap;
 }
 

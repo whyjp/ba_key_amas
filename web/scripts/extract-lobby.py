@@ -93,6 +93,9 @@ def load_crop_art():
     return mod
 
 
+THUMB_TRUST = 0.85  # a thumbnail match this good is believed over the face detector
+
+
 def locate_by_thumbnail(big_gray, thumb_path: pathlib.Path):
     """Find where SchaleDB's small lobby crop (cut around the character's face) sits inside the big picture.
 
@@ -171,11 +174,21 @@ def main() -> int:
         if bgr is None:
             missing.append(name)
             continue
-        face = crop.largest_face(det, bgr)
-        spot = None
-        if face is None:
+        h, w = bgr.shape[:2]
+        by_hand = crop.OVERRIDES.get("lobby", {}).get(str(sid))
+        face, spot = None, None
+        if by_hand:
+            spot = (by_hand[0] * w, by_hand[1] * h)
+        else:
+            # SchaleDB's own lobby crop is framed on the character, so where it sits in the big picture is the
+            # surest guide; the face detector is the second choice (it also hits hands and props in a wide scene)
             score, cx, cy = locate_by_thumbnail(cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY), ROOT / "public" / "lobby" / f"{sid}.webp")
-            spot = (cx, cy) if score >= 0.6 and cx is not None else None
+            if score >= THUMB_TRUST and cx is not None:
+                spot = (cx, cy)
+            else:
+                face = crop.largest_face(det, bgr)
+                if face is None and score >= 0.6 and cx is not None:
+                    spot = (cx, cy)
         how[("face" if face else "thumbnail" if spot else "middle")] += 1
         img = Image.open(src).convert("RGB")
         portrait_crop(img, face, spot).save(out / f"{sid}.webp", "WEBP", quality=86)

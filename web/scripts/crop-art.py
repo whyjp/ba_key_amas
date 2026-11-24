@@ -11,6 +11,7 @@ standing art, the middle of a lobby picture). The window never leaves the pictur
 
 Run from web/ after extract-assets.py:  python -I scripts/crop-art.py   (needs opencv-python-headless and pillow)
 """
+import json
 import pathlib
 import sys
 import urllib.request
@@ -24,6 +25,9 @@ CACHE = ROOT / "scripts" / ".cache"
 MODEL = CACHE / "yunet.onnx"
 MODEL_URL = "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx"
 RATIO = 6 / 5
+# Faces placed by hand where neither the detector nor the matching is right: {"standing"|"lobby": {id: [x, y]}} as
+# fractions of the picture. Kept short and checked by eye (see scripts/face-overrides.json).
+OVERRIDES = json.loads((ROOT / "scripts" / "face-overrides.json").read_text(encoding="utf-8")) if (ROOT / "scripts" / "face-overrides.json").exists() else {}
 FACE_AT = 0.36  # where the face centre sits inside a standing crop, from the top
 CARD_W, CARD_H = 720, 600  # size of every standing crop: the card shows the same picture size for every student
 
@@ -32,21 +36,71 @@ def detector():
     CACHE.mkdir(exist_ok=True)
     if not MODEL.exists():
         MODEL.write_bytes(urllib.request.urlopen(urllib.request.Request(MODEL_URL, headers={"User-Agent": "ba-key-amas-assets"}), timeout=60).read())
-    # A low score threshold: anime faces in a wide scene (a beach picture with the figure sitting under an umbrella)
-    # score 0.3 to 0.5. The best of the candidates is taken, not just any, see largest_face.
+    # Threshold 0.3 finds faint anime faces but also hits hands, hems and props, so it only runs on a small window
+    # that is already known to hold the head (face_near). On a whole picture a hit has to score 0.5 (largest_face).
     return cv2.FaceDetectorYN.create(str(MODEL), "", (320, 320), 0.3, 0.3, 5000)
 
 
-def largest_face(det, bgr):
+def largest_face(det, bgr, min_score=0.5):
     """The most likely face: the candidate with the best score times area, so a faint false hit does not beat a clear
     face. Returns (centre x, centre y, size) in pixels, or None."""
     h, w = bgr.shape[:2]
     det.setInputSize((w, h))
     _, faces = det.detect(bgr)
-    if faces is None or len(faces) == 0:
+    if faces is None:
+        return None
+    faces = [f for f in faces if float(f[14]) >= min_score]
+    if not faces:
         return None
     x, y, fw, fh = max(faces, key=lambda f: float(f[14]) * f[2] * f[3])[:4]
     return float(x + fw / 2), float(y + fh / 2), float(max(fw, fh))
+
+
+def locate_head(img, portrait_path):
+    """Where the game's own head portrait sits inside the standing art: multi-scale template matching of the
+    portrait's middle on the figure (the art is laid on white, the portrait has its own backdrop, so only the figure
+    matches). Returns (score, centre x, centre y, region width) in standing-art pixels, or None."""
+    if not portrait_path.exists():
+        return None
+    st = img.convert("RGBA")
+    flat = Image.new("RGBA", st.size, (255, 255, 255, 255))
+    flat.alpha_composite(st)
+    big = cv2.cvtColor(np.array(flat.convert("RGB")), cv2.COLOR_RGB2GRAY)
+    pt = cv2.cvtColor(np.array(Image.open(portrait_path).convert("RGB")), cv2.COLOR_RGB2GRAY)
+    h, w = big.shape
+    th, tw = pt.shape
+    core = pt[int(th * 0.2):int(th * 0.8), int(tw * 0.2):int(tw * 0.8)]
+    k = min(1.0, 800 / max(h, w))
+    small = cv2.resize(big, None, fx=k, fy=k, interpolation=cv2.INTER_AREA)
+    best = None
+    for region_w in np.linspace(120, min(w, h), 40):  # width of the portrait's region inside the standing art
+        s = (region_w / tw) * k
+        cw, ch = int(core.shape[1] * s), int(core.shape[0] * s)
+        if cw < 20 or ch < 20 or cw >= small.shape[1] or ch >= small.shape[0]:
+            continue
+        res = cv2.matchTemplate(small, cv2.resize(core, (cw, ch), interpolation=cv2.INTER_AREA), cv2.TM_CCOEFF_NORMED)
+        _, score, _, loc = cv2.minMaxLoc(res)
+        if best is None or score > best[0]:
+            best = (float(score), (loc[0] + cw / 2) / k, (loc[1] + ch / 2) / k, float(region_w))
+    return best
+
+
+ANCHOR_MIN = 0.55  # below this the match is not trusted
+
+
+def face_near(det, bgr, anchor):
+    """The face inside the window around the matched head, found with the low threshold; the match centre when the
+    detector finds nothing there. (x, y, size) in standing-art pixels."""
+    _, cx, cy, rw = anchor
+    h, w = bgr.shape[:2]
+    half = rw * 0.8
+    x0, y0 = int(max(cx - half, 0)), int(max(cy - half, 0))
+    x1, y1 = int(min(cx + half, w)), int(min(cy + half, h))
+    window = bgr[y0:y1, x0:x1]
+    found = largest_face(det, window, min_score=0.3) if window.size else None
+    if found:
+        return found[0] + x0, found[1] + y0, found[2]
+    return cx, cy, rw * 0.5
 
 
 def clamp(v, lo, hi):
@@ -130,15 +184,14 @@ MEAN_FACE = (0.51, 0.48)
 def write_faces(det) -> int:
     """`public/faces.json`: id -> [x, y], the face centre as fractions of the portrait, for placing the face in a
     heatmap cell. Found at normal size, then at double size (small faces), else the mean."""
-    import json as _json
     faces, found = {}, 0
     for path in sorted((ROOT / "public" / "portraits").glob("*.webp")):
         bgr = cv2.imdecode(np.fromfile(str(path), dtype=np.uint8), cv2.IMREAD_COLOR)
         h, w = bgr.shape[:2]
-        face = largest_face(det, bgr)
+        face = largest_face(det, bgr, min_score=0.3)
         if face is None:
             big = cv2.resize(bgr, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
-            face = largest_face(det, big)
+            face = largest_face(det, big, min_score=0.3)
             if face is not None:
                 face = (face[0] / 2, face[1] / 2, face[2] / 2)
         if face is not None:
@@ -147,7 +200,7 @@ def write_faces(det) -> int:
         else:
             xy = MEAN_FACE
         faces[path.stem] = [round(float(xy[0]), 3), round(float(xy[1]), 3)]
-    (ROOT / "public" / "faces.json").write_text(_json.dumps(faces), encoding="utf-8")
+    (ROOT / "public" / "faces.json").write_text(json.dumps(faces), encoding="utf-8")
     return found
 
 
@@ -163,7 +216,14 @@ def main() -> int:
             if target.exists():
                 continue
             bgr = cv2.imdecode(np.fromfile(str(path), dtype=np.uint8), cv2.IMREAD_COLOR)
-            face = largest_face(det, bgr)
+            override = OVERRIDES.get(src, {}).get(path.stem)
+            if override:
+                face = (override[0] * bgr.shape[1], override[1] * bgr.shape[0], bgr.shape[1] * 0.12)
+            elif src == "standing":
+                head = locate_head(Image.open(path), ROOT / "public" / "portraits" / path.name)
+                face = face_near(det, bgr, head) if head and head[0] >= ANCHOR_MIN else largest_face(det, bgr)
+            else:
+                face = largest_face(det, bgr)
             found += face is not None
             # standing art is cut out (transparent), so its alpha is kept and the card paints the backdrop
             img = Image.open(path).convert("RGBA")

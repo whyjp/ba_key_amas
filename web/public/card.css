@@ -317,7 +317,7 @@
 /* every student thumbnail opens the card */
 .clickable { cursor: pointer; }
 .face.clickable:hover .face-img, .face.clickable:focus-visible .face-img { box-shadow: 0 0 0 2px var(--cyan); }
-.momo.clickable:hover, .momo.clickable:focus-visible { border-color: var(--cyan); background: #f1f7fd; }
+.momo.clickable:hover, .momo.clickable:focus-visible { background: #ffeef4; }
 .fav.clickable { cursor: pointer; }
 .pi-generic { color: rgba(255, 255, 255, .92); filter: drop-shadow(0 0 8px rgba(255, 255, 255, .35)); }
 
@@ -395,3 +395,43 @@
 .full .pc-grade::after { transform: scaleX(-1); }
 .tier-ur .pc-grade::before, .tier-ur .pc-grade::after { background: linear-gradient(90deg, transparent, #e6cf94); }
 .tier-sar .pc-grade::before, .tier-sar .pc-grade::after { background: linear-gradient(90deg, transparent, #ffb6df, #ffe6a0); }
+
+/* card back: no boxes. Sections are set apart by a hairline and a small caption, values sit in ruled rows. */
+.bk-body { gap: 0; }
+.bk-sec { background: none; border: 0; border-radius: 0; padding: 9px 2px 8px; border-top: 1px solid rgba(255, 255, 255, .13); }
+.bk-sec:first-child { border-top: 0; padding-top: 2px; }
+.bk-sec h3 { margin: 0 0 5px; font-size: 11px; font-weight: 700; letter-spacing: .08em; color: hsl(var(--h) 38% 70%); }
+.bk-stats { grid-template-columns: 1fr 1fr; gap: 0 18px; }
+.bk-stat { flex-direction: row; justify-content: space-between; align-items: baseline; background: none; border: 0; border-radius: 0; padding: 4px 0; border-bottom: 1px dotted rgba(255, 255, 255, .18); }
+.bk-stat span { font-size: 11px; font-weight: 500; }
+.bk-stat b { font-size: 16px; font-variant-numeric: tabular-nums; }
+.bk-stat.max_hp b { color: #f0a498; } .bk-stat.attack b { color: #f0c27a; } .bk-stat.defense b { color: #8fc0f2; } .bk-stat.healing b { color: #8fd8ae; }
+.bk-row { border-bottom: 1px dotted rgba(255, 255, 255, .14); padding: 3px 0; }
+.bk-row b { font-variant-numeric: tabular-nums; }
+.bk-xp { height: 3px; border-radius: 2px; }
+.bk-terrain { gap: 16px; }
+.bk-terr { flex: none; background: none; border-radius: 0; padding: 0; gap: 6px; }
+.bk-terr b { width: auto; height: auto; background: none !important; font-size: 17px; display: inline; }
+.bk-terr.gS b { color: #f0c24a; } .bk-terr.gA b { color: #f09060; } .bk-terr.gB b { color: #7ab4ee; } .bk-terr.gC b { color: #7ccaa0; } .bk-terr.gD b { color: #98a2b8; }
+.bk-terr span { color: var(--dim); font-size: 12px; }
+.bk-gear { grid-template-columns: 1fr; gap: 0; }
+.bk-slot { display: grid; grid-template-columns: 54px 1fr auto; grid-template-areas: "k n t" "b b l"; align-items: center; column-gap: 8px; row-gap: 3px; background: none; border: 0; border-radius: 0; padding: 6px 0; border-bottom: 1px dotted rgba(255, 255, 255, .14); }
+.bk-slot:last-child { border-bottom: 0; }
+.bk-slot-top { display: contents; }
+.bk-slot-kind { grid-area: k; font-weight: 500; }
+.bk-slot-name { grid-area: n; font-size: 13px; }
+.bk-tier { grid-area: t; background: none; padding: 0; font-size: 13px; color: hsl(var(--th) 62% 70%); font-variant-numeric: tabular-nums; }
+.bk-lv { grid-area: b; height: 2px; margin: 0; }
+.bk-slot small { grid-area: l; justify-self: end; }
+.bk-slot.empty { opacity: .5; }
+
+/* the back never scrolls: what does not fit opens as a popup over the card when the stats are hovered or focused */
+.pc-back { position: absolute; }
+.bk-body { overflow: hidden; }
+.bk-hot { cursor: help; outline: none; }
+.bk-hint { float: right; font-style: normal; font-weight: 500; font-size: 10px; letter-spacing: 0; color: var(--dim); }
+.bk-hot:hover .bk-hint, .bk-hot:focus .bk-hint { color: hsl(var(--h) 55% 78%); }
+.bk-pop { display: none; position: absolute; left: 10px; right: 10px; top: 70px; z-index: 5; padding: 10px 12px; border-radius: 12px; background: hsl(var(--h) 30% 12% / .97); border: 1px solid hsl(var(--h) 40% 45%); box-shadow: 0 10px 30px rgba(0, 0, 0, .55); }
+.bk-pop .bk-sec:first-child { padding-top: 0; }
+.bk-pop .bk-rows { grid-template-columns: 1fr 1fr; gap: 0 18px; }
+.bk-body:has(.bk-hot:hover) ~ .bk-pop, .bk-body:has(.bk-hot:focus) ~ .bk-pop, .bk-pop:hover { display: block; }

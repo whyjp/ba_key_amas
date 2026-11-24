@@ -160,10 +160,11 @@ function backFace(s, meta, tier, rank, turn) {
     bar.append(fill);
     body.append(bkSection("레벨 경험치", bar, el("small", "bk-note", `${num(d.exp.current)} / ${num(d.exp.required)}`)));
   }
+  const pop = el("div", "bk-pop");
   if (d.stat_detail) {
     const rows = el("div", "bk-rows");
     for (const [k, label, unit] of EXTRA_STATS) if (d.stat_detail[k] !== undefined) rows.append(bkRow(label, unit ? `${num(d.stat_detail[k])}${unit}` : d.stat_detail[k]));
-    body.append(bkSection("상세 능력치", rows));
+    if (rows.childNodes.length) pop.append(bkSection("상세 능력치", rows));
   }
   if (d.terrain) {
     const row = el("div", "bk-terrain");
@@ -206,7 +207,14 @@ function backFace(s, meta, tier, rank, turn) {
     for (const [k, label] of [["stars", "현재 성급"], ["next_stars", "다음 성급"], ["max_bond_rank", "인연 랭크 상한"], ["next_max_bond_rank", "다음 인연 상한"], ["next_max_hp", "다음 최대 체력"], ["next_attack", "다음 공격력"], ["next_healing", "다음 치유력"]]) {
       if (d.mystic[k] !== undefined) rows.append(bkRow(label, d.mystic[k]));
     }
-    body.append(bkSection("신비 해방", rows));
+    if (rows.childNodes.length) pop.append(bkSection("신비 해방", rows));
+  }
+  // the first section (battle stats) opens the popup with the rest of the specs: the card never grows or scrolls
+  const hot = body.firstElementChild;
+  if (pop.childNodes.length && hot) {
+    hot.classList.add("bk-hot");
+    hot.tabIndex = 0;
+    hot.querySelector("h3")?.append(el("em", "bk-hint", "상세 보기"));
   }
   if (!body.childNodes.length) body.append(el("p", "bk-empty", "이 학생은 능력치를 읽지 않았습니다. 학생 스캔을 다시 하면 채워집니다."));
 
@@ -214,6 +222,7 @@ function backFace(s, meta, tier, rank, turn) {
   back_.type = "button";
   back_.addEventListener("click", turn);
   back.append(head, body, back_);
+  if (pop.childNodes.length) back.append(pop);
   return back;
 }
 
