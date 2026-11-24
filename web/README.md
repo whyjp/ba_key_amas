@@ -82,6 +82,10 @@ ba-key-AMAS --manage https://<서버> --rekey
 | `extract-lobby.py` | 고화질 메모리얼 로비 `public/card-lobby/<id>.webp`(760x1280)와 목록 `card-lobby.json` | 블루 아카이브 위키(bluearchive.wiki)의 `Memorial_Lobby_<이름>` 파일. 위키 API로 목록을 받고 SchaleDB 영어 이름과 맞춘 뒤, 얼굴 기준으로 카드 세로 모양으로 자른다. 원본은 `scripts/.cache`에 둔다 |
 | `crop-art.py` | 카드 일러스트 `public/card/`(입상), `public/card-lobby/`(위키에 없는 학생의 SchaleDB 썸네일 대체분) | 위 이미지를 얼굴 중심으로 미리 자른다 |
 
+위키에 `npm run assets`는 마지막에 `audit-assets.py`를 돌린다. 학생마다 초상화, 아이콘, 전신 입상, 카드 크롭, 로비, 얼굴 위치, 헤일로, 학교 로고, 슬롯 종류가 있고 이미지가 실제로 열리는지(오류 페이지를 이미지로 저장하지 않았는지) 확인하며, 빠진 것이 있으면 빌드를 멈춘다. 원본에 없는 것(사텐 루이코의 학교 로고)만 `KNOWN_GAPS`에 적어 둔다. 직접 보려면 `npm run audit`.
+
+학생 카탈로그(`src/catalog.json`)는 이름이 아니라 학생 ID가 키다. 글로벌에는 "호시노(무장)"이 둘(탱커, 딜러)이라 이름으로는 구분할 수 없고, 스캐너가 화면에서 찾은 학생 ID(`reference.id`)로 식별한다. ID 없는 옛 업로드만 이름으로 찾는다. 한 선생님이 둘 다 가지면 뒤의 학생 이름에 역할이 붙는다(`호시노(무장) · 딜러`).
+
 위키에 메모리얼 로비 이미지가 없는 학생은 SchaleDB의 182x144 썸네일을 쓰므로 키우면 다소 흐리다. 카드 배경은 SchaleDB의 수집 화면 배경(`public/backgrounds/`)이다. 헤일로는 위키에 없는 학생(약 13명)이 있고, 그 학생은 헤일로 없이 나온다. 위키 페이지에는 이용 조건 표기가 없었으므로, 이미지는 배포 저장소에 넣지 않고 빌드 때만 받는다.
 
 ## 학생 카드

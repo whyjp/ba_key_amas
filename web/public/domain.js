@@ -51,6 +51,8 @@ export function schoolLogo(key, cls = "school-logo") {
   img.src = "/schools/" + encodeURIComponent(key) + ".png";
   img.alt = "";
   img.loading = "lazy";
+  // a school without a logo shows nothing, not a broken-image mark
+  img.addEventListener("error", () => { img.style.visibility = "hidden"; }, { once: true });
   return img;
 }
 

@@ -1,5 +1,6 @@
 import backgrounds from "./backgrounds.json";
 import catalog from "./catalog.json";
+import { entryFor, indexByName, uniqueNames, type Catalog } from "./catalog.ts";
 import { formatKey, foldNickname, hashKey, keyMatches, newTag, normalizeNickname, parseKey, type ParsedKey } from "./keys.ts";
 import { BadJson, json, readJson, sameOriginJson, TooLarge } from "./security.ts";
 import { aggregate, analyze, SCORE_VERSION, summarize, type Analysis, type CharSummary, type OwnedStudent } from "./score.ts";
@@ -32,7 +33,9 @@ const DEFAULT_ADDON_URL = "https://github.com/whyjp/ba_key_amas/releases/latest"
 const ADDON_ONLY = new Set(["/api/upload", "/api/visibility", "/api/rekey", "/api/delete"]);
 const MAX_FAILS = 5;
 const LOCK_SECONDS = 15 * 60;
-const CATALOG = catalog as Record<string, { id: number; school: string | null; attack: string | null; armor: string | null; squad: string | null; equipment?: string[] | null }>;
+const CATALOG = catalog as Catalog;
+const BY_NAME = indexByName(CATALOG);
+const studentEntry = (name: string, id: number | null) => entryFor(CATALOG, BY_NAME, name, id);
 const now = () => Math.floor(Date.now() / 1000);
 
 type Auth = { ok: true; user: UserRow; key: ParsedKey } | { ok: false; res: Response };
@@ -57,7 +60,7 @@ async function authenticate(env: Env, raw: unknown): Promise<Auth> {
 const flag = (b: boolean | null): number | null => (b === null ? null : Number(b));
 
 function owned(s: StudentRow): OwnedStudent {
-  return { ...s, student_id: CATALOG[s.name]?.id ?? null };
+  return { ...s, student_id: studentEntry(s.name, s.student_id)?.id ?? null };
 }
 
 /** The leaderboard row stored with a user: the score, the count columns and the three best characters. */
@@ -88,11 +91,12 @@ function studentStatements(env: Env, userId: number, students: StudentRow[], kep
   );
   return students.map((s) => {
     const card = kept.get(s.name) ?? randomBackground();
-    return ins.bind(userId, s.name, CATALOG[s.name]?.id ?? null, s.level, s.stars, s.ex_skill, s.normal_skill, s.passive_skill, s.sub_skill, s.bond, s.uw_stars, s.uw_level, s.role, flag(s.pinned), flag(s.memorial), s.detail ? JSON.stringify(s.detail) : null, card?.bg ?? null, card?.third ?? null);
+    return ins.bind(userId, s.name, studentEntry(s.name, s.student_id)?.id ?? null, s.level, s.stars, s.ex_skill, s.normal_skill, s.passive_skill, s.sub_skill, s.bond, s.uw_stars, s.uw_level, s.role, flag(s.pinned), flag(s.memorial), s.detail ? JSON.stringify(s.detail) : null, card?.bg ?? null, card?.third ?? null);
   });
 }
 
-async function upload(env: Env, up: Upload, client: Client): Promise<Response> {
+async function upload(env: Env, upload_: Upload, client: Client): Promise<Response> {
+  const up: Upload = { ...upload_, students: uniqueNames(upload_.students, CATALOG) };
   const nickname = normalizeNickname(up.nickname);
   if (!nickname) return json(400, { error: "닉네임은 1~16자이며 # 과 제어 문자를 쓸 수 없습니다" });
   const nick = foldNickname(nickname);
@@ -138,7 +142,7 @@ function ownedFromRows(rows: Record<string, unknown>[]): OwnedStudent[] {
 async function profile(env: Env, user: UserRow, view: "owner" | "public"): Promise<Response> {
   const rows = await env.DB.prepare("SELECT * FROM students WHERE user_id = ?1").bind(user.id).all();
   const students = rows.results.map((r) => {
-    const c = CATALOG[String(r.name)];
+    const c = studentEntry(String(r.name), (r.student_id as number | null) ?? null);
     const detail = typeof r.detail_json === "string" ? JSON.parse(r.detail_json) : null;
     return { ...r, user_id: undefined, detail_json: undefined, detail, school: c?.school ?? null, attack: c?.attack ?? null, armor: c?.armor ?? null, equipment_slots: c?.equipment ?? null };
   });

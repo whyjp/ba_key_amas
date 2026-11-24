@@ -10,7 +10,7 @@ nothing is committed. Students without a wiki image keep the small SchaleDB lobb
 
 Rights stay with the wiki's contributors and the game's rights holders (Nexon, Nexon Games, Yostar).
 
-Run from web/ after extract-assets.py and before crop-art.py:  python -I scripts/extract-lobby.py
+Run from web/ after extract-assets.py and before crop-art.py:  python -I scripts/extract-lobby.py [--force]
 """
 import importlib.util
 import json
@@ -148,6 +148,9 @@ def main() -> int:
     CACHE.mkdir(parents=True, exist_ok=True)
     out = ROOT / "public" / "card-lobby"
     out.mkdir(parents=True, exist_ok=True)
+    # ids that already have a high resolution cut; --force makes them all again
+    prev = ROOT / "public" / "card-lobby.json"
+    done_before = set(json.loads(prev.read_text(encoding="utf-8"))) if prev.exists() else set()
     have, missing = [], []
     how = {"face": 0, "thumbnail": 0, "middle": 0}
     for sid in ids:
@@ -155,6 +158,9 @@ def main() -> int:
         f = files.get(wiki_key(name))
         if not f:
             missing.append(name)
+            continue
+        if (out / f"{sid}.webp").exists() and "--force" not in sys.argv and (out / f"{sid}.webp").stat().st_size > 5000 and sid in done_before:
+            have.append(sid)
             continue
         ext = f["url"].rsplit(".", 1)[-1].lower()
         src = CACHE / f"{sid}.{ext}"

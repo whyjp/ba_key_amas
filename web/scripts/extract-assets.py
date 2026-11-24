@@ -1,4 +1,4 @@
-"""Builds the student catalog (src/catalog.json) and the portrait assets (public/portraits/<id>.webp).
+"""Builds the student catalog (src/catalog.json, keyed by student id: names are not unique) and the portrait assets (public/portraits/<id>.webp).
 
 Source: SchaleDB's Korean student table, restricted to students released on the Global server (the
 same rule as the scanner's wiki.db). Neither output is committed: this runs in the deploy build
@@ -35,6 +35,12 @@ def get(url: str) -> bytes:
     raise RuntimeError("unreachable")
 
 
+def is_image(data: bytes) -> bool:
+    """PNG, JPEG or WebP by its first bytes. SchaleDB answers a missing image with its HTML page and status 200, which
+    must never be saved under an image name."""
+    return data[:4] == bytes([137, 80, 78, 71]) or data[:3] == bytes([255, 216, 255]) or (data[:4] == b"RIFF" and data[8:12] == b"WEBP")
+
+
 def main() -> int:
     students = json.loads(get(f"{BASE}/data/kr/students.min.json"))
     catalog = {}
@@ -44,8 +50,10 @@ def main() -> int:
         if len(released) <= GLOBAL_FLAG or not released[GLOBAL_FLAG]:
             continue
         backgrounds.add(s.get("CollectionBG"))
-        catalog[s["Name"]] = {
+        catalog[str(s["Id"])] = {
             "id": s["Id"],
+            "name": s["Name"],
+            "role": s.get("TacticRole"),
             "school": s.get("School"),
             "attack": s.get("BulletType"),
             "armor": s.get("ArmorType"),
@@ -69,7 +77,11 @@ def main() -> int:
             dest = out / f"{entry['id']}.{suffix}"
             if dest.exists():
                 continue
-            dest.write_bytes(get(f"{BASE}/{url.format(id=entry['id'])}.{suffix}"))
+            data = get(f"{BASE}/{url.format(id=entry['id'])}.{suffix}")
+            if not is_image(data):
+                print(f"no {folder} image for {entry['id']}")
+                continue
+            dest.write_bytes(data)
             fetched += 1
     # backgrounds for the cards: the collection backgrounds the students use, 56 or so
     names = sorted(b for b in backgrounds if b)
@@ -77,16 +89,24 @@ def main() -> int:
     for b in names:
         dest = pub / "backgrounds" / f"{b}.jpg"
         if not dest.exists():
-            dest.write_bytes(get(f"{BASE}/images/background/{b}.jpg"))
-            fetched += 1
+            data = get(f"{BASE}/images/background/{b}.jpg")
+            if is_image(data):
+                dest.write_bytes(data)
+                fetched += 1
+            else:
+                print(f"no background image {b}")
     (ROOT / "src" / "backgrounds.json").write_text(json.dumps(names), encoding="utf-8")
     schools = sorted({e["school"] for e in catalog.values() if e["school"]})
     (pub / "schools").mkdir(parents=True, exist_ok=True)
     for school in schools:
         dest = pub / "schools" / f"{school}.png"
         if not dest.exists():
-            dest.write_bytes(get(f"{BASE}/images/schoolicon/{school}.png"))
-            fetched += 1
+            data = get(f"{BASE}/images/schoolicon/{school}.png")
+            if is_image(data):
+                dest.write_bytes(data)
+                fetched += 1
+            else:
+                print(f"no school logo for {school}")
 
     loc = json.loads(get(f"{BASE}/data/kr/localization.min.json"))
     config = json.loads(get(f"{BASE}/data/config.min.json"))
@@ -98,9 +118,10 @@ def main() -> int:
             equipment.setdefault(item["Category"], {})[str(item["Tier"])] = {"name": item["Name"], "max_level": item.get("MaxLevel")}
     # characters, outfits merged by name: what the card grades are measured against
     import re
-    characters = {re.sub(r"\s*\([^)]*\)\s*$", "", n).strip() or n for n in catalog}
+    characters = {re.sub(r"\s*\([^)]*\)\s*$", "", e["name"]).strip() or e["name"] for e in catalog.values()}
     meta = {
         "character_count": len(characters),
+        "school_logos": sorted(p.stem for p in (pub / "schools").glob("*.png")),
         "equipment": equipment,
         "schools": loc["School"],
         "attack": loc["BulletType"],

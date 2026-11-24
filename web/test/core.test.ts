@@ -47,7 +47,7 @@ test("an upload keeps known fields only and drops duplicates and bad numbers", (
     ], account: { credits: 5, pyroxene: -1, ap: "10/20", extra: 1 } },
   });
   assert.equal(up.students.length, 2);
-  assert.deepEqual(up.students[0], { name: "아루", level: 80, stars: 3, ex_skill: null, normal_skill: null, passive_skill: null, sub_skill: null, bond: null, uw_stars: null, uw_level: null, role: "STRIKER", pinned: true, memorial: null, detail: null });
+  assert.deepEqual(up.students[0], { name: "아루", student_id: null, level: 80, stars: 3, ex_skill: null, normal_skill: null, passive_skill: null, sub_skill: null, bond: null, uw_stars: null, uw_level: null, role: "STRIKER", pinned: true, memorial: null, detail: null });
   assert.equal(up.students[1]?.level, null);
   assert.deepEqual(up.account, { credits: 5, ap: "10/20" });
 });

@@ -6,8 +6,17 @@ student through the Japanese name in SchaleDB (an outfit falls back to its base 
 halo identifies the character). The images are not committed: this runs in the deploy build, after
 extract-assets.py. Rights stay with the wiki's authors and the game's rights holders (Nexon, Nexon Games, Yostar).
 
+The page names its files loosely, and this script reads them that way:
+  - `HALO_リオ_仮v2.png`, `HALO_ツクヨ2.png`, `HALO_アコ_700px.png`: a variant tail is stripped; the plain file wins,
+    then a numbered or sized one, then a provisional (仮) one.
+  - `HALO_icon_カズサ.png`: an `icon_` prefix is stripped.
+  - `HALO_御坂.png` for 御坂美琴: a wiki name that is the start of exactly one student's name matches that student.
+  - A row's picture is at `attach2/<hex>.png` or at `./?plugin=ref&page=...&src=<file>`; both are read.
+Run audit-assets.py afterwards to see who still has no halo.
+
 Run from web/:  python -I scripts/extract-halos.py
 """
+import html as htmllib
 import json
 import pathlib
 import re
@@ -22,6 +31,7 @@ PAGE = "HALO一覧"
 UA = "ba-key-amas-assets (build-time, one request per image)"
 PAUSE = 0.3
 PNG = bytes([137, 80, 78, 71])
+TAIL = re.compile(r"(_?仮|_?v\d+|_?\d+px|_?\d+)$")
 
 
 def get(url: str) -> bytes:
@@ -30,65 +40,80 @@ def get(url: str) -> bytes:
         return r.read()
 
 
-def entry_name(file: str) -> tuple[str, int]:
-    """`HALO_セリカv2.png` -> (`セリカ`, preference). A plain file wins over a numbered, sized or provisional one."""
+def canonical(file: str) -> tuple[str, int]:
+    """`HALO_リオ_仮v2.png` -> (`リオ`, preference). 0 plain, 1 numbered or sized, 2 provisional."""
     stem = file[len("HALO_"):-len(".png")]
-    plain = re.sub(r"(v\d+|_\d+px|_\d+|_仮)$", "", stem)
-    return plain, 0 if plain == stem else 1
+    stem = re.sub(r"^icon_", "", stem)
+    pref = 0
+    while True:
+        m = TAIL.search(stem)
+        if not m or m.start() == 0:
+            break
+        pref = max(pref, 2 if "仮" in m.group(0) else 1)
+        stem = stem[:m.start()]
+    return stem, pref
 
 
 def base(name: str) -> str:
     return re.sub(r"[（(][^）)]*[）)]$", "", name).strip()
 
 
+def rows(page: str) -> dict[str, str]:
+    """file name -> picture URL, for every row of the list."""
+    out = {}
+    for f, src in re.findall(r'openfile=(HALO_[^"&]+?\.png)"[^>]*>\s*<img[^>]*data-src="([^"]+)"', page):
+        path = htmllib.unescape(src)
+        out[urllib.parse.unquote(f)] = WIKI + (path[2:] if path.startswith("./") else path)
+    return out
+
+
+def match(name: str, best: dict[str, tuple[int, str]]) -> str | None:
+    """The wiki key for a student's Japanese name: exact, then without the outfit, then a unique prefix."""
+    for candidate in (name, base(name)):
+        if candidate in best:
+            return candidate
+    b = base(name)
+    near = [k for k in best if len(k) >= 2 and b.startswith(k)]
+    return near[0] if len(near) == 1 else None
+
+
 def main() -> int:
     sys.stdout.reconfigure(encoding="utf-8")
-    html = get(WIKI + "?" + urllib.parse.quote(PAGE)).decode("utf-8", "replace")
-    # each row links the attach plugin and carries the real file path in the lazy-load `data-src`
-    rows = re.findall(r'openfile=(HALO_[^"&]+?\.png)"[^>]*><img[^>]*data-src="(attach2/[^"]+\.png)"', html)
-    files = sorted({urllib.parse.unquote(f) for f, _ in rows})
-    path_of = {urllib.parse.unquote(f): src for f, src in rows}
+    url_of = rows(get(WIKI + "?" + urllib.parse.quote(PAGE)).decode("utf-8", "replace"))
     best: dict[str, tuple[int, str]] = {}
-    for f in files:
-        name, pref = entry_name(f)
+    for f in sorted(url_of):
+        name, pref = canonical(f)
         if name not in best or pref < best[name][0]:
             best[name] = (pref, f)
-    print(f"{len(files)} halo files for {len(best)} names")
+    print(f"{len(url_of)} halo pictures for {len(best)} names")
 
     catalog = json.loads((ROOT / "src" / "catalog.json").read_text(encoding="utf-8"))
     ids = sorted({e["id"] for e in catalog.values()})
     jp = json.loads(get("https://schaledb.com/data/jp/students.min.json"))
     out = ROOT / "public" / "halos"
     out.mkdir(parents=True, exist_ok=True)
+    fetched: dict[str, bytes] = {}
     have, missing = [], []
-    cache: dict[str, bool] = {}
     for sid in ids:
         name = jp.get(str(sid), {}).get("Name", "")
-        key = name if name in best else base(name) if base(name) in best else None
+        key = match(name, best)
         if key is None:
             missing.append(name or str(sid))
             continue
         dest = out / f"{sid}.png"
-        file = best[key][1]
-        if not dest.exists():
-            if file not in cache:
+        if not dest.exists() or dest.read_bytes()[:4] != PNG:
+            file = best[key][1]
+            if file not in fetched:
                 time.sleep(PAUSE)
-                cache[file] = True
-                data = get(WIKI + path_of[file])
+                data = get(url_of[file])
                 if data[:4] != PNG:
-                    raise RuntimeError(f"not a PNG: {file}")
-                dest.write_bytes(data)
-            else:
-                dest.write_bytes((out / f"{next(i for i in have if best_key(i, jp, best) == key)}.png").read_bytes())
+                    raise RuntimeError(f"not a PNG: {file} ({url_of[file]})")
+                fetched[file] = data
+            dest.write_bytes(fetched[file])
         have.append(sid)
     (ROOT / "public" / "halos.json").write_text(json.dumps(have), encoding="utf-8")
     print(f"{len(have)} students with a halo, {len(missing)} without: {', '.join(missing[:12])}")
     return 0
-
-
-def best_key(sid, jp, best):
-    name = jp.get(str(sid), {}).get("Name", "")
-    return name if name in best else base(name)
 
 
 if __name__ == "__main__":
