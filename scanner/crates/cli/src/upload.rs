@@ -98,6 +98,9 @@ pub fn resolve_account_id(store: &Path, src: &Sources, ask: &mut dyn FnMut(&str)
     unreachable!("the last attempt returns")
 }
 
+/// The official server: what `--upload` and `--manage` use when no address is given.
+pub const DEFAULT_SERVER: &str = "https://key-amas.cxx.co.kr";
+
 /// https always; plain http only for this machine, where the account id cannot cross a network.
 pub fn check_server(server: &str) -> Result<()> {
     let rest = server.strip_prefix("https://").map(|_| true).or_else(|| server.strip_prefix("http://").map(|_| false));
@@ -249,6 +252,12 @@ mod tests {
     fn typing(lines: &[&str]) -> impl FnMut(&str) -> Result<String> {
         let mut it: std::vec::IntoIter<String> = lines.iter().map(|s| s.to_string()).collect::<Vec<_>>().into_iter();
         move |_| it.next().ok_or_else(|| anyhow!("asked more than expected"))
+    }
+
+    #[test]
+    fn the_default_server_is_an_accepted_https_address() {
+        assert!(DEFAULT_SERVER.starts_with("https://"));
+        assert!(check_server(DEFAULT_SERVER).is_ok());
     }
 
     #[test]

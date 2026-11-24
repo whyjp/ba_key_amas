@@ -53,7 +53,7 @@
 ## 업로드와 버전
 
 ```
-ba-key-AMAS --upload https://<서버> [--public] [--nickname 이름]
+ba-key-AMAS --upload [https://<서버>] [--public] [--nickname 이름]   # 주소를 생략하면 https://key-amas.cxx.co.kr
 ```
 
 ```
@@ -72,7 +72,8 @@ ba-key-AMAS --forget-account
 - 스캔 파일의 `schema_version`도 본다. 학생 명단이 `MIN_ROSTER_SCHEMA`, 진행 상태가 `MIN_PROGRESS_SCHEMA`보다 낮으면 426이다.
 - 서버를 고쳐 스키마가 바뀌거나, 새 애드온의 데이터를 받아야 할 때 `MIN_PROTOCOL`을 올려 구버전을 거부한다. 하위 호환이 되는 변경이면 범위를 그대로 둔다.
 - 브라우저의 요청(`Origin`, `Sec-Fetch-*` 헤더)은 403이다. 이 검사는 애드온을 식별할 뿐 인증하지는 않는다. 헤더는 누구나 보낼 수 있다.
-- 설치 링크는 `wrangler.jsonc`의 `ADDON_URL`이다. 지금은 GitHub 릴리즈 페이지를 가리키며, 주소가 정해지면 그 값만 바꾼다. `GET /api/version`이 서버 버전과 범위, 링크를 돌려준다.
+- 서버 주소는 `https://key-amas.cxx.co.kr`(Cloudflare 맞춤 도메인, 콘솔의 Worker 설정에서 연결)이고 애드온에 기본값으로 들어 있다(`scanner/crates/cli/src/upload.rs`의 `DEFAULT_SERVER`). 주소를 바꾸면 그 상수와 릴리스를 함께 갱신한다.
+- 설치 링크는 `wrangler.jsonc`의 `ADDON_URL`이다. GitHub 릴리즈 페이지를 가리키며, 바꿀 때는 그 값만 바꾼다. `GET /api/version`이 서버 버전과 범위, 링크를 돌려준다.
 
 ## API
 

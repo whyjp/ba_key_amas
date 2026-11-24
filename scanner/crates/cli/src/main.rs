@@ -59,11 +59,11 @@ struct Args {
     /// Read the account progress (schedule ranks, event story stamps) by walking the game's screens (HCU).
     #[arg(long)]
     scan_progress: bool,
-    /// Send the last student scan and progress scan to a ba-key-AMAS web server (https, or http://localhost). No game input. The first time it asks for the member code (see the note below).
-    #[arg(long, value_name = "SERVER_URL")]
+    /// Send the last student scan and progress scan to a ba-key-AMAS web server (https, or http://localhost); without a value, the official server. No game input. The first time it asks for the member code (see the note below).
+    #[arg(long, value_name = "SERVER_URL", num_args = 0..=1, default_missing_value = upload::DEFAULT_SERVER)]
     upload: Option<String>,
     /// Show this account on the server's leaderboard or not: --manage <SERVER_URL> --visibility public|private. Add-on only; the website cannot.
-    #[arg(long, value_name = "SERVER_URL")]
+    #[arg(long, value_name = "SERVER_URL", num_args = 0..=1, default_missing_value = upload::DEFAULT_SERVER)]
     manage: Option<String>,
     /// --manage: show this account on the leaderboard (public) or not (private).
     #[arg(long, value_name = "public|private")]
