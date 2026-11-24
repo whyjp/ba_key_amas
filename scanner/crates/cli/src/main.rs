@@ -32,7 +32,7 @@ use std::sync::Arc;
     name = "ba-key-AMAS",
     about = "Read Blue Archive student profile screens into data (4:3 or 16:9, windowed; the student scan needs 4:3)",
     after_help = "회원코드 (--upload, --manage):
-  게임 메뉴 모음 > 계정 > 고객센터 > 회원코드 (13자)를 입력하면 같은 계정을 다음 업로드에서 알아봅니다.
+  게임 메뉴 모음 > 계정 > 고객센터 > 회원코드 (13자, 소문자로 쳐도 됩니다. O는 0으로, I는 1로 읽고 L은 L 그대로입니다)를 입력하면 같은 계정을 다음 업로드에서 알아봅니다.
   입력한 회원코드는 이 PC에서 변환(해시)된 값으로만 서버에 올라가며, 원본은 저장되거나 전송되지 않습니다. 서버는 그 값을 다시 비밀 값으로 변환해 저장합니다.
   입력은 화면에 보이지 않고 두 번 묻습니다. 스크립트에서는 BAOCR_MEMBER_CODE 환경 변수를 쓰며(명령줄 인자는 받지 않습니다), --forget-account 로 저장한 값을 지웁니다."
 )]

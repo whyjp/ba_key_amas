@@ -13,23 +13,25 @@ pub const DOMAIN: &str = "ba-key-amas/account/v1\0";
 pub const CODE_LEN: usize = 13;
 
 pub const GUIDE: &str = "회원코드를 입력해 주세요.
-  - 위치: 게임 메뉴 모음 > 계정 > 고객센터 > 회원코드 (영문 대문자와 숫자 13자)
+  - 위치: 게임 메뉴 모음 > 계정 > 고객센터 > 회원코드 (영문 대문자와 숫자 13자, 소문자로 쳐도 같은 코드로 읽습니다. O는 0으로, I는 1로 읽고 L은 L 그대로입니다)
   - 같은 계정을 다음 업로드에서 알아보는 데만 쓰입니다.
   - 입력한 회원코드는 이 PC에서 변환(해시)된 값으로만 서버에 올라가며, 원본은 저장되거나 전송되지 않습니다. 서버는 그 값을 다시 비밀 값으로 변환해 저장합니다.
   - 화면에는 입력이 보이지 않습니다. 틀리게 입력하지 않도록 두 번 입력합니다.";
 
-/// Trimmed, upper case, only `[A-Z0-9]`, with the look-alikes folded (`O` to `0`, `I` and `l` to `1`) so a typed
-/// `O` for a zero does not split one account in two. A real pair of codes that differ only there is negligible.
-/// A lower case `l` is folded before the upper casing, so a real capital `L` stays `L`. `None` when nothing is left.
+/// Trimmed and upper-cased first, then only `[A-Z0-9]` is kept and `O` is folded to `0` and `I` to `1`, so a typed
+/// letter O for a zero does not split one account in two. The game's code is upper case only, so a lower case `l`
+/// the player typed means the letter L and stays `L` (folding it to `1` would give a second account to the same
+/// person). Only ASCII is upper-cased, so a look-alike such as the dotless `ı` is dropped, not read as `I`.
+/// `None` when nothing is left.
 pub fn normalise(raw: &str) -> Option<String> {
     let code: String = raw
         .trim()
+        .to_ascii_uppercase()
         .chars()
         .filter_map(|c| match c {
-            'l' => Some('1'),
-            'O' | 'o' => Some('0'),
-            'I' | 'i' => Some('1'),
-            c if c.is_ascii_alphanumeric() => Some(c.to_ascii_uppercase()),
+            'O' => Some('0'),
+            'I' => Some('1'),
+            c if c.is_ascii_uppercase() || c.is_ascii_digit() => Some(c),
             _ => None,
         })
         .collect();
@@ -124,7 +126,7 @@ mod tests {
     //   node -e 'console.log(require("crypto").createHash("sha256").update("ba-key-amas/account/v1\0"+"AB12CD34EF56G").digest("hex"))'
     const FAKE: &str = "AB12CD34EF56G";
     const FAKE_ID: &str = "c3b695e22c163896b1d76d133b9cb0ddf56296451f1ae5ff6af982828e73a7d3";
-    const LOOKALIKE_ID: &str = "8bc9f8f289d0b618bb07d161ccc8d92f56ed24713e332829fb1cb64cd04f0b79";
+    const LOOKALIKE_ID: &str = "2656dad47d0a114a69400c8ba03bb3116342916128e5138e74bb02d502a423bf"; // "AB01L1CDEFG23"
 
     #[test]
     fn account_id_matches_an_independent_sha256() {
@@ -143,12 +145,15 @@ mod tests {
     }
 
     #[test]
-    fn look_alikes_fold_to_one_code_but_a_capital_l_stays() {
-        assert_eq!(normalise("AbOIl1CDEFG23").as_deref(), Some("AB0111CDEFG23"));
+    fn only_o_and_i_are_folded_and_a_typed_l_is_the_letter_l() {
+        assert_eq!(normalise("AbOIl1CDEFG23").as_deref(), Some("AB01L1CDEFG23"));
         assert_eq!(account_id("AbOIl1CDEFG23"), LOOKALIKE_ID);
-        assert_eq!(account_id("ab0i11cdefg23"), LOOKALIKE_ID);
+        assert_eq!(account_id("ab0il1cdefg23"), LOOKALIKE_ID, "o and i fold, l is L");
+        assert_eq!(account_id("AB01L1CDEFG23"), account_id("ab01l1cdefg23"), "a lower case l is the same account as a capital L");
+        assert_ne!(account_id("ABL"), account_id("AB1"), "L and 1 are different codes");
         assert_eq!(normalise("LL").as_deref(), Some("LL"));
-        assert_eq!(normalise("ll").as_deref(), Some("11"));
+        assert_eq!(normalise("ll").as_deref(), Some("LL"));
+        assert_eq!(normalise("ıİ").as_deref(), None, "non-ASCII look-alikes of I are dropped, not folded");
     }
 
     #[test]

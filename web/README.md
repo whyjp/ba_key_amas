@@ -19,7 +19,7 @@
 
 **값이 만들어지는 순서.**
 
-1. 애드온(PC): 회원코드를 다듬는다. 앞뒤 공백을 자르고 영문 대문자와 숫자만 남긴다. 헷갈리는 글자는 `O`를 `0`으로, `I`와 소문자 `l`을 `1`로 접어, 잘못 친 한 글자가 계정을 둘로 쪼개지 않게 한다(두 코드가 정확히 그 자리에서만 다를 확률은 무시한다). 13자가 아니면 거절한다. 그다음 `account_id = hex(SHA-256("ba-key-amas/account/v1\0" + 코드))`를 만든다. 원본 코드는 저장, 전송, 로그, 출력 어디에도 가지 않고 `account_id`만 `%APPDATA%/baocr/upload.json`에 남는다. `--forget-account`가 그것을 지운다. 스크립트용으로 환경 변수 `BAOCR_MEMBER_CODE`를 받는다(명령줄 인자는 받지 않는다, 셸 기록에 남기 때문). 로컬 시험용 `BAOCR_ACCOUNT_ID_FOR_TESTING`은 `account_id`를 그대로 준다.
+1. 애드온(PC): 회원코드를 다듬는다. 앞뒤 공백을 자르고 먼저 모두 대문자로 바꾼 뒤 영문 대문자와 숫자만 남긴다. 그다음 헷갈리는 글자 둘만 접는다. `O`는 `0`으로, `I`는 `1`로 읽어 영(0)을 O로, 숫자 1을 I로 잘못 친 한 글자가 계정을 둘로 쪼개지 않게 한다(두 코드가 정확히 그 자리에서만 다를 확률은 무시한다). 게임의 코드는 대문자뿐이라 소문자로 친 `l`은 글자 L이므로 `L`로 두고 `1`로 접지 않는다(접으면 같은 사람이 계정 둘을 갖게 된다). 서버는 아직 배포되지 않아 이 규칙 이전에 만들어진 계정이 없으므로 도메인 접두어는 `v1` 그대로다. 13자가 아니면 거절한다. 그다음 `account_id = hex(SHA-256("ba-key-amas/account/v1\0" + 코드))`를 만든다. 원본 코드는 저장, 전송, 로그, 출력 어디에도 가지 않고 `account_id`만 `%APPDATA%/baocr/upload.json`에 남는다. `--forget-account`가 그것을 지운다. 스크립트용으로 환경 변수 `BAOCR_MEMBER_CODE`를 받는다(명령줄 인자는 받지 않는다, 셸 기록에 남기 때문). 로컬 시험용 `BAOCR_ACCOUNT_ID_FOR_TESTING`은 `account_id`를 그대로 준다.
 2. 서버: `account_hash = HMAC-SHA256(KEY_PEPPER, "account:" + account_id)`를 저장한다(UNIQUE). 비밀 값(pepper)이 있어서 데이터베이스만 새어도 회원코드를 대입해 볼 수 없다(코드 공간이 작아 pepper 없이는 전수 대입이 가능하다).
 3. 주소와 순위에 쓰는 `public_id = HMAC-SHA256(KEY_PEPPER, "public:" + account_id)`의 앞 16자리(UNIQUE)가 따로 있다. 둘 다 코드를 되돌릴 수 없다.
 
