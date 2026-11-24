@@ -78,22 +78,20 @@ pub struct VolumeCard {
 }
 
 /// The cards of the volume map (`N. 이름 편`). A card's state is its badge: `클리어` is cleared, `New` is open but
-/// not cleared. The badge sits up and to the left of the name plate by fixed multiples of the plate's height
-/// (8.5 across, 3.8 up). A card with no badge in view is null, never false: the card the player has selected
+/// not cleared. The badge sits up and to the left of the name plate by a fixed distance (114 px up, 254 px from the plate's right edge). A card with no badge in view is null, never false: the card the player has selected
 /// shows its synopsis instead of the badge, and a card cut off by the screen edge has its badge off screen.
 pub fn parse_volume_cards(boxes: &[TextBox]) -> Read<Vec<VolumeCard>> {
     let mut warnings = Vec::new();
-    let plate_re = Regex::new(r"^((?:\d+|Ex)\s*\.\s*.+?)편$").unwrap();
+    let plate_re = Regex::new(r"(?i)^((?:\d+|Ex)\s*\.\s*.+?)편$").unwrap();
     let mut cards = Vec::new();
     for b in boxes.iter().filter(|b| b.x0 < 900.0) {
         let name = squashed(b);
         let Some(c) = plate_re.captures(&name) else { continue };
-        let u = (b.y1 - b.y0).max(1.0);
+        // the badge sits 114 px above and 254 px left of the plate's right edge; OCR boxes differ in height
+        // from read to read, so the offsets are plain pixels (UI elements are the same size in both layouts)
         let badge = boxes.iter().find(|k| {
-            let dy = b.y0 - k.y1;
-            let dx = b.x1 - cx(k);
             let label = squashed(k);
-            (label == "클리어" || label == "New") && (dy - 2.8 * u).abs() < 1.2 * u && (dx - 8.5 * u).abs() < 1.5 * u
+            (label == "클리어" || label == "New") && ((b.y0 - k.y1) - 114.0).abs() < 25.0 && ((b.x1 - cx(k)) - 254.0).abs() < 30.0
         });
         let cleared = badge.map(|k| squashed(k) == "클리어");
         if cleared.is_none() {
@@ -164,6 +162,12 @@ mod tests {
             s,
             vec![("5.백화요란".to_string(), None), ("Ex.데카그라마톤".to_string(), Some(true)), ("6.흘러간시간들의오라토리오".to_string(), Some(true))]
         );
+    }
+
+    #[test]
+    fn the_16_9_map_reads_with_the_same_offsets_whatever_the_plate_height() {
+        let s = states("w169-main-story-part2-map");
+        assert_eq!(s, vec![("5.백화요란".to_string(), None), ("EX.데카그라마톤".to_string(), Some(true)), ("6.흘러간시간들의오라토리오".to_string(), Some(true))]);
     }
 
     #[test]

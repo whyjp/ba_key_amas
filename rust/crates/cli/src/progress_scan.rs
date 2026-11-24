@@ -339,7 +339,7 @@ fn main_story_section(nav: &Nav, lobby: &Look, snap: &mut ProgressSnapshot) -> R
     let mut volumes: Vec<StoryVolume> = Vec::new();
     let merge = |cards: baocr_progress::Read<Vec<story::VolumeCard>>, volumes: &mut Vec<StoryVolume>| {
         for c in cards.value {
-            match volumes.iter_mut().find(|v| v.volume == c.volume.volume) {
+            match volumes.iter_mut().find(|v| v.volume.eq_ignore_ascii_case(&c.volume.volume)) {
                 Some(v) => v.cleared = v.cleared.or(c.volume.cleared),
                 None => volumes.push(c.volume),
             }
@@ -354,33 +354,49 @@ fn main_story_section(nav: &Nav, lobby: &Look, snap: &mut ProgressSnapshot) -> R
         look = map;
     }
     for _ in 0..2 {
-        // the wheel moves the map sideways: sweep it from its left end to its right end, reading every view
-        let (mx, my) = (640.0, nav.frame_h() * 0.62);
-        nav.scroll_list(mx, my, false, 8)?;
-        std::thread::sleep(Duration::from_millis(1500));
-        let mut quiet = 0;
-        for _ in 0..12 {
-            look = nav.look()?;
-            let before = volumes.len();
-            warnings.extend(merge(story::parse_volume_cards(&look.boxes), &mut volumes).into_iter().filter(|w| !w.contains("no badge")));
-            quiet = if volumes.len() == before { quiet + 1 } else { 0 };
-            if quiet >= 2 {
-                break;
+        // two passes: the second starts with a different card selected, so the badge the first one hid shows
+        for _pass in 0..2 {
+            // the card selected now has no badge in view: read what is shown, then select a card whose state is
+            // known, so the sweep below sees the badge of the one that was selected
+            let first = story::parse_volume_cards(&look.boxes);
+            let known = first.value.iter().find(|c| c.volume.cleared.is_some()).map(|c| c.plate);
+            warnings.extend(merge(first, &mut volumes).into_iter().filter(|w| !w.contains("no badge")));
+            if let Some((x, y)) = known {
+                nav.click_at(x, y)?;
+                std::thread::sleep(Duration::from_millis(1600));
             }
-            nav.scroll_list(mx, my, true, 1)?;
+            // the wheel moves the map sideways: sweep it from its left end to its right end, reading every view
+            let (mx, my) = (640.0, nav.frame_h() * 0.62);
+            nav.scroll_list(mx, my, false, 8)?;
             std::thread::sleep(Duration::from_millis(1500));
-        }
-        // the selected card shows its synopsis instead of its badge: select another card and read again
-        let cards = story::parse_volume_cards(&look.boxes);
-        if let Some(c) = cards.value.iter().find(|c| c.volume.cleared.is_some()) {
-            nav.click_at(c.plate.0, c.plate.1)?;
-            std::thread::sleep(Duration::from_millis(1600));
-            look = nav.look()?;
-            warnings.extend(merge(story::parse_volume_cards(&look.boxes), &mut volumes).into_iter().filter(|w| !w.contains("no badge")));
+            let mut quiet = 0;
+            for _ in 0..12 {
+                look = nav.look()?;
+                if std::env::var_os("BAOCR_DEBUG_PROGRESS").is_some() {
+                    let seen: Vec<_> = story::parse_volume_cards(&look.boxes).value.into_iter().map(|c| (c.volume.volume, c.volume.cleared)).collect();
+                    eprintln!("progress: map view {seen:?}");
+                }
+                let before = volumes.len();
+                warnings.extend(merge(story::parse_volume_cards(&look.boxes), &mut volumes).into_iter().filter(|w| !w.contains("no badge")));
+                quiet = if volumes.len() == before { quiet + 1 } else { 0 };
+                if quiet >= 2 {
+                    break;
+                }
+                nav.scroll_list(mx, my, true, 1)?;
+                std::thread::sleep(Duration::from_millis(1500));
+            }
+            // the selected card shows its synopsis instead of its badge: select another card and read again
+            let cards = story::parse_volume_cards(&look.boxes);
+            if let Some(c) = cards.value.iter().find(|c| c.volume.cleared.is_some()) {
+                nav.click_at(c.plate.0, c.plate.1)?;
+                std::thread::sleep(Duration::from_millis(1600));
+                look = nav.look()?;
+                warnings.extend(merge(story::parse_volume_cards(&look.boxes), &mut volumes).into_iter().filter(|w| !w.contains("no badge")));
+            }
         }
         if let Some(final_view) = nav.press(&look, Target::FinalVolume)? {
             if let Some(v) = story::parse_main_volume(&final_view.boxes).value {
-                if !volumes.iter().any(|k| k.volume == v.volume) {
+                if !volumes.iter().any(|k| k.volume.eq_ignore_ascii_case(&v.volume)) {
                     volumes.push(v);
                 }
             }
