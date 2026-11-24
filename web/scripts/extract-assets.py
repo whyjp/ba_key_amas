@@ -18,6 +18,7 @@ import urllib.request
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 BASE = "https://schaledb.com"
 GLOBAL_FLAG = 1  # IsReleased = [JP, Global, CN]
+EQUIPMENT_TYPES = {"Hat", "Gloves", "Shoes", "Bag", "Badge", "Hairpin", "Charm", "Watch", "Necklace"}
 
 
 def get(url: str) -> bytes:
@@ -49,6 +50,7 @@ def main() -> int:
             "attack": s.get("BulletType"),
             "armor": s.get("ArmorType"),
             "squad": s.get("SquadType"),
+            "equipment": s.get("Equipment"),
         }
     (ROOT / "src").mkdir(exist_ok=True)
     (ROOT / "src" / "catalog.json").write_text(json.dumps(catalog, ensure_ascii=False, sort_keys=True), encoding="utf-8")
@@ -89,7 +91,13 @@ def main() -> int:
     loc = json.loads(get(f"{BASE}/data/kr/localization.min.json"))
     config = json.loads(get(f"{BASE}/data/config.min.json"))
     event_ids = [e for e in config["Regions"][GLOBAL_FLAG]["Events"] if e < 10000]  # 10000+ are reruns
+    # one item per (type, tier): the name a scan never has to read. Blueprints and tier 0 are not worn items.
+    equipment: dict[str, dict[str, dict]] = {}
+    for item in json.loads(get(f"{BASE}/data/kr/equipment.min.json")).values():
+        if item["Category"] in EQUIPMENT_TYPES and 1 <= item["Tier"] <= 10 and "설계도" not in item["Name"]:
+            equipment.setdefault(item["Category"], {})[str(item["Tier"])] = {"name": item["Name"], "max_level": item.get("MaxLevel")}
     meta = {
+        "equipment": equipment,
         "schools": loc["School"],
         "attack": loc["BulletType"],
         "armor": loc["ArmorType"],

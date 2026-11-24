@@ -27,6 +27,7 @@ pub struct Dataset {
     pub enemies: Value,
     pub stages: Value,
     pub raids: Value,
+    pub equipment: Value,
     pub localization: Value,
     pub config: Value,
 }
@@ -58,6 +59,9 @@ pub struct Counts {
     pub raid_weights: usize,
     pub raid_seasons: usize,
     pub eliminate_seasons: usize,
+    /// One item per equipment type and tier, and the slot types of the students.
+    pub equipment_items: usize,
+    pub equipment_slots: usize,
 }
 
 fn get(url: &str) -> Result<Value> {
@@ -76,6 +80,7 @@ pub fn fetch() -> Result<Dataset> {
         enemies: file("enemies")?,
         stages: file("stages")?,
         raids: file("raids")?,
+        equipment: file("equipment")?,
         localization: file("localization")?,
         config,
     })
@@ -125,9 +130,39 @@ pub fn load(conn: &mut Connection, d: &Dataset, fetched_at: &str) -> Result<Coun
     enemies(&tx, d, &mut n)?;
     stages(&tx, d, &mut n)?;
     raids(&tx, d, &mut n)?;
+    equipment(&tx, d, &mut n)?;
     tx.execute("INSERT INTO meta (key, value) VALUES ('built_at', ?1)", params![fetched_at])?;
     tx.commit()?;
     Ok(n)
+}
+
+/// The nine equipment types a student slot can take.
+const EQUIPMENT_CATEGORIES: [&str; 9] = ["Hat", "Gloves", "Shoes", "Bag", "Badge", "Hairpin", "Charm", "Watch", "Necklace"];
+
+/// Equipment items (tiers 1 to 10 of the nine types; blueprints and experience items are not items a student
+/// wears) and the item type of each student slot. One item per (type, tier), which the unique index checks.
+fn equipment(tx: &rusqlite::Transaction, d: &Dataset, n: &mut Counts) -> Result<()> {
+    let mut item = tx.prepare("INSERT INTO equipment_item (id, category, tier, name_ko, max_level, released_global, icon, source_id) VALUES (?1,?2,?3,?4,?5,?6,?7,1)")?;
+    for r in objects(&d.equipment, "equipment")? {
+        let (Some(id), Some(cat), Some(tier), Some(name)) = (int(r, "Id"), text(r, "Category"), int(r, "Tier"), text(r, "Name")) else { continue };
+        if !EQUIPMENT_CATEGORIES.contains(&cat.as_str()) || !(1..=10).contains(&tier) || name.contains("설계도") {
+            continue;
+        }
+        let max_level = int(r, "MaxLevel").ok_or_else(|| anyhow!("equipment {id}: no MaxLevel"))?;
+        item.execute(params![id, cat, tier, name, max_level, released_global(r) as i64, text(r, "Icon")]).with_context(|| format!("equipment item {id} ({cat} tier {tier})"))?;
+        n.equipment_items += 1;
+    }
+    let mut slot = tx.prepare("INSERT INTO student_equipment_slot (student_id, slot, category) VALUES (?1,?2,?3)")?;
+    for r in objects(&d.students, "students")? {
+        let Some(id) = int(r, "Id") else { continue };
+        for (i, cat) in r.get("Equipment").and_then(|x| x.as_array()).into_iter().flatten().filter_map(|c| c.as_str()).enumerate() {
+            if EQUIPMENT_CATEGORIES.contains(&cat) && i < 3 {
+                slot.execute(params![id, i as i64 + 1, cat])?;
+                n.equipment_slots += 1;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Localization sections that name a closed code set, stored under the kind the schema uses.
@@ -609,6 +644,7 @@ mod tests {
             students: json!({
                 "1": {"Id": 1, "IsReleased": [true, true, true], "PathName": "a", "DevName": "a", "Name": "폭발학생", "SquadType": "Main",
                       "BulletType": "Explosion", "ArmorType": "LightArmor", "StarGrade": 3, "StreetBattleAdaptation": 3, "OutdoorBattleAdaptation": 2, "IndoorBattleAdaptation": 1,
+                      "Equipment": ["Hat", "Hairpin", "Watch"],
                       "FurnitureInteraction": [[[100, 0]], [[100, 3], [101, 0], [101, 1]], [[100, 0]]]},
                 "2": {"Id": 2, "IsReleased": [true, true, true], "PathName": "b", "DevName": "b", "Name": "관통학생", "SquadType": "Main",
                       "BulletType": "Pierce", "ArmorType": "LightArmor", "StarGrade": 3, "StreetBattleAdaptation": 1, "OutdoorBattleAdaptation": 1, "IndoorBattleAdaptation": 1,
@@ -658,6 +694,14 @@ mod tests {
                                  "EliminateSeasons": [{"SeasonId": 5, "SeasonDisplay": "BETA", "RaidId": 1, "Terrain": "Outdoor", "Start": 30, "End": 40, "OpenDifficulty": {"LightArmor": 5}}]},
                                 {"Seasons": []}]
             }),
+            equipment: json!({
+                "1": {"Id": 1, "Category": "Exp", "Tier": 0, "Name": "하급 강화석"},
+                "1001": {"Id": 1001, "Category": "Hat", "Tier": 1, "Name": "무지 캡모자", "MaxLevel": 10, "IsReleased": [true, true, true], "Icon": "equipment_icon_hat_tier1"},
+                "1002": {"Id": 1002, "Category": "Hat", "Tier": 2, "Name": "니트 털모자", "MaxLevel": 20, "IsReleased": [true, true, true]},
+                "1003": {"Id": 1003, "Category": "Hat", "Tier": 2, "Name": "니트 털모자 설계도면", "MaxLevel": 20, "IsReleased": [true, true, true]},
+                "1010": {"Id": 1010, "Category": "Hat", "Tier": 0, "Name": "모자 만능 설계도", "IsReleased": [true, true, true]},
+                "1060": {"Id": 1060, "Category": "Watch", "Tier": 6, "Name": "고딕풍 손목 시계", "MaxLevel": 50, "IsReleased": [true, true, true]}
+            }),
             localization: json!({"BulletType": {"Explosion": "폭발"}, "StageType": {"ChaserA": "현상수배 - 고가도로"}, "AdaptationType": {"Street": "시가지", "Outdoor": "야외"},
                                 "ArmorType": {"LightArmor": "경장갑"}, "TimeAttackStage": {"Shooting": "사격 시험"}}),
             config: json!({"TypeEffectiveness": {
@@ -697,6 +741,8 @@ mod tests {
                 raid_weights: 17,
                 raid_seasons: 1,
                 eliminate_seasons: 1,
+                equipment_items: 3,
+                equipment_slots: 3,
             }
         );
         let name: String = conn.query_row("SELECT name_ko FROM stage WHERE id = 30101", [], |r| r.get(0)).unwrap();
@@ -906,5 +952,19 @@ mod tests {
         assert_eq!(students, 4);
         assert!(!dir.join("wiki.db.tmp").exists());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+    #[test]
+    fn equipment_items_are_one_per_type_and_tier_and_students_know_their_slot_types() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::create(&conn).unwrap();
+        let n = load(&mut conn, &dataset(), "t").unwrap();
+        // experience items, blueprints and tier 0 are not worn items
+        assert_eq!(n.equipment_items, 3);
+        let name: String = conn.query_row("SELECT name_ko FROM equipment_item WHERE category = 'Hat' AND tier = 2", [], |r| r.get(0)).unwrap();
+        assert_eq!(name, "니트 털모자");
+        let cap: i64 = conn.query_row("SELECT max_level FROM equipment_item WHERE category = 'Watch' AND tier = 6", [], |r| r.get(0)).unwrap();
+        assert_eq!(cap, 50);
+        let slots: Vec<String> = conn.prepare("SELECT category FROM student_equipment_slot WHERE student_id = 1 ORDER BY slot").unwrap().query_map([], |r| r.get(0)).unwrap().map(|r| r.unwrap()).collect();
+        assert_eq!(slots, vec!["Hat", "Hairpin", "Watch"]);
     }
 }

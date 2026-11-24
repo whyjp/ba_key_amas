@@ -22,7 +22,7 @@ pub const SCHEMA: &str = include_str!("../../../../wikidb/schema.sql");
 
 /// The schema version this build reads and writes (meta.schema_version). `Wiki::open` refuses
 /// a database of another version: rebuild it with the collector.
-pub const SCHEMA_VERSION: u32 = 5;
+pub const SCHEMA_VERSION: u32 = 6;
 
 /// A fresh database with the schema applied.
 pub fn create(conn: &Connection) -> Result<()> {

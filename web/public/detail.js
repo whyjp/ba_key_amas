@@ -148,15 +148,18 @@ function backFace(s, meta, tier, rank, turn) {
   if (d.equipment) {
     const slots = el("div", "bk-gear");
     for (const e of d.equipment) {
+      // the type comes from the student's slot (static data); the scan only says the tier and the level
+      const kind = e.unique ? null : e.type ?? s.equipment_slots?.[e.slot - 1] ?? null;
+      const item = kind && e.tier ? meta.equipment?.[kind]?.[String(e.tier)] : null;
       const g = el("div", "bk-slot" + (e.equipped === false ? " empty" : ""));
       if (e.tier) g.style.setProperty("--th", String(TIER_HUE[e.tier - 1] ?? 210));
       const top = el("div", "bk-slot-top");
-      top.append(el("span", "bk-slot-kind", e.unique ? "고유 장비" : EQUIP_KO[e.type] ?? `장비 ${e.slot}`));
+      top.append(el("span", "bk-slot-kind", e.unique ? "고유 장비" : EQUIP_KO[kind] ?? `장비 ${e.slot}`));
       if (e.tier) top.append(el("b", "bk-tier", `T${e.tier}`));
       g.append(top);
-      g.append(el("span", "bk-slot-name", e.item_name ?? (e.equipped === false ? "미장착" : "읽지 못함")));
+      g.append(el("span", "bk-slot-name", item?.name ?? (e.equipped === false ? "미장착" : e.tier ? "이름 없음" : "티어를 읽지 못함")));
       if (e.level) {
-        const cap = TIER_LEVEL_CAP[(e.tier ?? 0) - 1];
+        const cap = item?.max_level ?? TIER_LEVEL_CAP[(e.tier ?? 0) - 1];
         const bar = el("div", "bk-lv");
         const fill = el("i");
         fill.style.width = cap ? Math.min(100, Math.round((e.level / cap) * 100)) + "%" : "100%";

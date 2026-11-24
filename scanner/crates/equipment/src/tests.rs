@@ -72,7 +72,8 @@ fn saori_with_fake_ocr() {
         assert_eq!(e.equipped, Some(true));
         assert_eq!(e.tier, Some(4));
         assert_eq!(e.level, Some(40));
-        assert!(e.kind.is_some() && e.item_name.is_some(), "slot {i}: {e:?}");
+        // the item name is looked up from the static equipment table by (type, tier), not read from the icon
+        assert!(e.kind.is_some() && e.item_name.is_none(), "slot {i}: {e:?}");
     }
     assert_eq!(eq[3].equipped, Some(false));
     assert_eq!(eq[3].level, None);
@@ -125,4 +126,35 @@ fn nothing_is_claimed_for_a_slot_without_a_gold_level_badge() {
     let ocr = Fake { tier: "T6", level: "Lv.50", state: "EMPTY" };
     let (eq, _) = detect_equipment_for(&img, &ocr, &kinds).unwrap();
     assert!(eq.iter().take(3).all(|e| e.kind.is_none() && e.item_name.is_none()));
+}
+
+#[test]
+fn the_tier_is_taken_from_the_number_and_the_icon_together() {
+    assert_eq!(resolve_tier(Some(6), Some((6, 30.0))), (Some(6), "both"));
+    assert_eq!(resolve_tier(Some(6), None), (Some(6), "number"));
+    assert_eq!(resolve_tier(None, Some((7, 30.0))), (Some(7), "icon"));
+    assert_eq!(resolve_tier(None, None), (None, "none"));
+    assert_eq!(resolve_tier(Some(5), Some((6, 10.0))), (Some(6), "icon over number"), "a sure icon wins a disagreement");
+    assert_eq!(resolve_tier(Some(5), Some((6, 35.0))), (Some(5), "number over icon"), "an unsure icon does not");
+}
+
+#[test]
+fn a_greyed_slot_with_a_notification_dot_is_empty_not_equipped() {
+    // kayoko: three greyed items and the yellow dots that look like the equipped badge
+    let img = fixture("detail-kayoko-no-gear.png");
+    assert!((0..3).all(|i| equip_badge(&img, i)), "the dots do pass for the badge");
+    assert!((0..3).all(|i| icon_vividness(&img, i) < 0.006));
+    let ocr = Fake { tier: "", level: "", state: "EMPTY" };
+    let kinds = ["Shoes".to_string(), "Hairpin".to_string(), "Charm".to_string()];
+    let (eq, _) = detect_equipment_for(&img, &ocr, &kinds).unwrap();
+    for e in eq.iter().take(3) {
+        assert_eq!(e.equipped, Some(false), "{e:?}");
+        assert!(e.tier.is_none() && e.level.is_none() && e.kind.is_none(), "{e:?}");
+    }
+}
+
+#[test]
+fn an_item_in_colour_is_not_taken_for_a_greyed_one() {
+    let img = fixture("detail-saori.png");
+    assert!((0..3).all(|i| icon_vividness(&img, i) >= 0.006));
 }

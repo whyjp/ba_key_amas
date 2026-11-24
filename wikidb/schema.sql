@@ -2,7 +2,7 @@
 -- Reference data only, rebuilt from sources by the collectors. The user's own roster stays
 -- in the scan output (index.json) and joins to this DB by student.id.
 -- Local assist use only: the DB file is not distributed (see source.note).
--- Version 5 (4 plus the story and event lists). Bump meta.schema_version on every incompatible change.
+-- Version 6 (5 plus the equipment items and the item type of each student slot). Bump meta.schema_version on every incompatible change.
 
 PRAGMA foreign_keys = ON;
 
@@ -331,4 +331,25 @@ CREATE TABLE event_scenario (
 );
 CREATE INDEX event_scenario_event ON event_scenario (event_content_id, ordinal);
 
-INSERT INTO meta (key, value) VALUES ('schema_version', '5');
+-- Equipment: the item of each type at each tier (one item per pair), and which item type each slot of a
+-- student takes. A scan reads only the tier and level; the item's name comes from here.
+CREATE TABLE equipment_item (
+    id              INTEGER PRIMARY KEY,
+    category        TEXT NOT NULL,          -- Hat | Gloves | Shoes | Bag | Badge | Hairpin | Charm | Watch | Necklace
+    tier            INTEGER NOT NULL CHECK (tier BETWEEN 1 AND 10),
+    name_ko         TEXT NOT NULL,
+    max_level       INTEGER NOT NULL,       -- the level an item of this tier stops at
+    released_global INTEGER NOT NULL CHECK (released_global IN (0, 1)),
+    icon            TEXT,
+    source_id       INTEGER NOT NULL REFERENCES source(id)
+);
+CREATE UNIQUE INDEX equipment_item_kind_tier ON equipment_item (category, tier);
+
+CREATE TABLE student_equipment_slot (
+    student_id INTEGER NOT NULL REFERENCES student(id),
+    slot       INTEGER NOT NULL CHECK (slot BETWEEN 1 AND 3),
+    category   TEXT NOT NULL,
+    PRIMARY KEY (student_id, slot)
+) WITHOUT ROWID;
+
+INSERT INTO meta (key, value) VALUES ('schema_version', '6');

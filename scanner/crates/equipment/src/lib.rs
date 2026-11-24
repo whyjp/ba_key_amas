@@ -90,6 +90,27 @@ pub fn equip_badge(img: &RgbImage, i: i32) -> bool {
     hits >= 8
 }
 
+/// Share of the slot icon's pixels that are saturated and bright. An equipped item is drawn in colour; an
+/// unequipped slot shows the item greyed out (and a yellow notification dot that looks like the equipped badge).
+pub fn icon_vividness(img: &RgbImage, i: i32) -> f64 {
+    let (x0, y0) = ICON_ORIGINS[i as usize];
+    let (mut vivid, mut n) = (0u32, 0u32);
+    for y in y0..y0 + 48 {
+        for x in x0..x0 + 64 {
+            let [r, g, b] = px(img, x, y);
+            let (mx, mn) = (r.max(g).max(b), r.min(g).min(b));
+            if mx > 114 && mx > 0 && (mx - mn) * 100 > 45 * mx {
+                vivid += 1;
+            }
+            n += 1;
+        }
+    }
+    f64::from(vivid) / f64::from(n)
+}
+
+/// Below this share a slot's icon counts as greyed out.
+const GREYED_BELOW: f64 = 0.006;
+
 /// Slot 4 reads "EMPTY" when unequipped.
 pub fn unique_state(text: &str) -> Option<bool> {
     text.to_uppercase().contains("EMPTY").then_some(false)
@@ -276,7 +297,7 @@ fn equipment_level(img: &RgbImage, ocr: &dyn Ocr, i: i32) -> Result<(Option<Int>
         if big.width() == 0 {
             continue;
         }
-        let variants = [big.clone(), threshold_rgb(&big, 210), threshold_rgb(&big, 225)];
+        let variants = [big.clone(), threshold_rgb(&big, 210), threshold_rgb(&big, 225), threshold_rgb(&big, 190), threshold_rgb(&big, 240)];
         for v in &variants {
             let (text, _) = ocr.line(v)?;
             obs.push(text.clone());
@@ -309,6 +330,22 @@ fn blank(slot: i32, kind: &str) -> Equipment {
     }
 }
 
+/// An icon match this good is taken over a printed number that disagrees with it.
+const ICON_SURE: f64 = 22.0;
+
+/// Decide a tier from the number read off the icon and the icon comparison `(tier, error)`. Returns the tier and
+/// where it came from, for the raw log: agreeing reads, one read alone, or a conflict settled by how sure the
+/// icon is.
+pub fn resolve_tier(ocr: Option<Int>, icon: Option<(Int, f64)>) -> (Option<Int>, &'static str) {
+    match (ocr, icon) {
+        (Some(o), Some((i, _))) if o == i => (Some(o), "both"),
+        (Some(o), Some((i, err))) => if err <= ICON_SURE { (Some(i), "icon over number") } else { (Some(o), "number over icon") },
+        (Some(o), None) => (Some(o), "number"),
+        (None, Some((i, _))) => (Some(i), "icon"),
+        (None, None) => (None, "none"),
+    }
+}
+
 /// The four equipment slots (slot 4 = unique gear) plus the raw OCR strings.
 pub fn detect_equipment(img: &RgbImage, ocr: &dyn Ocr) -> Result<(Vec<Equipment>, BTreeMap<String, String>)> {
     detect_equipment_for(img, ocr, &[])
@@ -327,30 +364,37 @@ pub fn detect_equipment_for(img: &RgbImage, ocr: &dyn Ocr, slot_kinds: &[String]
             e.equipped = Some(true);
         }
         let tier_text = read_line(img, ocr, tier_roi(i))?;
-        e.tier = equipment_tier(&tier_text);
+        let ocr_tier = equipment_tier(&tier_text);
         raw.insert(format!("equipment_{}_tier", i + 1), tier_text);
         if e.equipped.is_some() {
             let (lvl, obs) = equipment_level(img, ocr, i)?;
             e.level = lvl;
             raw.insert(format!("equipment_{}_level", i + 1), obs);
-            // a level above the tier's cap means the tier was misread
-            if let (Some(t), Some(l)) = (e.tier, e.level) {
-                if TIER_LEVEL_CAP.get((t - 1) as usize).is_some_and(|cap| l > *cap) {
-                    e.tier = None;
-                }
+            // the tier without opening the equipment growth menu: the number printed on the icon, and the icon
+            // itself compared with the ten tiers of the type this slot takes (the dictionary gives the type).
+            // A level above a tier's cap rules that tier out, and the level also gives the lowest tier possible.
+            let min_tier = e.level.and_then(min_tier_for_level);
+            let fits = |t: Int| min_tier.is_none_or(|m| t >= m);
+            let ocr_tier = ocr_tier.filter(|t| fits(*t));
+            // with the type known the ten tiers of that type are compared on their own, an independent second read;
+            // without it the printed tier narrows the search, since the type must be found as well
+            let icon = match_equipment_in(img, i + 1, if hint.is_some() { None } else { ocr_tier }, hint, min_tier)?;
+            let (tier, source) = resolve_tier(ocr_tier, icon.as_ref().map(|m| (m.tier, m.error)));
+            e.tier = tier;
+            raw.insert(format!("equipment_{}_tier_from", i + 1), source.into());
+            if let Some(k) = hint.map(str::to_string).or_else(|| icon.as_ref().map(|m| m.kind.clone())) {
+                e.kind = Some(k);
             }
-            let min_tier = if e.tier.is_none() { e.level.and_then(min_tier_for_level) } else { None };
-            if let Some(m) = match_equipment_in(img, i + 1, e.tier, hint, min_tier)? {
-                e.kind = Some(m.kind);
-                e.item_name = Some(m.name);
-                e.icon_match_error = Some(m.error);
-                if e.tier.is_none() {
-                    e.tier = Some(m.tier);
-                }
-            } else if let Some(k) = hint {
-                e.kind = Some(k.to_string());
-                if let Some(t) = e.tier {
-                    e.item_name = catalog().entries.iter().find(|c| c.slot == i + 1 && c.kind == k && c.tier == t).map(|c| c.name.clone());
+            e.icon_match_error = icon.as_ref().filter(|m| Some(m.tier) == tier).map(|m| m.error);
+            // The gold badge is not proof of an item: the yellow dot on an empty slot passes for it. Anything read
+            // from the slot is proof. With nothing read, a greyed icon means the slot is empty; colour with
+            // nothing read stays unknown.
+            if e.tier.is_none() && e.level.is_none() && icon.is_none() {
+                if icon_vividness(img, i) < GREYED_BELOW {
+                    e.equipped = Some(false);
+                    e.kind = None;
+                } else {
+                    e.equipped = None;
                 }
             }
         }

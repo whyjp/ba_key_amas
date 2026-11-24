@@ -51,6 +51,8 @@
 | 스테이지의 적 방어 타입과 공격 타입 비중, 레벨, 지형 | 정적 | `wikidb/wiki.db` |
 | 학생의 공격 타입과 방어 타입, 지형 적응, 역할 | 정적 | `wikidb/wiki.db` |
 | 타입 상성표, 적 가중치 | 정적 | `wikidb/wiki.db` |
+| 학생 장비 슬롯의 아이템 종류, 종류와 티어별 아이템 이름, 티어별 최대 레벨 | 정적 | `wikidb/wiki.db`의 `student_equipment_slot`, `equipment_item` |
+| 학생 장비 슬롯의 티어와 레벨, 장착 여부 | 동적 | 화면의 티어 숫자와 아이콘 비교, 레벨 OCR (장비 성장 메뉴에 들어가지 않음) |
 | 설정, 도킹 위치, 접기 상태 | 사용자 상태 | `%APPDATA%\baocr\overlay.json` |
 | 스캔 출력 | 생성 데이터 | `%APPDATA%\baocr\students` |
 

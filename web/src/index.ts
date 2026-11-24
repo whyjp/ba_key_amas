@@ -31,7 +31,7 @@ interface UserRow {
 const DEFAULT_ADDON_URL = "https://github.com/whyjp/ba_key_amas/releases/latest";
 const MAX_FAILS = 5;
 const LOCK_SECONDS = 15 * 60;
-const CATALOG = catalog as Record<string, { id: number; school: string | null; attack: string | null; armor: string | null; squad: string | null }>;
+const CATALOG = catalog as Record<string, { id: number; school: string | null; attack: string | null; armor: string | null; squad: string | null; equipment?: string[] | null }>;
 const now = () => Math.floor(Date.now() / 1000);
 
 type Auth = { ok: true; user: UserRow; key: ParsedKey } | { ok: false; res: Response };
@@ -130,7 +130,7 @@ async function profile(env: Env, user: UserRow, view: "owner" | "public"): Promi
   const students = rows.results.map((r) => {
     const c = CATALOG[String(r.name)];
     const detail = typeof r.detail_json === "string" ? JSON.parse(r.detail_json) : null;
-    return { ...r, user_id: undefined, detail_json: undefined, detail, school: c?.school ?? null, attack: c?.attack ?? null, armor: c?.armor ?? null };
+    return { ...r, user_id: undefined, detail_json: undefined, detail, school: c?.school ?? null, attack: c?.attack ?? null, armor: c?.armor ?? null, equipment_slots: c?.equipment ?? null };
   });
   const analysis = analyze(
     rows.results.map((r) => ({
