@@ -15,15 +15,33 @@ function roster(...names: string[]) {
   return { schema_version: 3, entries: names.map((name) => ({ student: { name, level: 80, rarity_stars: 3 } })) };
 }
 
+/** Like the Cloudflare binding: `limit` successes per key, then refusals (the window never resets inside a test). */
+class FakeLimiter {
+  private used = new Map<string, number>();
+  private max: number;
+  constructor(max: number) {
+    this.max = max;
+  }
+  async limit({ key }: { key: string }): Promise<{ success: boolean }> {
+    const n = (this.used.get(key) ?? 0) + 1;
+    this.used.set(key, n);
+    return { success: n <= this.max };
+  }
+}
+
+const accountId = (n: number) => n.toString(16).padStart(64, "0");
+
 class Server {
   d1 = new MemoryD1();
   logs: string[] = [];
   pepper: string;
+  limiter?: FakeLimiter;
+  createLimiter?: FakeLimiter;
   constructor(pepper = PEPPER) {
     this.pepper = pepper;
   }
   async call(method: string, path: string, body?: unknown, headers: Record<string, string> = ADDON): Promise<{ status: number; text: string; json: any }> {
-    const env = { DB: this.d1, ASSETS: { fetch: async () => new Response("asset") }, KEY_PEPPER: this.pepper } as never;
+    const env = { DB: this.d1, ASSETS: { fetch: async () => new Response("asset") }, KEY_PEPPER: this.pepper, LIMITER: this.limiter, CREATE_LIMITER: this.createLimiter } as never;
     const orig = [console.error, console.log, console.warn];
     console.error = console.log = console.warn = (...a: unknown[]) => void this.logs.push(a.map(String).join(" "));
     try {
@@ -191,4 +209,28 @@ test("the same id under another pepper is another account", async () => {
   const b = await two.upload(A, "a", ["아루"]);
   assert.notEqual(a.json.public_id, b.json.public_id);
   assert.notEqual(one.users()[0]?.account_hash, two.users()[0]?.account_hash);
+});
+
+test("creating an account is limited per IP, updating one is not", async () => {
+  const s = new Server();
+  s.createLimiter = new FakeLimiter(2);
+  const from = (ip: string) => ({ ...ADDON, "cf-connecting-ip": ip });
+  const up = (id: string, ip: string) => s.call("POST", "/api/upload", { account_id: id, nickname: "a", roster: roster("아루") }, from(ip));
+  assert.equal((await up(accountId(1), "1.1.1.1")).status, 201);
+  assert.equal((await up(accountId(2), "1.1.1.1")).status, 201);
+  const refused = await up(accountId(3), "1.1.1.1");
+  assert.equal(refused.status, 429);
+  assert.match(refused.json.error, /계정/);
+  assert.equal(s.users().length, 2, "the refused upload created nothing");
+  assert.equal((await up(accountId(1), "1.1.1.1")).status, 200, "an existing account can still be updated from that IP");
+  assert.equal((await up(accountId(2), "1.1.1.1")).status, 200);
+  assert.equal((await up(accountId(3), "2.2.2.2")).status, 201, "another IP has its own allowance");
+});
+
+test("only the creation path spends the creation allowance", async () => {
+  const s = new Server();
+  s.createLimiter = new FakeLimiter(1);
+  assert.equal((await s.upload(A, "a", ["아루"])).status, 201);
+  for (let i = 0; i < 5; i++) assert.equal((await s.upload(A, "a", ["아루"])).status, 200);
+  assert.equal((await s.upload(B, "b", ["아루"])).status, 429, "the one allowance went to the first creation");
 });

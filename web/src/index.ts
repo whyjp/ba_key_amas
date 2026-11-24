@@ -13,6 +13,8 @@ interface Env {
   /** `wrangler secret put KEY_PEPPER`: account ids are stored only as HMACs under this secret. */
   KEY_PEPPER: string;
   LIMITER?: RateLimit;
+  /** A stricter allowance per IP for making a NEW account (updating one only spends LIMITER). */
+  CREATE_LIMITER?: RateLimit;
   /** Where the add-on is installed from (a GitHub release page). Not decided yet, so it is a variable. */
   ADDON_URL?: string;
 }
@@ -87,7 +89,7 @@ function studentStatements(env: Env, userId: number, students: StudentRow[], kep
   });
 }
 
-async function upload(env: Env, up: Upload, accountId: string, client: Client): Promise<Response> {
+async function upload(env: Env, up: Upload, accountId: string, client: Client, ip: string): Promise<Response> {
   const nickname = normalizeNickname(up.nickname);
   if (!nickname) return json(400, { error: "닉네임은 1~16자이며 제어 문자를 쓸 수 없습니다" });
   const search = foldNickname(nickname);
@@ -110,6 +112,7 @@ async function upload(env: Env, up: Upload, accountId: string, client: Client): 
       ]);
       return json(200, { created: false, public_id: pub, students: up.students.length, public: up.public ?? Boolean(existing.public), score: board.score });
     }
+    if (env.CREATE_LIMITER && !(await env.CREATE_LIMITER.limit({ key: ip })).success) return json(429, { error: "새 계정을 너무 많이 만들었습니다. 잠시 뒤에 다시 시도해 주세요" }, { "retry-after": "60" });
     try {
       const t = now();
       const res = await env.DB.prepare("INSERT INTO users (account_hash, public_id, nickname, nick_search, account_json, progress_json, created_at, updated_at, public, score, stats_json, top_json, score_version, addon_version, protocol, chars_json) VALUES (?1,?2,?3,?4,?5,?6,?7,?7,?8,?9,?10,?11,?12,?13,?14,?15)").bind(hash, pub, nickname, search, accountJson, progressJson, t, Number(up.public ?? false), board.score, board.stats, board.top, SCORE_VERSION, client.addon, client.protocol, board.chars).run();
@@ -244,7 +247,7 @@ async function handleApi(req: Request, env: Env, path: string): Promise<Response
         const up = parseUpload(body);
         const old = checkSchemas((body as { roster?: unknown }).roster, up.progress);
         if (old) return json(old.status, { error: old.error, server: SERVER_VERSION, download: env.ADDON_URL ?? DEFAULT_ADDON_URL });
-        return await upload(env, up, id, client as Client);
+        return await upload(env, up, id, client as Client, req.headers.get("cf-connecting-ip") ?? "unknown");
       } catch (e) {
         if (e instanceof Invalid) return json(400, { error: e.message });
         throw e;
