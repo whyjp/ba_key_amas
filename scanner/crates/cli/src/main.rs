@@ -10,6 +10,7 @@
 mod assist;
 mod dump;
 mod profile;
+mod plate_eval;
 mod progress_scan;
 mod upload;
 mod scan;
@@ -32,6 +33,9 @@ struct Args {
     /// Parse an existing 1280x960 profile screenshot (no desktop input).
     #[arg(long)]
     image: Option<PathBuf>,
+    /// Score the duty-list plate reading on the labelled plate pictures in this folder (see scripts/eval-plates.ps1).
+    #[arg(long, value_name = "DIR")]
+    eval_plates: Option<PathBuf>,
     /// Re-run extraction from the frames saved in this output directory (no game input).
     #[arg(long)]
     reextract: Option<PathBuf>,
@@ -188,10 +192,10 @@ fn real_main() -> Result<()> {
         println!("{}", report.render());
         return Ok(());
     }
-    let modes = [args.boxes.is_some(), args.image.is_some(), args.reextract.is_some(), args.scan_arrows, args.scan_progress, args.upload.is_some(), args.manage.is_some(), args.watch, args.grab.is_some(), args.learn.is_some(), args.assist];
+    let modes = [args.boxes.is_some(), args.image.is_some(), args.reextract.is_some(), args.eval_plates.is_some(), args.scan_arrows, args.scan_progress, args.upload.is_some(), args.manage.is_some(), args.watch, args.grab.is_some(), args.learn.is_some(), args.assist];
     let chosen = modes.iter().filter(|m| **m).count();
     if chosen > 1 {
-        bail!("choose one of --image, --reextract, --scan-arrows, --scan-progress, --upload, --manage, --watch, --grab, --learn, --assist (none starts the add-on)");
+        bail!("choose one of --image, --reextract, --eval-plates, --scan-arrows, --scan-progress, --upload, --manage, --watch, --grab, --learn, --assist (none starts the add-on)");
     }
     if args.from_first && !args.scan_arrows {
         bail!("--from-first requires --scan-arrows");
@@ -222,6 +226,11 @@ fn real_main() -> Result<()> {
         for b in load_ocr(&args)?.boxes(&img)? {
             println!("{:.0},{:.0},{:.0},{:.0}	{}", b.x0, b.y0, b.x1, b.y1, b.text.trim());
         }
+        return Ok(());
+    }
+
+    if let Some(dir) = &args.eval_plates {
+        print!("{}", plate_eval::run(&load_ocr(&args)?, dir)?);
         return Ok(());
     }
 

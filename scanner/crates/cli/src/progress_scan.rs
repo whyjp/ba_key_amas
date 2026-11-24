@@ -702,6 +702,39 @@ fn reread_plate(ocr: &dyn Ocr, img: &RgbImage, b: &TextBox) -> String {
     }
 }
 
+/// What the duty-list path reads on one plate picture: the detector finds the letters, then `reread_plate` votes over the
+/// enlarged readings. This is the per-plate step of `reread_plates` without the page bookkeeping, so the plate evaluation
+/// (`--eval-plates`) scores the same code the scan runs. Returns the raw text, with no dictionary applied.
+pub fn read_plate(ocr: &dyn Ocr, plate: &RgbImage) -> String {
+    match plate_box(ocr, plate) {
+        Some(b) => squash(&reread_plate(ocr, plate, &b)),
+        None => String::new(),
+    }
+}
+
+/// The detector's reading of a plate picture alone, before any re-reading: all its boxes joined left to right.
+pub fn detect_plate(ocr: &dyn Ocr, plate: &RgbImage) -> String {
+    plate_box(ocr, plate).map(|b| squash(&b.text)).unwrap_or_default()
+}
+
+fn plate_box(ocr: &dyn Ocr, plate: &RgbImage) -> Option<TextBox> {
+    let mut boxes = ocr.boxes(plate).ok()?;
+    if boxes.is_empty() {
+        return None;
+    }
+    boxes.sort_by(|a, b| a.x0.total_cmp(&b.x0));
+    let text = boxes.iter().map(|b| b.text.as_str()).collect::<Vec<_>>().join("");
+    let score = boxes.iter().map(|b| b.score).sum::<f32>() / boxes.len() as f32;
+    Some(TextBox {
+        x0: boxes.iter().map(|b| b.x0).fold(f32::MAX, f32::min),
+        y0: boxes.iter().map(|b| b.y0).fold(f32::MAX, f32::min),
+        x1: boxes.iter().map(|b| b.x1).fold(f32::MIN, f32::max),
+        y1: boxes.iter().map(|b| b.y1).fold(f32::MIN, f32::max),
+        text,
+        score,
+    })
+}
+
 /// A student name read off a list, set to the dictionary's spelling when the dictionary is sure of it: the list font
 /// gave "순" for 슌, "시로코테러" for 시로코*테러 and "우네" for 아야네. An ambiguous or unknown reading stays as read.
 fn canonical_name(raw: &str) -> String {

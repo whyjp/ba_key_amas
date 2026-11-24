@@ -1,0 +1,1922 @@
+{
+ "000.png": {
+  "label": "아리스",
+  "frame": "frame-007",
+  "box": [
+   305,
+   408,
+   94,
+   35
+  ],
+  "autolabel": "아리스",
+  "old_engine": "아리스"
+ },
+ "001.png": {
+  "label": "시로코(라이딩)",
+  "frame": "frame-007",
+  "box": [
+   417,
+   408,
+   94,
+   35
+  ],
+  "autolabel": "시로코(라이딩)",
+  "old_engine": "시로코(라이딩)"
+ },
+ "002.png": {
+  "label": "노아",
+  "frame": "frame-007",
+  "box": [
+   530,
+   408,
+   94,
+   35
+  ],
+  "autolabel": "노아",
+  "old_engine": "노아"
+ },
+ "003.png": {
+  "label": "사츠키(수영복)",
+  "frame": "frame-007",
+  "box": [
+   642,
+   408,
+   95,
+   35
+  ],
+  "autolabel": "사츠키(수영복)",
+  "old_engine": "사츠키(수영복)"
+ },
+ "004.png": {
+  "label": "토모에(치파오)",
+  "frame": "frame-007",
+  "box": [
+   755,
+   408,
+   94,
+   35
+  ],
+  "autolabel": "토모에(치파오)",
+  "old_engine": "토모에(치파오)"
+ },
+ "005.png": {
+  "label": "키라라",
+  "frame": "frame-007",
+  "box": [
+   868,
+   408,
+   94,
+   35
+  ],
+  "autolabel": "키라라",
+  "old_engine": "키라라"
+ },
+ "006.png": {
+  "label": "토모에",
+  "frame": "frame-007",
+  "box": [
+   305,
+   560,
+   94,
+   35
+  ],
+  "autolabel": "토모에",
+  "old_engine": "토모에"
+ },
+ "007.png": {
+  "label": "리오(무장)",
+  "frame": "frame-007",
+  "box": [
+   417,
+   560,
+   94,
+   35
+  ],
+  "autolabel": "리오(무장)",
+  "old_engine": "리오(무장)"
+ },
+ "008.png": {
+  "label": "케이",
+  "frame": "frame-007",
+  "box": [
+   529,
+   560,
+   95,
+   35
+  ],
+  "autolabel": "케이",
+  "old_engine": "케이"
+ },
+ "009.png": {
+  "label": "시로코*테러",
+  "frame": "frame-007",
+  "box": [
+   642,
+   560,
+   95,
+   35
+  ],
+  "autolabel": "시로코*테러",
+  "old_engine": "시로코츠테러"
+ },
+ "010.png": {
+  "label": "호시노(무장)",
+  "frame": "frame-007",
+  "box": [
+   755,
+   560,
+   94,
+   35
+  ],
+  "autolabel": "호시노(무장)",
+  "old_engine": "호시노(무장)"
+ },
+ "011.png": {
+  "label": "슌",
+  "frame": "frame-007",
+  "box": [
+   868,
+   560,
+   94,
+   35
+  ],
+  "autolabel": "리오(무장)",
+  "old_engine": "순"
+ },
+ "012.png": {
+  "label": "아리스",
+  "frame": "frame-008",
+  "box": [
+   305,
+   408,
+   94,
+   35
+  ],
+  "autolabel": "아리스",
+  "old_engine": "아리스"
+ },
+ "013.png": {
+  "label": "시로코(라이딩)",
+  "frame": "frame-008",
+  "box": [
+   417,
+   408,
+   94,
+   35
+  ],
+  "autolabel": "시로코(라이딩)",
+  "old_engine": "시로코(라이딩)"
+ },
+ "014.png": {
+  "label": "노아",
+  "frame": "frame-008",
+  "box": [
+   530,
+   408,
+   94,
+   35
+  ],
+  "autolabel": "노아",
+  "old_engine": "노아"
+ },
+ "015.png": {
+  "label": "사츠키(수영복)",
+  "frame": "frame-008",
+  "box": [
+   642,
+   408,
+   95,
+   35
+  ],
+  "autolabel": "사츠키(수영복)",
+  "old_engine": "사츠키(수영복)"
+ },
+ "016.png": {
+  "label": "토모에(치파오)",
+  "frame": "frame-008",
+  "box": [
+   755,
+   408,
+   94,
+   35
+  ],
+  "autolabel": "토모에(치파오)",
+  "old_engine": "토모에(치파오)"
+ },
+ "017.png": {
+  "label": "키라라",
+  "frame": "frame-008",
+  "box": [
+   868,
+   408,
+   94,
+   35
+  ],
+  "autolabel": "키라라",
+  "old_engine": "키라라"
+ },
+ "018.png": {
+  "label": "토모에",
+  "frame": "frame-008",
+  "box": [
+   305,
+   560,
+   94,
+   35
+  ],
+  "autolabel": "토모에",
+  "old_engine": "토모에"
+ },
+ "019.png": {
+  "label": "리오(무장)",
+  "frame": "frame-008",
+  "box": [
+   417,
+   560,
+   94,
+   35
+  ],
+  "autolabel": "리오(무장)",
+  "old_engine": "리오(무장)"
+ },
+ "020.png": {
+  "label": "케이",
+  "frame": "frame-008",
+  "box": [
+   529,
+   560,
+   95,
+   35
+  ],
+  "autolabel": "케이",
+  "old_engine": "케이"
+ },
+ "021.png": {
+  "label": "시로코*테러",
+  "frame": "frame-008",
+  "box": [
+   642,
+   560,
+   95,
+   35
+  ],
+  "autolabel": "시로코*테러",
+  "old_engine": "시로코츠테러"
+ },
+ "022.png": {
+  "label": "호시노(무장)",
+  "frame": "frame-008",
+  "box": [
+   755,
+   560,
+   94,
+   35
+  ],
+  "autolabel": "호시노(무장)",
+  "old_engine": "호시노(무장)"
+ },
+ "023.png": {
+  "label": "슌",
+  "frame": "frame-008",
+  "box": [
+   868,
+   560,
+   94,
+   35
+  ],
+  "autolabel": "리오(무장)",
+  "old_engine": "순"
+ },
+ "024.png": {
+  "label": "하나코(수영복)",
+  "frame": "frame-009",
+  "box": [
+   304,
+   409,
+   95,
+   35
+  ],
+  "autolabel": "하나코(수영복)",
+  "old_engine": "하나코(수영복)"
+ },
+ "025.png": {
+  "label": "사오리(드레스)",
+  "frame": "frame-009",
+  "box": [
+   417,
+   409,
+   94,
+   35
+  ],
+  "autolabel": "사오리(드레스)",
+  "old_engine": "사오리(드레스)"
+ },
+ "026.png": {
+  "label": "미카",
+  "frame": "frame-009",
+  "box": [
+   529,
+   409,
+   95,
+   35
+  ],
+  "autolabel": "미카",
+  "old_engine": "미카"
+ },
+ "027.png": {
+  "label": "마코토(수영복)",
+  "frame": "frame-009",
+  "box": [
+   642,
+   409,
+   95,
+   35
+  ],
+  "autolabel": "마코토(수영복)",
+  "old_engine": "마코토(수영복)"
+ },
+ "028.png": {
+  "label": "리오",
+  "frame": "frame-009",
+  "box": [
+   755,
+   409,
+   94,
+   35
+  ],
+  "autolabel": "리오",
+  "old_engine": "리오"
+ },
+ "029.png": {
+  "label": "키사키",
+  "frame": "frame-009",
+  "box": [
+   868,
+   409,
+   94,
+   35
+  ],
+  "autolabel": "키사키",
+  "old_engine": "키사키"
+ },
+ "030.png": {
+  "label": "아코",
+  "frame": "frame-009",
+  "box": [
+   305,
+   562,
+   94,
+   34
+  ],
+  "autolabel": "아코",
+  "old_engine": "아코"
+ },
+ "031.png": {
+  "label": "유우카(파자마)",
+  "frame": "frame-009",
+  "box": [
+   417,
+   562,
+   94,
+   34
+  ],
+  "autolabel": "유우카(파자마)",
+  "old_engine": "유우카(파자마)"
+ },
+ "032.png": {
+  "label": "토키(바니걸)",
+  "frame": "frame-009",
+  "box": [
+   529,
+   562,
+   95,
+   34
+  ],
+  "autolabel": "토키(바니걸)",
+  "old_engine": "토키(바니걸)"
+ },
+ "033.png": {
+  "label": "카요코",
+  "frame": "frame-009",
+  "box": [
+   642,
+   562,
+   95,
+   34
+  ],
+  "autolabel": "카요코",
+  "old_engine": "카요코"
+ },
+ "034.png": {
+  "label": "아루",
+  "frame": "frame-009",
+  "box": [
+   755,
+   562,
+   94,
+   34
+  ],
+  "autolabel": "아루",
+  "old_engine": "아루"
+ },
+ "035.png": {
+  "label": "카요코(새해)",
+  "frame": "frame-009",
+  "box": [
+   868,
+   562,
+   94,
+   34
+  ],
+  "autolabel": "카요코(새해)",
+  "old_engine": "카요코(새해)"
+ },
+ "036.png": {
+  "label": "노도카(온천)",
+  "frame": "frame-010",
+  "box": [
+   304,
+   412,
+   94,
+   34
+  ],
+  "autolabel": "노도카(온천)",
+  "old_engine": "노도카(온천)"
+ },
+ "037.png": {
+  "label": "노조미",
+  "frame": "frame-010",
+  "box": [
+   417,
+   412,
+   94,
+   34
+  ],
+  "autolabel": "노조미",
+  "old_engine": "노조미"
+ },
+ "038.png": {
+  "label": "아카리",
+  "frame": "frame-010",
+  "box": [
+   529,
+   412,
+   95,
+   34
+  ],
+  "autolabel": "아카리",
+  "old_engine": "아카리"
+ },
+ "039.png": {
+  "label": "사쿠라코",
+  "frame": "frame-010",
+  "box": [
+   642,
+   412,
+   95,
+   34
+  ],
+  "autolabel": "사쿠라코",
+  "old_engine": "사쿠라코"
+ },
+ "040.png": {
+  "label": "아루(드레스)",
+  "frame": "frame-010",
+  "box": [
+   755,
+   412,
+   94,
+   34
+  ],
+  "autolabel": "아루(드레스)",
+  "old_engine": "아루(드레스)"
+ },
+ "041.png": {
+  "label": "호시노",
+  "frame": "frame-010",
+  "box": [
+   868,
+   412,
+   94,
+   34
+  ],
+  "autolabel": "호시노",
+  "old_engine": "호시노"
+ },
+ "042.png": {
+  "label": "렌게",
+  "frame": "frame-010",
+  "box": [
+   304,
+   564,
+   95,
+   35
+  ],
+  "autolabel": "렌게",
+  "old_engine": "렌게"
+ },
+ "043.png": {
+  "label": "츠바키(가이드)",
+  "frame": "frame-010",
+  "box": [
+   417,
+   564,
+   94,
+   35
+  ],
+  "autolabel": "츠바키(가이드)",
+  "old_engine": "츠바키(가이드)"
+ },
+ "044.png": {
+  "label": "루미",
+  "frame": "frame-010",
+  "box": [
+   529,
+   564,
+   95,
+   35
+  ],
+  "autolabel": "루미",
+  "old_engine": "루미"
+ },
+ "045.png": {
+  "label": "와카모(수영복)",
+  "frame": "frame-010",
+  "box": [
+   642,
+   564,
+   95,
+   35
+  ],
+  "autolabel": "와카모(수영복)",
+  "old_engine": "와카모(수영복)"
+ },
+ "046.png": {
+  "label": "하나코",
+  "frame": "frame-010",
+  "box": [
+   755,
+   564,
+   94,
+   35
+  ],
+  "autolabel": "하나코",
+  "old_engine": "하나코"
+ },
+ "047.png": {
+  "label": "하나에",
+  "frame": "frame-010",
+  "box": [
+   868,
+   564,
+   94,
+   35
+  ],
+  "autolabel": "하나에",
+  "old_engine": "하나에"
+ },
+ "048.png": {
+  "label": "노도카(온천)",
+  "frame": "frame-011",
+  "box": [
+   304,
+   412,
+   94,
+   34
+  ],
+  "autolabel": "노도카(온천)",
+  "old_engine": "노도카(온천)"
+ },
+ "049.png": {
+  "label": "노조미",
+  "frame": "frame-011",
+  "box": [
+   417,
+   412,
+   94,
+   34
+  ],
+  "autolabel": "노조미",
+  "old_engine": "노조미"
+ },
+ "050.png": {
+  "label": "아카리",
+  "frame": "frame-011",
+  "box": [
+   529,
+   412,
+   95,
+   34
+  ],
+  "autolabel": "아카리",
+  "old_engine": "아카리"
+ },
+ "051.png": {
+  "label": "사쿠라코",
+  "frame": "frame-011",
+  "box": [
+   642,
+   412,
+   95,
+   34
+  ],
+  "autolabel": "사쿠라코",
+  "old_engine": "사쿠라코"
+ },
+ "052.png": {
+  "label": "아루(드레스)",
+  "frame": "frame-011",
+  "box": [
+   755,
+   412,
+   94,
+   34
+  ],
+  "autolabel": "아루(드레스)",
+  "old_engine": "아루(드레스)"
+ },
+ "053.png": {
+  "label": "호시노",
+  "frame": "frame-011",
+  "box": [
+   868,
+   412,
+   94,
+   34
+  ],
+  "autolabel": "호시노",
+  "old_engine": "호시노"
+ },
+ "054.png": {
+  "label": "렌게",
+  "frame": "frame-011",
+  "box": [
+   304,
+   564,
+   95,
+   35
+  ],
+  "autolabel": "렌게",
+  "old_engine": "렌게"
+ },
+ "055.png": {
+  "label": "츠바키(가이드)",
+  "frame": "frame-011",
+  "box": [
+   417,
+   564,
+   94,
+   35
+  ],
+  "autolabel": "츠바키(가이드)",
+  "old_engine": "츠바키(가이드)"
+ },
+ "056.png": {
+  "label": "루미",
+  "frame": "frame-011",
+  "box": [
+   529,
+   564,
+   95,
+   35
+  ],
+  "autolabel": "루미",
+  "old_engine": "루미"
+ },
+ "057.png": {
+  "label": "와카모(수영복)",
+  "frame": "frame-011",
+  "box": [
+   642,
+   564,
+   95,
+   35
+  ],
+  "autolabel": "와카모(수영복)",
+  "old_engine": "와카모(수영복)"
+ },
+ "058.png": {
+  "label": "하나코",
+  "frame": "frame-011",
+  "box": [
+   755,
+   564,
+   94,
+   35
+  ],
+  "autolabel": "하나코",
+  "old_engine": "하나코"
+ },
+ "059.png": {
+  "label": "하나에",
+  "frame": "frame-011",
+  "box": [
+   868,
+   564,
+   94,
+   35
+  ],
+  "autolabel": "하나에",
+  "old_engine": "하나에"
+ },
+ "060.png": {
+  "label": "아이리",
+  "frame": "frame-012",
+  "box": [
+   305,
+   414,
+   94,
+   35
+  ],
+  "autolabel": "아이리",
+  "old_engine": "아이리"
+ },
+ "061.png": {
+  "label": "히나",
+  "frame": "frame-012",
+  "box": [
+   417,
+   414,
+   94,
+   35
+  ],
+  "autolabel": "히나",
+  "old_engine": "히나"
+ },
+ "062.png": {
+  "label": "카린",
+  "frame": "frame-012",
+  "box": [
+   529,
+   414,
+   95,
+   35
+  ],
+  "autolabel": "카린",
+  "old_engine": "카린"
+ },
+ "063.png": {
+  "label": "후우카",
+  "frame": "frame-012",
+  "box": [
+   642,
+   414,
+   95,
+   35
+  ],
+  "autolabel": "후우카",
+  "old_engine": "후우카"
+ },
+ "064.png": {
+  "label": "주리",
+  "frame": "frame-012",
+  "box": [
+   755,
+   414,
+   94,
+   35
+  ],
+  "autolabel": "주리",
+  "old_engine": "주리"
+ },
+ "065.png": {
+  "label": "히요리",
+  "frame": "frame-012",
+  "box": [
+   868,
+   414,
+   94,
+   35
+  ],
+  "autolabel": "히요리",
+  "old_engine": "히요리"
+ },
+ "066.png": {
+  "label": "시구레",
+  "frame": "frame-012",
+  "box": [
+   305,
+   566,
+   94,
+   36
+  ],
+  "autolabel": "시구레",
+  "old_engine": "시구레"
+ },
+ "067.png": {
+  "label": "카스미",
+  "frame": "frame-012",
+  "box": [
+   417,
+   566,
+   94,
+   36
+  ],
+  "autolabel": "카스미",
+  "old_engine": "카스미"
+ },
+ "068.png": {
+  "label": "모에(수영복)",
+  "frame": "frame-012",
+  "box": [
+   530,
+   566,
+   94,
+   36
+  ],
+  "autolabel": "모에(수영복)",
+  "old_engine": "모에(수영복)"
+ },
+ "069.png": {
+  "label": "츠쿠요",
+  "frame": "frame-012",
+  "box": [
+   642,
+   566,
+   94,
+   36
+  ],
+  "autolabel": "츠쿠요",
+  "old_engine": "츠쿠요"
+ },
+ "070.png": {
+  "label": "사야(사복)",
+  "frame": "frame-012",
+  "box": [
+   755,
+   566,
+   94,
+   36
+  ],
+  "autolabel": "사야(사복)",
+  "old_engine": "사야(사복)"
+ },
+ "071.png": {
+  "label": "나구사(수영복)",
+  "frame": "frame-012",
+  "box": [
+   868,
+   566,
+   94,
+   36
+  ],
+  "autolabel": "나구사(수영복)",
+  "old_engine": "나구사(수영복)"
+ },
+ "072.png": {
+  "label": "마리나(치파오)",
+  "frame": "frame-013",
+  "box": [
+   304,
+   417,
+   95,
+   35
+  ],
+  "autolabel": "마리나(치파오)",
+  "old_engine": "마리나(치파오)"
+ },
+ "073.png": {
+  "label": "시구레(온천)",
+  "frame": "frame-013",
+  "box": [
+   417,
+   417,
+   94,
+   35
+  ],
+  "autolabel": "시구레(온천)",
+  "old_engine": "시구레(온천)"
+ },
+ "074.png": {
+  "label": "이즈미(새해)",
+  "frame": "frame-013",
+  "box": [
+   529,
+   417,
+   95,
+   35
+  ],
+  "autolabel": "이즈미(새해)",
+  "old_engine": "이즈미(새해)"
+ },
+ "075.png": {
+  "label": "하루카(새해)",
+  "frame": "frame-013",
+  "box": [
+   642,
+   417,
+   95,
+   35
+  ],
+  "autolabel": "하루카(새해)",
+  "old_engine": "하루카(새해)"
+ },
+ "076.png": {
+  "label": "세리카(새해)",
+  "frame": "frame-013",
+  "box": [
+   755,
+   417,
+   94,
+   35
+  ],
+  "autolabel": "세리카(새해)",
+  "old_engine": "세리카(새해)"
+ },
+ "077.png": {
+  "label": "모에",
+  "frame": "frame-013",
+  "box": [
+   868,
+   417,
+   94,
+   35
+  ],
+  "autolabel": "모에",
+  "old_engine": "모에"
+ },
+ "078.png": {
+  "label": "사키(수영복)",
+  "frame": "frame-013",
+  "box": [
+   304,
+   569,
+   95,
+   35
+  ],
+  "autolabel": "사키(수영복)",
+  "old_engine": "사키(수영복)"
+ },
+ "079.png": {
+  "label": "미모리(수영복)",
+  "frame": "frame-013",
+  "box": [
+   417,
+   569,
+   94,
+   35
+  ],
+  "autolabel": "미모리(수영복)",
+  "old_engine": "미모리(수영복)"
+ },
+ "080.png": {
+  "label": "피나(가이드)",
+  "frame": "frame-013",
+  "box": [
+   529,
+   569,
+   95,
+   35
+  ],
+  "autolabel": "피나(가이드)",
+  "old_engine": "피나(가이드)"
+ },
+ "081.png": {
+  "label": "이치카",
+  "frame": "frame-013",
+  "box": [
+   642,
+   569,
+   95,
+   35
+  ],
+  "autolabel": "이치카",
+  "old_engine": "이치카"
+ },
+ "082.png": {
+  "label": "메구",
+  "frame": "frame-013",
+  "box": [
+   755,
+   569,
+   94,
+   35
+  ],
+  "autolabel": "메구",
+  "old_engine": "메구"
+ },
+ "083.png": {
+  "label": "네루(교복)",
+  "frame": "frame-013",
+  "box": [
+   868,
+   569,
+   94,
+   35
+  ],
+  "autolabel": "네루(교복)",
+  "old_engine": "네루(교복)"
+ },
+ "084.png": {
+  "label": "하스미",
+  "frame": "frame-014",
+  "box": [
+   304,
+   419,
+   95,
+   35
+  ],
+  "autolabel": "하스미",
+  "old_engine": "하스미"
+ },
+ "085.png": {
+  "label": "아카네",
+  "frame": "frame-014",
+  "box": [
+   417,
+   419,
+   94,
+   35
+  ],
+  "autolabel": "아카네",
+  "old_engine": "아카네"
+ },
+ "086.png": {
+  "label": "노노미",
+  "frame": "frame-014",
+  "box": [
+   529,
+   419,
+   95,
+   35
+  ],
+  "autolabel": "노노미",
+  "old_engine": "노노미"
+ },
+ "087.png": {
+  "label": "렌게(수영복)",
+  "frame": "frame-014",
+  "box": [
+   642,
+   419,
+   95,
+   35
+  ],
+  "autolabel": "렌게(수영복)",
+  "old_engine": "렌게(수영복)"
+ },
+ "088.png": {
+  "label": "마리",
+  "frame": "frame-014",
+  "box": [
+   755,
+   419,
+   94,
+   35
+  ],
+  "autolabel": "마리",
+  "old_engine": "마리"
+ },
+ "089.png": {
+  "label": "아야네",
+  "frame": "frame-014",
+  "box": [
+   868,
+   419,
+   94,
+   35
+  ],
+  "autolabel": "아카네",
+  "old_engine": "아네"
+ },
+ "090.png": {
+  "label": "하레",
+  "frame": "frame-014",
+  "box": [
+   304,
+   571,
+   95,
+   35
+  ],
+  "autolabel": "하레",
+  "old_engine": "하레"
+ },
+ "091.png": {
+  "label": "시즈코",
+  "frame": "frame-014",
+  "box": [
+   417,
+   571,
+   94,
+   35
+  ],
+  "autolabel": "시즈코",
+  "old_engine": "시즈코"
+ },
+ "092.png": {
+  "label": "츠바키",
+  "frame": "frame-014",
+  "box": [
+   529,
+   571,
+   95,
+   35
+  ],
+  "autolabel": "츠바키",
+  "old_engine": "츠바키"
+ },
+ "093.png": {
+  "label": "모미지",
+  "frame": "frame-014",
+  "box": [
+   642,
+   571,
+   95,
+   35
+  ],
+  "autolabel": "모미지",
+  "old_engine": "모미지"
+ },
+ "094.png": {
+  "label": "세리카",
+  "frame": "frame-014",
+  "box": [
+   755,
+   571,
+   94,
+   35
+  ],
+  "autolabel": "세리카",
+  "old_engine": "세리카"
+ },
+ "095.png": {
+  "label": "우타하",
+  "frame": "frame-014",
+  "box": [
+   868,
+   571,
+   94,
+   35
+  ],
+  "autolabel": "우타하",
+  "old_engine": "우타하"
+ },
+ "096.png": {
+  "label": "키리노",
+  "frame": "frame-015",
+  "box": [
+   304,
+   422,
+   95,
+   35
+  ],
+  "autolabel": "키리노",
+  "old_engine": "키리노"
+ },
+ "097.png": {
+  "label": "치세",
+  "frame": "frame-015",
+  "box": [
+   417,
+   422,
+   94,
+   35
+  ],
+  "autolabel": "치세",
+  "old_engine": "치세"
+ },
+ "098.png": {
+  "label": "무츠키",
+  "frame": "frame-015",
+  "box": [
+   529,
+   422,
+   95,
+   35
+  ],
+  "autolabel": "무츠키",
+  "old_engine": "무츠키"
+ },
+ "099.png": {
+  "label": "준코",
+  "frame": "frame-015",
+  "box": [
+   642,
+   422,
+   95,
+   35
+  ],
+  "autolabel": "준코",
+  "old_engine": "준코"
+ },
+ "100.png": {
+  "label": "모모이",
+  "frame": "frame-015",
+  "box": [
+   755,
+   422,
+   94,
+   35
+  ],
+  "autolabel": "모모이",
+  "old_engine": "모모이"
+ },
+ "101.png": {
+  "label": "유우카",
+  "frame": "frame-015",
+  "box": [
+   868,
+   422,
+   94,
+   35
+  ],
+  "autolabel": "유우카",
+  "old_engine": "유우카"
+ },
+ "102.png": {
+  "label": "토키(무장)",
+  "frame": "frame-015",
+  "box": [
+   305,
+   575,
+   94,
+   34
+  ],
+  "autolabel": "토키(무장)",
+  "old_engine": "토키(무장)"
+ },
+ "103.png": {
+  "label": "아스나",
+  "frame": "frame-015",
+  "box": [
+   417,
+   575,
+   94,
+   34
+  ],
+  "autolabel": "아스나",
+  "old_engine": "아스나"
+ },
+ "104.png": {
+  "label": "세리나",
+  "frame": "frame-015",
+  "box": [
+   529,
+   575,
+   95,
+   34
+  ],
+  "autolabel": "세리나",
+  "old_engine": "세리나"
+ },
+ "105.png": {
+  "label": "아야네(수영복)",
+  "frame": "frame-015",
+  "box": [
+   642,
+   575,
+   95,
+   34
+  ],
+  "autolabel": "아야네(수영복)",
+  "old_engine": "아네(수영복)"
+ },
+ "106.png": {
+  "label": "스즈미",
+  "frame": "frame-015",
+  "box": [
+   755,
+   575,
+   94,
+   34
+  ],
+  "autolabel": "스즈미",
+  "old_engine": "스즈미"
+ },
+ "107.png": {
+  "label": "시미코",
+  "frame": "frame-015",
+  "box": [
+   868,
+   575,
+   94,
+   34
+  ],
+  "autolabel": "시미코",
+  "old_engine": "시미코"
+ },
+ "108.png": {
+  "label": "요시미",
+  "frame": "frame-016",
+  "box": [
+   304,
+   425,
+   94,
+   34
+  ],
+  "autolabel": "요시미",
+  "old_engine": "요시미"
+ },
+ "109.png": {
+  "label": "츠루기(수영복)",
+  "frame": "frame-016",
+  "box": [
+   417,
+   425,
+   94,
+   34
+  ],
+  "autolabel": "츠루기(수영복)",
+  "old_engine": "츠루기(수영복)"
+ },
+ "110.png": {
+  "label": "코타마",
+  "frame": "frame-016",
+  "box": [
+   529,
+   425,
+   95,
+   34
+  ],
+  "autolabel": "코타마",
+  "old_engine": "코타마"
+ },
+ "111.png": {
+  "label": "피나",
+  "frame": "frame-016",
+  "box": [
+   642,
+   425,
+   95,
+   34
+  ],
+  "autolabel": "피나",
+  "old_engine": "피나"
+ },
+ "112.png": {
+  "label": "노도카",
+  "frame": "frame-016",
+  "box": [
+   755,
+   425,
+   94,
+   34
+  ],
+  "autolabel": "노도카",
+  "old_engine": "노도카"
+ },
+ "113.png": {
+  "label": "코하루(수영복)",
+  "frame": "frame-016",
+  "box": [
+   868,
+   425,
+   94,
+   34
+  ],
+  "autolabel": "코하루(수영복)",
+  "old_engine": "코하루(수영복)"
+ },
+ "114.png": {
+  "label": "하스미(체육복)",
+  "frame": "frame-016",
+  "box": [
+   304,
+   577,
+   95,
+   35
+  ],
+  "autolabel": "하스미(체육복)",
+  "old_engine": "하스미(체육복)"
+ },
+ "115.png": {
+  "label": "준코(새해)",
+  "frame": "frame-016",
+  "box": [
+   417,
+   577,
+   94,
+   35
+  ],
+  "autolabel": "준코(새해)",
+  "old_engine": "준코(새해)"
+ },
+ "116.png": {
+  "label": "하루카",
+  "frame": "frame-016",
+  "box": [
+   529,
+   577,
+   95,
+   35
+  ],
+  "autolabel": "하루카",
+  "old_engine": "하루카"
+ },
+ "117.png": {
+  "label": "유즈(메이드)",
+  "frame": "frame-016",
+  "box": [
+   642,
+   577,
+   95,
+   35
+  ],
+  "autolabel": "유즈(메이드)",
+  "old_engine": "유즈(메이드)"
+ },
+ "118.png": {
+  "label": "카린(교복)",
+  "frame": "frame-016",
+  "box": [
+   755,
+   577,
+   94,
+   35
+  ],
+  "autolabel": "카린(교복)",
+  "old_engine": "카린(교복)"
+ },
+ "119.png": {
+  "label": "코토리",
+  "frame": "frame-016",
+  "box": [
+   868,
+   577,
+   94,
+   35
+  ],
+  "autolabel": "코토리",
+  "old_engine": "코토리"
+ },
+ "120.png": {
+  "label": "미유(수영복)",
+  "frame": "frame-017",
+  "box": [
+   304,
+   427,
+   95,
+   35
+  ],
+  "autolabel": "미유(수영복)",
+  "old_engine": "미유(수영복)"
+ },
+ "121.png": {
+  "label": "미치루",
+  "frame": "frame-017",
+  "box": [
+   417,
+   427,
+   94,
+   35
+  ],
+  "autolabel": "미치루",
+  "old_engine": "미치루"
+ },
+ "122.png": {
+  "label": "이즈미(수영복)",
+  "frame": "frame-017",
+  "box": [
+   530,
+   427,
+   94,
+   35
+  ],
+  "autolabel": "이즈미(수영복)",
+  "old_engine": "이즈미(수영복)"
+ },
+ "123.png": {
+  "label": "치나츠",
+  "frame": "frame-017",
+  "box": [
+   642,
+   427,
+   95,
+   35
+  ],
+  "autolabel": "치나츠",
+  "old_engine": "치나츠"
+ },
+ "124.png": {
+  "label": "히비키(응원단)",
+  "frame": "frame-017",
+  "box": [
+   755,
+   427,
+   94,
+   35
+  ],
+  "autolabel": "히비키(응원단)",
+  "old_engine": "히비키(응원단)"
+ },
+ "125.png": {
+  "label": "아츠코(수영복)",
+  "frame": "frame-017",
+  "box": [
+   868,
+   427,
+   94,
+   35
+  ],
+  "autolabel": "아츠코(수영복)",
+  "old_engine": "아츠코(수영복)"
+ },
+ "126.png": {
+  "label": "후부키",
+  "frame": "frame-017",
+  "box": [
+   304,
+   580,
+   95,
+   35
+  ],
+  "autolabel": "후부키",
+  "old_engine": "후부키"
+ },
+ "127.png": {
+  "label": "오토기",
+  "frame": "frame-017",
+  "box": [
+   417,
+   580,
+   94,
+   35
+  ],
+  "autolabel": "오토기",
+  "old_engine": "오토기"
+ },
+ "128.png": {
+  "label": "아오바",
+  "frame": "frame-017",
+  "box": [
+   529,
+   580,
+   95,
+   35
+  ],
+  "autolabel": "아오바",
+  "old_engine": "아오바"
+ },
+ "129.png": {
+  "label": "치아키(수영복)",
+  "frame": "frame-017",
+  "box": [
+   642,
+   580,
+   95,
+   35
+  ],
+  "autolabel": "치아키(수영복)",
+  "old_engine": "치아키(수영복)"
+ },
+ "130.png": {
+  "label": "미유(수영복)",
+  "frame": "frame-018",
+  "box": [
+   304,
+   426,
+   95,
+   35
+  ],
+  "autolabel": "미유(수영복)",
+  "old_engine": "미유(수영복)"
+ },
+ "131.png": {
+  "label": "미치루",
+  "frame": "frame-018",
+  "box": [
+   417,
+   426,
+   94,
+   35
+  ],
+  "autolabel": "미치루",
+  "old_engine": "미치루"
+ },
+ "132.png": {
+  "label": "이즈미(수영복)",
+  "frame": "frame-018",
+  "box": [
+   529,
+   426,
+   95,
+   35
+  ],
+  "autolabel": "이즈미(수영복)",
+  "old_engine": "이즈미(수영복)"
+ },
+ "133.png": {
+  "label": "치나츠",
+  "frame": "frame-018",
+  "box": [
+   642,
+   426,
+   95,
+   35
+  ],
+  "autolabel": "치나츠",
+  "old_engine": "치나츠"
+ },
+ "134.png": {
+  "label": "히비키(응원단)",
+  "frame": "frame-018",
+  "box": [
+   755,
+   426,
+   94,
+   35
+  ],
+  "autolabel": "히비키(응원단)",
+  "old_engine": "히비키(응원단)"
+ },
+ "135.png": {
+  "label": "아츠코(수영복)",
+  "frame": "frame-018",
+  "box": [
+   868,
+   426,
+   94,
+   35
+  ],
+  "autolabel": "아츠코(수영복)",
+  "old_engine": "아츠코(수영복)"
+ },
+ "136.png": {
+  "label": "후부키",
+  "frame": "frame-018",
+  "box": [
+   305,
+   579,
+   94,
+   34
+  ],
+  "autolabel": "후부키",
+  "old_engine": "후부키"
+ },
+ "137.png": {
+  "label": "오토기",
+  "frame": "frame-018",
+  "box": [
+   417,
+   579,
+   94,
+   34
+  ],
+  "autolabel": "오토기",
+  "old_engine": "오토기"
+ },
+ "138.png": {
+  "label": "아오바",
+  "frame": "frame-018",
+  "box": [
+   529,
+   579,
+   95,
+   34
+  ],
+  "autolabel": "아오바",
+  "old_engine": "아오바"
+ },
+ "139.png": {
+  "label": "치아키(수영복)",
+  "frame": "frame-018",
+  "box": [
+   642,
+   579,
+   95,
+   34
+  ],
+  "autolabel": "치아키(수영복)",
+  "old_engine": "치아키(수영복)"
+ },
+ "140.png": {
+  "label": "미유(수영복)",
+  "frame": "frame-019",
+  "box": [
+   304,
+   426,
+   95,
+   35
+  ],
+  "autolabel": "미유(수영복)",
+  "old_engine": "미유(수영복)"
+ },
+ "141.png": {
+  "label": "미치루",
+  "frame": "frame-019",
+  "box": [
+   417,
+   426,
+   94,
+   35
+  ],
+  "autolabel": "미치루",
+  "old_engine": "미치루"
+ },
+ "142.png": {
+  "label": "이즈미(수영복)",
+  "frame": "frame-019",
+  "box": [
+   529,
+   426,
+   95,
+   35
+  ],
+  "autolabel": "이즈미(수영복)",
+  "old_engine": "이즈미(수영복)"
+ },
+ "143.png": {
+  "label": "치나츠",
+  "frame": "frame-019",
+  "box": [
+   642,
+   426,
+   95,
+   35
+  ],
+  "autolabel": "치나츠",
+  "old_engine": "치나츠"
+ },
+ "144.png": {
+  "label": "히비키(응원단)",
+  "frame": "frame-019",
+  "box": [
+   755,
+   426,
+   94,
+   35
+  ],
+  "autolabel": "히비키(응원단)",
+  "old_engine": "히비키(응원단)"
+ },
+ "145.png": {
+  "label": "아츠코(수영복)",
+  "frame": "frame-019",
+  "box": [
+   868,
+   426,
+   94,
+   35
+  ],
+  "autolabel": "아츠코(수영복)",
+  "old_engine": "아츠코(수영복)"
+ },
+ "146.png": {
+  "label": "후부키",
+  "frame": "frame-019",
+  "box": [
+   305,
+   579,
+   94,
+   34
+  ],
+  "autolabel": "후부키",
+  "old_engine": "후부키"
+ },
+ "147.png": {
+  "label": "오토기",
+  "frame": "frame-019",
+  "box": [
+   417,
+   579,
+   94,
+   34
+  ],
+  "autolabel": "오토기",
+  "old_engine": "오토기"
+ },
+ "148.png": {
+  "label": "아오바",
+  "frame": "frame-019",
+  "box": [
+   529,
+   579,
+   95,
+   34
+  ],
+  "autolabel": "아오바",
+  "old_engine": "아오바"
+ },
+ "149.png": {
+  "label": "치아키(수영복)",
+  "frame": "frame-019",
+  "box": [
+   642,
+   579,
+   95,
+   34
+  ],
+  "autolabel": "치아키(수영복)",
+  "old_engine": "치아키(수영복)"
+ },
+ "150.png": {
+  "label": "미유(수영복)",
+  "frame": "frame-020",
+  "box": [
+   304,
+   426,
+   95,
+   35
+  ],
+  "autolabel": "미유(수영복)",
+  "old_engine": "미유(수영복)"
+ },
+ "151.png": {
+  "label": "미치루",
+  "frame": "frame-020",
+  "box": [
+   417,
+   426,
+   94,
+   35
+  ],
+  "autolabel": "미치루",
+  "old_engine": "미치루"
+ },
+ "152.png": {
+  "label": "이즈미(수영복)",
+  "frame": "frame-020",
+  "box": [
+   529,
+   426,
+   95,
+   35
+  ],
+  "autolabel": "이즈미(수영복)",
+  "old_engine": "이즈미(수영복)"
+ },
+ "153.png": {
+  "label": "치나츠",
+  "frame": "frame-020",
+  "box": [
+   642,
+   426,
+   95,
+   35
+  ],
+  "autolabel": "치나츠",
+  "old_engine": "치나츠"
+ },
+ "154.png": {
+  "label": "히비키(응원단)",
+  "frame": "frame-020",
+  "box": [
+   755,
+   426,
+   94,
+   35
+  ],
+  "autolabel": "히비키(응원단)",
+  "old_engine": "히비키(응원단)"
+ },
+ "155.png": {
+  "label": "아츠코(수영복)",
+  "frame": "frame-020",
+  "box": [
+   868,
+   426,
+   94,
+   35
+  ],
+  "autolabel": "아츠코(수영복)",
+  "old_engine": "아츠코(수영복)"
+ },
+ "156.png": {
+  "label": "후부키",
+  "frame": "frame-020",
+  "box": [
+   305,
+   579,
+   94,
+   34
+  ],
+  "autolabel": "후부키",
+  "old_engine": "후부키"
+ },
+ "157.png": {
+  "label": "오토기",
+  "frame": "frame-020",
+  "box": [
+   417,
+   579,
+   94,
+   34
+  ],
+  "autolabel": "오토기",
+  "old_engine": "오토기"
+ },
+ "158.png": {
+  "label": "아오바",
+  "frame": "frame-020",
+  "box": [
+   529,
+   579,
+   95,
+   34
+  ],
+  "autolabel": "아오바",
+  "old_engine": "아오바"
+ },
+ "159.png": {
+  "label": "치아키(수영복)",
+  "frame": "frame-020",
+  "box": [
+   642,
+   579,
+   95,
+   34
+  ],
+  "autolabel": "치아키(수영복)",
+  "old_engine": "치아키(수영복)"
+ }
+}
