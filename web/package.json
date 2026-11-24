@@ -1,0 +1,19 @@
+{
+  "name": "ba-key-amas-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test \"test/*.test.ts\"",
+    "db:local": "wrangler d1 migrations apply ba-key-amas --local",
+    "db:remote": "wrangler d1 migrations apply ba-key-amas --remote",
+    "assets": "python -I scripts/extract-assets.py"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261124.1",
+    "typescript": "7.0.2",
+    "wrangler": "4.167.0"
+  }
+}

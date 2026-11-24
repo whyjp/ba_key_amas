@@ -25,3 +25,4 @@ scanner/Cargo.lock.bak
 # wiki DB is built locally from public data and not redistributed
 wikidb/wiki.db
 wikidb/wiki.db.tmp
+web/node_modules/
