@@ -76,7 +76,7 @@ function cell(c, rank, byName, meta, ctx) {
   t.title = `${ch.outfits.map((o) => o.name).join(" · ")}\n${num(ch.total)}점${ch.owners ? ` · ${ch.owners}명 보유` : ""}`;
   if (rank < 3) t.classList.add("top" + (rank + 1));
   // a portrait wherever there is room for a face; only a sliver gets none
-  const showArt = Math.min(c.w, c.h) >= 22 && a >= 700;
+  const showArt = Math.min(c.w, c.h) >= 16 && a >= 400;
   if (showArt) {
     const art = el("div", "hm-art");
     const shown = ch.outfits.filter((o) => o.id).slice(0, c.w >= 200 ? 3 : c.w >= 120 ? 2 : 1);
@@ -92,7 +92,7 @@ function cell(c, rank, byName, meta, ctx) {
     t.append(art);
   }
   const label = el("div", "hm-label");
-  if (c.w >= 30 && c.h >= 16) {
+  if (c.w >= 34 && c.h >= 18) {
     const big = a >= 9000;
     const small = a < 1800;
     label.append(el("b", small ? "tiny" : big ? "big" : "", ch.base));
@@ -110,14 +110,36 @@ function cell(c, rank, byName, meta, ctx) {
   return t;
 }
 
-function mountTreemap(frame, chars, byName, meta, ctx) {
+/** Area (px squared) the map aims to give each character. Below about 60 x 60 a face is hard to read, so a narrow window
+ *  gets a taller map (and scrolls) instead of a crowd of slivers. */
+const CELL_AREA = 3800;
+const MAX_HEIGHT = 1600;
+
+/** The height a map of `n` tiles needs at this width. */
+export function wantedHeight(n, width) {
+  return Math.min(MAX_HEIGHT, Math.ceil((n * CELL_AREA) / Math.max(width, 1)));
+}
+
+/**
+ * Draws the treemap into `frame` and redraws when the frame or the window changes size. `fit` frames fill the room
+ * their page gives them (the profile), and only get a minimum height; the others (the leaderboard page) are sized
+ * here: the window's height, or what the tiles need, whichever is larger.
+ */
+function mountTreemap(frame, chars, byName, meta, ctx, fit) {
   const draw = () => {
-    const { width, height } = frame.getBoundingClientRect();
-    if (width < 10 || height < 10) return;
+    if (!frame.isConnected) return;
+    const width = frame.getBoundingClientRect().width;
+    if (width < 10) return;
+    const need = wantedHeight(chars.length, width);
+    if (fit) frame.style.minHeight = need + "px";
+    else frame.style.height = Math.max(380, innerHeight - 330, need) + "px";
+    const { height } = frame.getBoundingClientRect();
+    if (height < 10) return;
     const tiles = squarify(chars.map((character) => ({ value: character.total, character })), 0, 0, width, height);
     frame.replaceChildren(...tiles.map((c, i) => cell(c, i, byName, meta, ctx)));
   };
   new ResizeObserver(draw).observe(frame);
+  addEventListener("resize", draw);
 }
 
 /** One teacher's characters. `top` (summary and favourites) sits above the map. */
@@ -127,7 +149,8 @@ export function heatmapView(d, ctx, meta, top) {
   const frame = el("div", "hm-frame");
   if (top) root.append(top);
   root.append(note, frame);
-  mountTreemap(frame, [...d.analysis.characters].filter((c) => c.total > 0).sort((a, b) => b.total - a.total), ctx.byName, meta, ctx);
+  root.classList.add("scrollable");
+  mountTreemap(frame, [...d.analysis.characters].filter((c) => c.total > 0).sort((a, b) => b.total - a.total), ctx.byName, meta, ctx, true);
   return root;
 }
 
@@ -138,6 +161,6 @@ export function communityHeatmap(characters, meta, teachers) {
   root.append(el("p", "hint", `공개한 선생님 ${teachers}명이 가진 학생을 캐릭터별로 더한 지도입니다. 넓을수록 많은 선생님이 아끼는 학생입니다. 칸에 마우스를 올리면 보유 인원이 보입니다.`));
   const frame = el("div", "hm-frame community-frame");
   root.append(frame);
-  mountTreemap(frame, characters.filter((c) => c.total > 0), new Map(), meta, { duty: new Set(), unread: new Map(), byName: new Map() });
+  mountTreemap(frame, characters.filter((c) => c.total > 0), new Map(), meta, { duty: new Set(), unread: new Map(), byName: new Map() }, false);
   return root;
 }

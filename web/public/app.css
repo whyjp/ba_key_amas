@@ -377,9 +377,27 @@ a.button.ghost-link:hover { background: var(--sky); }
 
 /* leaderboard tabs and the community map */
 .board-panel { margin-top: 12px; }
-.community-frame { height: calc(100vh - 330px); min-height: 380px; flex: none; }
+.community-frame { min-height: 380px; flex: none; }
 .community .hint { margin: 0 0 8px; }
 
 /* heatmap portraits are placed in script (size and offset per cell); the name sits on a soft gradient */
 .hm-art i { background-repeat: no-repeat; flex: 1; }
 .hm-art::after { background: linear-gradient(180deg, rgba(20, 36, 70, 0) 55%, rgba(20, 36, 70, .85)); }
+
+.main-view.scrollable { overflow: auto; }
+.lead-actions { flex-wrap: wrap; }
+.lead-actions .button { white-space: nowrap; }
+.lead-search { flex-wrap: nowrap; }
+@media (max-width: 560px) { .lead-search input { width: 100%; flex: 1; min-width: 0; } .lead-actions, .lead-search { width: 100%; } }
+/* narrow screens: tabs scroll sideways instead of wrapping letter by letter */
+@media (max-width: 760px) {
+  .layout.fit .tabs .tab { white-space: nowrap; flex: none; padding: 6px 12px; }
+  .layout.fit .side { gap: 6px; }
+  .layout.fit .teacher { flex-direction: row; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
+  .layout.fit .teacher .wide { width: auto; }
+}
+@media (max-width: 760px) {
+  .layout.fit { grid-template-columns: minmax(0, 1fr); }
+  .layout.fit .side, .layout.fit .tabbody { min-width: 0; }
+  .layout.fit .tabs { min-width: 0; overflow-x: auto; flex-wrap: nowrap; }
+}
