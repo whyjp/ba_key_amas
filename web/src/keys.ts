@@ -3,7 +3,7 @@
 // The server hashes the id once more under a secret pepper before it stores it, so a copy of the database
 // cannot be used to guess member codes (the code space is small). Nicknames are display text and are not unique.
 
-const FORBIDDEN = /[\p{C}\p{Zl}\p{Zp}#]/u; // controls, format and bidi characters, line separators, '#'
+const FORBIDDEN = /[\p{C}\p{Zl}\p{Zp}]/u; // controls, format and bidi characters, line separators
 const ACCOUNT_ID_RE = /^[0-9a-f]{64}$/;
 const PUBLIC_ID_RE = /^[0-9a-f]{16}$/;
 

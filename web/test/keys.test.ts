@@ -5,10 +5,12 @@ import { accountHash, foldNickname, normalizeNickname, parseAccountId, parsePubl
 
 const ID = "ab".repeat(32);
 
-test("nicknames reject controls, bidi marks and #", () => {
+test("nicknames reject controls and bidi marks but allow #, which is part of no key", () => {
+  assert.equal(normalizeNickname("a​b"), null, "format characters stay refused");
+  assert.equal(normalizeNickname("a#b"), "a#b");
+  assert.equal(normalizeNickname("#1 소다"), "#1 소다");
   assert.equal(normalizeNickname("a‮b"), null);
   assert.equal(normalizeNickname("a\nb"), null);
-  assert.equal(normalizeNickname("a#b"), null);
   assert.equal(normalizeNickname(""), null);
   assert.equal(normalizeNickname("x".repeat(17)), null);
   assert.equal(normalizeNickname("  소다팝 "), "소다팝");

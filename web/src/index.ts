@@ -89,7 +89,7 @@ function studentStatements(env: Env, userId: number, students: StudentRow[], kep
 
 async function upload(env: Env, up: Upload, accountId: string, client: Client): Promise<Response> {
   const nickname = normalizeNickname(up.nickname);
-  if (!nickname) return json(400, { error: "닉네임은 1~16자이며 # 과 제어 문자를 쓸 수 없습니다" });
+  if (!nickname) return json(400, { error: "닉네임은 1~16자이며 제어 문자를 쓸 수 없습니다" });
   const search = foldNickname(nickname);
   const hash = await accountHash(env.KEY_PEPPER, accountId);
   const pub = await publicId(env.KEY_PEPPER, accountId);
