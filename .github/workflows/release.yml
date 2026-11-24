@@ -1,0 +1,149 @@
+name: release
+
+# Builds the Windows add-on and publishes it as a GitHub Release.
+# Push a tag v<version> (the version in scanner/Cargo.toml) or run it by hand with that tag name.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, v<scanner/Cargo.toml version>. Created on the selected commit when it does not exist."
+        required: true
+        type: string
+
+# No job gets more than read unless it says so. Only the publish job writes, and it runs no code from this repository.
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+  ASSET: ba-key-AMAS-${{ github.event.inputs.tag || github.ref_name }}-windows-x64.zip
+  # Pinned model files (RapidOCR v3.10.0 on ModelScope). The sha256 is checked before anything is built.
+  MODEL_BASE: https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.10.0
+  SHA_DET: 090f04abcd9d9a7498bc4ebf677e4cb9bdce1fe4197ddb7e529f1ef44e1ff94f
+  SHA_REC: cd6e2ea50f6943ca7271eb8c56a877a5a90720b7047fe9c41a2e541a25773c9b
+  SHA_DICT: a88071c68c01707489baa79ebe0405b7beb5cca229f4fc94cc3ef992328802d7
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Release contract (tag, version, download URL, protocol, migrations)
+        run: ./scripts/release-check.ps1 -Tag $env:TAG
+
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustc --version
+          cargo --version
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            scanner/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('scanner/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+
+      - name: OCR models (pinned by sha256)
+        run: |
+          New-Item -ItemType Directory -Force models | Out-Null
+          $files = @(
+            @{ Url = "$env:MODEL_BASE/onnx/PP-OCRv6/det/PP-OCRv6_det_small.onnx"; Name = "PP-OCRv6_det_small.onnx"; Sha = $env:SHA_DET },
+            @{ Url = "$env:MODEL_BASE/onnx/PP-OCRv5/rec/korean_PP-OCRv5_rec_mobile.onnx"; Name = "korean_PP-OCRv5_rec_mobile.onnx"; Sha = $env:SHA_REC },
+            @{ Url = "$env:MODEL_BASE/paddle/PP-OCRv5/rec/korean_PP-OCRv5_rec_mobile/ppocrv5_korean_dict.txt"; Name = "korean_PP-OCRv5_dict.txt"; Sha = $env:SHA_DICT }
+          )
+          foreach ($f in $files) {
+            $dest = "models/$($f.Name)"
+            for ($i = 1; $i -le 4; $i++) {
+              try { Invoke-WebRequest -Uri $f.Url -OutFile $dest -TimeoutSec 300; break }
+              catch { if ($i -eq 4) { throw }; Start-Sleep -Seconds (5 * $i) }
+            }
+            $got = (Get-FileHash $dest -Algorithm SHA256).Hash.ToLower()
+            if ($got -ne $f.Sha) { throw "$($f.Name): sha256 $got, pinned $($f.Sha)" }
+            "{0}  {1:N0} bytes  {2}" -f $f.Name, (Get-Item $dest).Length, $got
+          }
+
+      - name: Wiki database (SchaleDB and story tables, schema version of this build)
+        working-directory: scanner
+        run: |
+          cargo run -p baocr-wikidb --release --locked -- ../wikidb/wiki.db
+          if ($LASTEXITCODE -ne 0) { throw "wikidb build failed ($LASTEXITCODE)" }
+          python -I ../scripts/check_wikidb.py ../wikidb/wiki.db
+          if ($LASTEXITCODE -ne 0) { throw "wiki.db check failed" }
+
+      - name: Tests
+        working-directory: scanner
+        env:
+          BAOCR_MODELS: ${{ github.workspace }}/models
+        run: |
+          cargo test --release --workspace --locked
+          if ($LASTEXITCODE -ne 0) { throw "cargo test failed ($LASTEXITCODE)" }
+
+      - name: Portable package, zip and SHA256SUMS
+        run: |
+          ./scripts/package-portable.ps1 -Out "$env:RUNNER_TEMP/pkg" -Zip "$env:GITHUB_WORKSPACE/dist/$env:ASSET"
+
+      - name: Smoke test of the packaged exe
+        run: |
+          $exe = "$env:RUNNER_TEMP/pkg/ba-key-AMAS.exe"
+          $v = (& $exe --version | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0) { throw "--version exited $LASTEXITCODE" }
+          $v
+          $want = "ba-key-AMAS " + $env:TAG.TrimStart("v")
+          if ($v -ne $want) { throw "version output '$v', expected '$want'" }
+          & $exe --help | Select-Object -First 5
+          if ($LASTEXITCODE -ne 0) { throw "--help exited $LASTEXITCODE" }
+          Get-Content "$env:GITHUB_WORKSPACE/dist/SHA256SUMS"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-files
+          path: |
+            dist/${{ env.ASSET }}
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-files
+          path: dist
+      - name: Verify the checksum, then create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          cd dist
+          sha256sum --check SHA256SUMS
+          flags=(--title "ba-key-AMAS $TAG" --generate-notes --target "$GITHUB_SHA")
+          case "$TAG" in *-*) flags+=(--prerelease) ;; esac
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$ASSET" SHA256SUMS --clobber
+          else
+            gh release create "$TAG" "$ASSET" SHA256SUMS "${flags[@]}"
+          fi

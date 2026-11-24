@@ -30,6 +30,7 @@ use std::sync::Arc;
 #[derive(Parser)]
 #[command(
     name = "ba-key-AMAS",
+    version,
     about = "Read Blue Archive student profile screens into data (4:3 or 16:9, windowed; the student scan needs 4:3)",
     after_help = "회원코드 (--upload, --manage):
   게임 메뉴 모음 > 계정 > 고객센터 > 회원코드 (13자, 소문자로 쳐도 됩니다. O는 0으로, I는 1로 읽고 L은 L 그대로입니다)를 입력하면 같은 계정을 다음 업로드에서 알아봅니다.
@@ -91,6 +92,9 @@ struct Args {
     /// Check the game window, DPI, monitors and permissions that sending input depends on, then exit. Sends no input.
     #[arg(long)]
     doctor: bool,
+    /// Print the version and whether this build carries the upload signing key (never the key itself), then exit.
+    #[arg(long)]
+    build_info: bool,
     /// Passive guide: recognise the game screen and show it, and for a picked mission its terrain and enemy types, on a card beside the game window. Screenshots only, no input.
     #[arg(long)]
     assist: bool,
@@ -191,6 +195,12 @@ fn load_ocr(args: &Args) -> Result<PpOcr> {
 
 fn real_main() -> Result<()> {
     let args = Args::parse();
+    if args.build_info {
+        let signed = option_env!("BAOCR_ADDON_SIGNING_KEY").is_some_and(|k| k.len() >= 16);
+        println!("ba-key-AMAS {}
+signed build: {}", env!("CARGO_PKG_VERSION"), if signed { "yes" } else { "no" });
+        return Ok(());
+    }
     if args.doctor {
         let report = baocr_hcu::run_doctor();
         println!("{}", report.render());
