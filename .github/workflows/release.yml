@@ -113,7 +113,7 @@ jobs:
           if ($v -ne $want) { throw "version output '$v', expected '$want'" }
           $info = Invoke-Exe "--build-info"
           $info
-          if ($info -notmatch "(?m)^signed build: yes?$") { throw "the shipped exe carries no signing key" }
+          if ($info -notmatch "signed build: yes") { throw "the shipped exe carries no signing key" }
           (Invoke-Exe "--help") -split "`n" | Select-Object -First 5
           Get-Content "$env:GITHUB_WORKSPACE/dist/SHA256SUMS"
 
