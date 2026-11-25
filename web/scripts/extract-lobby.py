@@ -233,6 +233,10 @@ def main() -> int:
         if not src.exists():
             time.sleep(PAUSE)
             src.write_bytes(get(f["url"]))
+        # the uncropped picture of blue-utils.me (fetch-lobby-blueutils.py) is taller than the wiki's cut: preferred when it is there
+        full = ROOT / "scripts" / ".cache" / "lobby-bu" / f"{sid}.webp"
+        if full.exists() and full.stat().st_size > 20000:
+            src = full
         bgr = cv2.imdecode(np.fromfile(str(src), dtype=np.uint8), cv2.IMREAD_COLOR)
         if bgr is None:
             missing.append(name)

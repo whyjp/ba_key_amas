@@ -100,6 +100,7 @@ ba-key-AMAS --forget-account
 | `extract-assets.py` | 학생 카탈로그, 초상화, 아이콘, 전신 입상, 메모리얼 로비, 학교 로고, `meta.json` | SchaleDB(글로벌 출시 학생만) |
 | `extract-halos.py` | 학생별 헤일로 `public/halos/<id>.png` | 블루 아카이브 위키 `HALO一覧` 페이지. 일본어 이름을 SchaleDB의 일본어 이름과 맞춘다. 의상은 기본 캐릭터의 헤일로를 쓴다 |
 | `extract-lobby.py` | 고화질 메모리얼 로비 `public/card-lobby/<id>.webp`와 `<id>-1`, `<id>-2`(760x1280, 학생마다 최대 3가지 컷), 목록 `card-lobby.json`, 컷 수 `card-lobby-variants.json` | 블루 아카이브 위키(bluearchive.wiki)의 `Memorial_Lobby_<이름>` 파일. 위키 API로 목록을 받고 SchaleDB 영어 이름과 맞춘 뒤, 만화 얼굴 검출기(`scripts/anime_faces.py`, `scripts/models/anime_face_v1.4_s.onnx`, deepghs/anime_face_detection, MIT)로 얼굴을 찾아 카드 세로면 전체에 맞게 자른다. 얼굴은 항상 온전하고 글자 영역을 피해 윗부분에 둔다. 컷은 가장 넓은 것, 얼굴 위치를 옮긴 것, 더 가까운 것이며 카드를 열 때마다 하나를 무작위로 고른다. 원본은 `scripts/.cache`에 둔다 |
+| `fetch-lobby-blueutils.py` | `scripts/.cache/lobby-bu/<id>.webp` (커밋하지 않음) | blue-utils.me의 잘리지 않은 메모리얼 로비 원본(`/static/img/memorylobby/original/<학생>_<의상>.webp`, 대부분 1.44:1). robots.txt의 요청 간격 5초를 지켜 받는다(약 25분). `extract-lobby.py`가 위키 원본보다 우선해서 쓴다. 사이트에 없는 학생(2명)은 위키 원본을 쓴다 |
 | `crop-art.py` | 카드 그림 `public/card/`(6:5), `public/card-lobby/`(위키에 없는 학생의 SchaleDB 썸네일 대체분), 얼굴 위치 `faces.json` | 입상의 투명 영역으로 인물 위치를 찾아 얼굴 쪽을 인물 폭에 맞게 자르고, 학생마다 같은 크기로 맞춘다. 게임의 초상화 전용 이미지(머리 크롭)는 카드에 쓰지 않는다. 학생 타일, 히트맵, 작은 아이콘은 그 이미지를 그대로 쓴다 |
 
 위키에 `npm run assets`는 마지막에 `audit-assets.py`를 돌린다. 학생마다 초상화, 아이콘, 전신 입상, 카드 크롭, 로비, 얼굴 위치, 헤일로, 학교 로고, 슬롯 종류가 있고 이미지가 실제로 열리는지(오류 페이지를 이미지로 저장하지 않았는지) 확인하며, 빠진 것이 있으면 빌드를 멈춘다. 원본에 없는 것(사텐 루이코의 학교 로고)만 `KNOWN_GAPS`에 적어 둔다. 직접 보려면 `npm run audit`.
