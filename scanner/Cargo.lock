@@ -370,6 +370,7 @@ dependencies = [
  "image",
  "oar-ocr",
  "ort",
+ "serde_json",
 ]
 
 [[package]]

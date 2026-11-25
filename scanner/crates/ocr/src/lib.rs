@@ -7,6 +7,8 @@
 //!   algorithm and the most probable candidate wins. With a dictionary of
 //!   student names this cannot return text that is not a student, and short
 //!   names are decided by likelihood instead of by a lossy text read.
+pub mod trocr;
+
 use anyhow::{anyhow, Result};
 use baocr_core::ocr_api::{Ocr, TextBox};
 use image::{imageops::FilterType, RgbImage};
