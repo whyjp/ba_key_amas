@@ -1,0 +1,27 @@
+# Line endings are LF everywhere: in the repository and in every checkout, whatever core.autocrlf says on a machine.
+# (A file edited on Windows may carry CRLF in the working tree for a moment; git writes LF into the repository.)
+* text=auto eol=lf
+
+# Files git must never convert or diff as text.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.ttf binary
+*.otf binary
+*.woff binary
+*.woff2 binary
+*.zip binary
+*.exe binary
+*.dll binary
+*.pdf binary
+*.db binary
+*.onnx binary
+
+# Third-party model data whose bytes are pinned by a checksum (models/SHA256SUMS): a converted line ending would change it.
+models/*.txt binary
+
+# Generated text kept as text so reviews can diff it.
+*.svg text eol=lf

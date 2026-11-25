@@ -76,7 +76,7 @@ test("the duty scan decides memorial lobby, by name", () => {
   });
   assert.equal(up.public, true);
   assert.deepEqual(up.students.map((x) => x.memorial), [true, false, null]);
-  assert.equal(parseUpload({ nickname: "x", roster: { entries: [{ student: { name: "a" } }] } }).public, false);
+  assert.equal(parseUpload({ nickname: "x", roster: { entries: [{ student: { name: "a" } }] } }).public, null, "not said: a stored choice is kept");
 });
 
 test("the community sum adds a character over the teachers who own it, outfits merged, without stats", () => {

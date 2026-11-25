@@ -6,6 +6,10 @@ Blue Archive(글로벌 서버, 한국어 UI, 4:3 창 모드)용 Windows 애드�
 
 ![아키텍처](docs/diagrams/crates.svg)
 
+## 웹 서버
+
+스캔 결과를 올려 두고 리더보드와 학생 카드를 보는 서버는 **https://key-amas.cxx.co.kr** 이다(Cloudflare Workers, 코드는 [web/](web/README.md)). 애드온은 이 주소를 기본값으로 가지고 있어 `ba-key-AMAS --upload`만 쳐도 올라간다. 올리는 값은 회원코드를 해시로 바꾼 것이며 원래 코드는 서버로 가지 않는다. 설치 파일은 [릴리스](https://github.com/whyjp/ba_key_amas/releases/latest)에서 받는다.
+
 ## 기능
 
 | 기능 | 게임에 입력을 보냄 |
@@ -49,11 +53,12 @@ Blue Archive(글로벌 서버, 한국어 UI, 4:3 창 모드)용 Windows 애드�
 | `ba-key-AMAS --doctor` | 게임 창, DPI, 모니터, 권한 상승, 포커스를 점검한다. 입력은 보내지 않는다 |
 | `ba-key-AMAS --scan-arrows --from-first --out scan` | 명령줄에서 명단을 스캔한다. `--fast`를 붙이면 메뉴 단계를 건너뛴다 |
 | `ba-key-AMAS --reextract scan [--ids 003,007]` | 저장한 프레임을 다시 읽는다. 게임 입력은 없다 |
-| `ba-key-AMAS --upload https://<서버> [--public]` | 마지막 스캔을 웹서버(`web/`)에 올리고 키를 저장한다. 게임 입력은 없다 |
+| `ba-key-AMAS --upload [https://<서버>] [--public]` (주소를 생략하면 `https://key-amas.cxx.co.kr`) | 마지막 스캔을 웹서버(`web/`)에 올린다. 처음에는 회원코드(메뉴 모음 > 계정 > 고객센터 > 회원코드)를 화면에 보이지 않게 두 번 묻고, 변환(해시)한 값만 저장하고 보낸다. 같은 회원코드는 같은 계정을 갱신한다. 게임 입력은 없다 |
+| `ba-key-AMAS --manage [https://<서버>] --visibility public\|private`, `ba-key-AMAS --forget-account` | 리더보드 공개 여부를 바꾼다. 저장한 계정 값을 지운다 |
 | `ba-key-AMAS --watch --out db` | 수동 관찰 업데이터 |
 | `ba-key-AMAS --learn shots` | 플레이하는 동안 새 화면과 그 텍스트를 모두 저장한다. 입력은 보내지 않는다 |
 | `ba-key-AMAS --image fixtures/detail-shun.png --out out` | 저장한 스크린샷 한 장을 파싱한다 |
-| `cargo run -p baocr-wikidb --release` | SchaleDB에서 `wikidb/wiki.db`를 만든다 |
+| `cargo run -p baocr-wikidb --release` | SchaleDB에서 `wikidb/wiki.db`를 새로 만든다(연구 단계에서만 실행하고 결과를 커밋한다. 빌드는 실행하지 않는다) |
 | `cargo run -p baocr-namedict` | 패치 뒤에 이름 사전을 갱신한다 |
 
 환경 변수는 다음과 같다. `BAOCR_MODELS`(모델 폴더), `BAOCR_OCR_DEVICE=cpu`(GPU를 쓰지 않음),

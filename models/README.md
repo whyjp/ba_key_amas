@@ -1,4 +1,4 @@
-# OCR 모델 (git이 추적하지 않음)
+# OCR 모델 (저장소에 커밋된 시드, 무결성은 `SHA256SUMS`)
 
 Rust 엔진(`scanner/crates/ocr`)이 쓰는 파일이다. 이 폴더에 두거나 `BAOCR_MODELS`를 설정한다.
 

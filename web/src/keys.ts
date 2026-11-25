@@ -1,13 +1,11 @@
-// The key is `nickname#hex6`. The nickname is unique (case and width folded). The tag is random and the
-// whole key is the secret, so it is never stored, only its HMAC.
+// An account is identified by `account_id`, which the add-on computes on the player's PC as
+// SHA-256("ba-key-amas/account/v1\0" + the game's member code). The member code itself never reaches this server.
+// The server hashes the id once more under a secret pepper before it stores it, so a copy of the database
+// cannot be used to guess member codes (the code space is small). Nicknames are display text and are not unique.
 
-const TAG_RE = /^[0-9a-f]{6}$/;
-const FORBIDDEN = /[\p{C}\p{Zl}\p{Zp}#]/u; // controls, format and bidi characters, line separators, '#'
-
-export interface ParsedKey {
-  nickname: string;
-  tag: string;
-}
+const FORBIDDEN = /[\p{C}\p{Zl}\p{Zp}]/u; // controls, format and bidi characters, line separators
+const ACCOUNT_ID_RE = /^[0-9a-f]{64}$/;
+const PUBLIC_ID_RE = /^[0-9a-f]{16}$/;
 
 export function normalizeNickname(raw: string): string | null {
   const nick = raw.normalize("NFC").trim();
@@ -16,28 +14,20 @@ export function normalizeNickname(raw: string): string | null {
   return nick;
 }
 
-/** The duplicate-check form: nicknames that fold to the same string are the same user. */
+/** The search form of a nickname: case and width folded, so "Soda" finds "ＳＯＤＡ". */
 export function foldNickname(nick: string): string {
   return nick.normalize("NFKC").toLowerCase();
 }
 
-export function parseKey(raw: string): ParsedKey | null {
-  const i = raw.lastIndexOf("#");
-  if (i < 0) return null;
-  const nickname = normalizeNickname(raw.slice(0, i));
-  const tag = raw.slice(i + 1).trim().toLowerCase();
-  if (!nickname || !TAG_RE.test(tag)) return null;
-  return { nickname, tag };
+/** The add-on's account id, 64 lower-case hex digits, or null. */
+export function parseAccountId(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const id = raw.trim().toLowerCase();
+  return ACCOUNT_ID_RE.test(id) ? id : null;
 }
 
-export function formatKey(k: ParsedKey): string {
-  return `${k.nickname}#${k.tag}`;
-}
-
-export function newTag(): string {
-  const b = new Uint8Array(3);
-  crypto.getRandomValues(b);
-  return [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
+export function parsePublicId(raw: unknown): string | null {
+  return typeof raw === "string" && PUBLIC_ID_RE.test(raw) ? raw : null;
 }
 
 const enc = new TextEncoder();
@@ -46,17 +36,18 @@ function hex(buf: ArrayBuffer): string {
   return [...new Uint8Array(buf)].map((x) => x.toString(16).padStart(2, "0")).join("");
 }
 
-/** HMAC of the folded nickname plus tag, so `Soda#abc123` and `soda#abc123` are one key. */
-export async function hashKey(pepper: string, k: ParsedKey): Promise<string> {
+async function hmac(pepper: string, message: string): Promise<string> {
+  if (!pepper) throw new Error("KEY_PEPPER is not set");
   const key = await crypto.subtle.importKey("raw", enc.encode(pepper), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  return hex(await crypto.subtle.sign("HMAC", key, enc.encode(`${foldNickname(k.nickname)}#${k.tag}`)));
+  return hex(await crypto.subtle.sign("HMAC", key, enc.encode(message)));
 }
 
-export async function keyMatches(pepper: string, k: ParsedKey, storedHash: string): Promise<boolean> {
-  const got = enc.encode(await hashKey(pepper, k));
-  const want = enc.encode(storedHash);
-  if (got.length !== want.length) return false;
-  let d = 0;
-  for (let i = 0; i < got.length; i++) d |= (got[i] ?? 0) ^ (want[i] ?? 0);
-  return d === 0;
+/** What the database stores to recognise an account. Separate prefixes keep it independent of `publicId`. */
+export function accountHash(pepper: string, accountId: string): Promise<string> {
+  return hmac(pepper, "account:" + accountId);
+}
+
+/** The stable, unguessable id that URLs and the leaderboard use. 64 bits, and it does not reveal the account hash. */
+export async function publicId(pepper: string, accountId: string): Promise<string> {
+  return (await hmac(pepper, "public:" + accountId)).slice(0, 16);
 }

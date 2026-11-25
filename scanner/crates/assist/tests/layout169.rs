@@ -45,7 +45,7 @@ fn cards_from_names(boxes: &[TextBox], rows_y: (f32, f32)) -> Vec<(String, CardN
             let column = (((b.x0 + b.x1) / 2.0 - 629.0) / 111.0).round().max(0.0);
             // the one-letter 슌 is read "순" by free text: the real reader settles it by ink width, here it is told
             let text = if b.text == "순" { "슌".to_string() } else { b.text.clone() };
-            (text.clone(), CardName { text, x: 629.0 + 111.0 * column, y0: b.y0 - 3.0 })
+            (text.clone(), CardName { text, x: 629.0 + 111.0 * column, y0: b.y0 - 3.0, bare: false })
         })
         .collect()
 }
@@ -61,7 +61,8 @@ fn the_squad_and_the_portrait_marks_land_on_the_16_9_quick_formation_popup() {
 
     // the squad screen gives the slots, the popup keeps them
     let mut observer = Observer::new(&ocr, &students);
-    let squad = observer.observe(&img, &recorded_boxes("w169-squad"), Scene::Unknown);
+    // (the squad screen has no popup: a frame without its tab pixels, the text and the pixels of one frame agree)
+    let squad = observer.observe(&image::RgbImage::new(1280, 720), &recorded_boxes("w169-squad"), Scene::Unknown);
     assert_eq!((squad.scene, squad.layout), (Scene::Squad, Layout::Ratio169));
     let names = |ids: &[i64]| ids.iter().map(|id| students.iter().find(|s| s.id == *id).unwrap().name.clone()).collect::<Vec<_>>();
     assert_eq!(names(&squad.squad), vec!["호시노(무장)", "하나코(수영복)", "시로코*테러", "미카", "아코", "키사키"]);

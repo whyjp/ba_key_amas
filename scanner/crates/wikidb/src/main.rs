@@ -1,4 +1,5 @@
-//! wikidb: builds the reference database from public sources.
+//! wikidb: refreshes the reference database from public sources. Run it during research and commit the result:
+//! the build and CI never run it (docs/SEED-DATA.md).
 //! `cargo run -p baocr-wikidb --release [-- <out.db>]` (default `../wikidb/wiki.db`).
 use anyhow::Result;
 use baocr_wikidb::{build_with, schaledb, story};

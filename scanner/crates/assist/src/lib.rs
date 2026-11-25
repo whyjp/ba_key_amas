@@ -13,6 +13,7 @@ pub mod assistant;
 pub mod library;
 pub mod matchup;
 pub mod observe;
+pub mod portrait;
 pub mod raid_lookup;
 pub mod settings;
 pub mod surface;

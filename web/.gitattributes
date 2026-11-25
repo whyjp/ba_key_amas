@@ -1,0 +1,10 @@
+# The generated game art and its JSON are stored byte for byte: no line-ending conversion, no text diff.
+public/**/*.webp binary
+public/**/*.png binary
+public/**/*.jpg binary
+public/meta.json -text
+public/halos.json -text
+public/card-lobby.json -text
+public/faces.json -text
+src/catalog.json -text
+src/backgrounds.json -text

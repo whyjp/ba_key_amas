@@ -1,6 +1,6 @@
 # ba-key-AMAS 웹
 
-스캐너(`../scanner`)가 만든 유저 데이터를 올려 두고, 키로 다시 꺼내 보는 Cloudflare Workers 앱이다. 스캐너 코드와는 폴더도 빌드도 따로다.
+스캐너(`../scanner`)가 만든 유저 데이터를 올려 두고, 계정 값으로 같은 선생님을 알아보는 Cloudflare Workers 앱이다. 스캐너 코드와는 폴더도 빌드도 따로다.
 
 | 구성 | 선택 | 이유 |
 |---|---|---|
@@ -9,49 +9,71 @@
 | 화면 | 프레임워크 없는 HTML, CSS, JS | 의존성이 없고, `innerHTML`을 쓰지 않는다 |
 | 개발 도구 | wrangler, typescript | `devDependencies`만, 정확한 버전으로 고정 |
 
-## 키
+## 회원코드와 계정
 
-- 키는 `닉네임#6자리hex`다. 닉네임은 스캐너가 읽은 이름이고, 대소문자와 전각을 접어서 중복을 막는다.
-- 서버는 키 원문을 저장하지 않는다. `KEY_PEPPER` 비밀값으로 만든 HMAC-SHA256만 저장한다.
-- 키는 URL이 아니라 POST 본문으로만 보낸다. 로그와 Referer에 남지 않는다.
-- 닉네임만으로는 조회할 수 없다. 틀린 키와 없는 닉네임은 같은 응답이다.
-- `POST /api/rekey`로 키를 바꾸면 이전 키는 바로 무효다. `POST /api/delete`로 데이터를 지운다.
-- 6자리 hex는 2^24가지라 추측 공격에 약하다. 막는 수단은 두 겹이다. 한 닉네임에 5번 틀리면 15분 잠기고, IP당 분당 30건의 속도 제한(`LIMITER`)이 건다. 잠금은 남이 닉네임을 알면 본인도 15분간 못 들어가게 만들 수 있는 대가가 있다.
+선생님은 게임의 회원코드(메뉴 모음 > 계정 > 고객센터 > 회원코드, 13자)로 알아본다. 닉네임은 표시용일 뿐이라 겹쳐도 된다(`닉네임#6자리` 키는 없어졌고, `#`도 닉네임에 쓸 수 있다).
+
+**애드온에 알리는 말.** 애드온은 업로드할 때 회원코드를 한 번 묻고(화면에 보이지 않게, 두 번), 이 문구를 먼저 보여 준다. 이 웹의 메인 페이지(애드온 받기 옆)와 애드온 `--help`에도 같은 문구가 있다.
+
+> 입력한 회원코드는 이 PC에서 변환(해시)된 값으로만 서버에 올라가며, 원본은 저장되거나 전송되지 않습니다. 서버는 그 값을 다시 비밀 값으로 변환해 저장합니다.
+
+**값이 만들어지는 순서.**
+
+1. 애드온(PC): 회원코드를 다듬는다. 앞뒤 공백을 자르고 먼저 모두 대문자로 바꾼 뒤 영문 대문자와 숫자만 남긴다. 그다음 헷갈리는 글자 둘만 접는다. `O`는 `0`으로, `I`는 `1`로 읽어 영(0)을 O로, 숫자 1을 I로 잘못 친 한 글자가 계정을 둘로 쪼개지 않게 한다(두 코드가 정확히 그 자리에서만 다를 확률은 무시한다). 게임의 코드는 대문자뿐이라 소문자로 친 `l`은 글자 L이므로 `L`로 두고 `1`로 접지 않는다(접으면 같은 사람이 계정 둘을 갖게 된다). 서버는 아직 배포되지 않아 이 규칙 이전에 만들어진 계정이 없으므로 도메인 접두어는 `v1` 그대로다. 13자가 아니면 거절한다. 그다음 `account_id = hex(SHA-256("ba-key-amas/account/v1\0" + 코드))`를 만든다. 원본 코드는 저장, 전송, 로그, 출력 어디에도 가지 않고 `account_id`만 `%APPDATA%/baocr/upload.json`에 남는다. `--forget-account`가 그것을 지운다. 스크립트용으로 환경 변수 `BAOCR_MEMBER_CODE`를 받는다(명령줄 인자는 받지 않는다, 셸 기록에 남기 때문). 로컬 시험용 `BAOCR_ACCOUNT_ID_FOR_TESTING`은 `account_id`를 그대로 준다.
+2. 서버: `account_hash = HMAC-SHA256(KEY_PEPPER, "account:" + account_id)`를 저장한다(UNIQUE). 비밀 값(pepper)이 있어서 데이터베이스만 새어도 회원코드를 대입해 볼 수 없다(코드 공간이 작아 pepper 없이는 전수 대입이 가능하다).
+3. 주소와 순위에 쓰는 `public_id = HMAC-SHA256(KEY_PEPPER, "public:" + account_id)`의 앞 16자리(UNIQUE)가 따로 있다. 둘 다 코드를 되돌릴 수 없다.
+
+같은 회원코드로 올리면 같은 줄을 갱신한다(닉네임 갱신, 학생과 진행 상태 교체, 공개 여부는 요청에 있을 때만 바꾼다). 새 회원코드면 새 줄이다. 새 계정은 비공개로 시작한다.
+
+**접근.** 공개한 선생님은 순위와 검색에 나온다. 검색은 공개한 선생님의 닉네임 앞부분으로 하고, 같은 닉네임이 여럿이면 후보 목록(점수, 마지막 업로드)을 보여 준다. 비공개 선생님은 목록에도 검색에도 없고 `#/u/<public_id>` 주소로만 열린다. 이 주소는 추측할 수 없고 애드온이 업로드 뒤에 알려 준다. 공개 여부와 삭제는 애드온에서만 하며, `account_id`를 보내 증명한다. 틀린 `account_id`는 없는 계정(404)이다. 계정 값이 256비트 해시라서 닉네임 키 때와 달리 추측으로 잠글 일이 없어 잠금은 없다. IP당 분당 30건의 속도 제한(`LIMITER`)은 남아 있다.
+
+### 위협 모델
+
+- **회원코드는 업로드의 열쇠 구실을 한다.** 회원코드를 아는 사람은 누구나 그 계정으로 올려 데이터를 덮어쓸 수 있고, 공개 여부를 바꾸거나 지울 수 있다. 서버는 코드를 갖고 있지 않아 이를 막을 수 없다. 코드는 친구나 고객센터가 볼 수 있는 값이라 비밀 번호만큼 강하지 않다는 점을 알고 쓴다.
+- **애드온 전용 헤더는 인증이 아니다.** `x-amas-protocol`, `x-amas-addon` 헤더는 누구나 보낼 수 있다. 브라우저의 우발적 요청, 옛 애드온, 실수를 막을 뿐이다. 그래서 상태를 바꾸는 요청에는 아래 서명이 더해진다.
+- **요청 서명(`x-amas-ts`, `x-amas-sig`).** `/api/upload`, `/api/visibility`, `/api/delete`는 `HMAC-SHA256(키, "{ts}\n{경로}\n{본문의 SHA-256}")`를 요구한다. 키는 공식 릴리스 빌드를 만들 때 CI 비밀(`BAOCR_ADDON_SIGNING_KEY`)에서 실행 파일에 들어가고 소스에는 없다. 서버는 같은 값을 비밀 `ADDON_SIGNING_KEY`로 계산해 비교한다(시간이 일정한 비교). 시각은 서버와 5분 넘게 다르면 거부하고, 경로와 본문이 서명에 들어가 다른 곳에 재사용하거나 본문을 바꾸면 맞지 않는다. 소스에서 직접 빌드한 애드온은 키가 없어 서버가 401로 거부한다. 서버에 키가 없으면 모두 허용하지 않고 모두 거부한다(500). **한계:** 실행 파일 안의 키는 역공학으로 꺼낼 수 있다. 이 서명은 "헤더 두 개를 흉내 내면 되는" 수준을 "공식 빌드를 분석해야 하는" 수준으로 올릴 뿐 완전한 보장이 아니다. 키가 새면 새 키로 릴리스를 내고 `ADDON_SIGNING_KEY_PREV`에 옛 키를 잠시 두었다가 지운다. 같은 요청을 5분 안에 다시 보내는 재생은 막지 못한다(업로드는 같은 내용을 덮어쓸 뿐이다).
+- **저장 시 보호.** 데이터베이스에는 `account_hash`와 `public_id`만 있다. 둘 다 pepper 없이는 계산할 수 없어, 데이터베이스 유출만으로는 회원코드나 `account_id`를 추측할 수 없다.
+- **pepper가 새면.** 코드 공간이 작아서 유출된 데이터베이스의 `account_hash`에 대해 회원코드를 대입해 계정을 알아낼 수 있게 된다(회원코드 13자 전수 대입은 비싸지만 불가능하지 않다). pepper를 바꾸면 모든 `account_hash`와 `public_id`가 달라져 기존 계정이 모두 끊기므로, 바꿀 때는 데이터를 지우고 다시 올리게 한다. 정해서 유지한다.
+- **`account_id`가 새면.** `account_id`는 회원코드의 해시일 뿐이지만 업로드에는 그것만 있으면 된다. 가진 사람은 그 계정을 덮어쓰거나 지울 수 있다. 회원코드 자체는 알 수 없다(SHA-256의 역산이 필요하다). 코드 공간이 작아 `account_id`로 코드를 대입해 찾아내는 일은 가능하다. `account_id`는 요청 본문으로만 보내고(URL, 로그, Referer에 남지 않는다) 서버는 응답과 로그에 싣지 않는다. 사용자의 PC에서는 `upload.json`이 곧 열쇠이므로 남에게 주지 않는다.
+- **비공개로 바꿔도 순위에 최대 1분 남는다.** `/api/leaderboard`와 `/api/leaderboard/students`는 60초 동안 공개 캐시되므로, 방금 비공개로 바꾸거나 삭제한 계정이 이미 캐시된 순위 응답에는 최대 60초 더 보일 수 있다. 동작은 바꾸지 않았다. 캐시가 풀린 뒤에는 나오지 않는다.
+- **계정 만들기는 막지 않는다.** 모르는 `account_id`로도 새 계정이 만들어진다(회원코드를 서버가 확인할 수 없다). 남용은 IP 속도 제한과 본문 크기 제한이 맡는다. 새 계정을 만드는 요청에는 따로 더 엄한 제한이 있다. IP당 분당 5개(`CREATE_LIMITER`, wrangler.jsonc의 `ratelimits`)이고, 이미 있는 계정을 갱신하는 요청은 이 몫을 쓰지 않으며 분당 30건의 공용 제한(`LIMITER`)만 받는다. 이것은 한 IP가 하루에 계정을 수만 개 만드는 일을 하루 7천 개 남짓으로 줄일 뿐이다. 여러 IP를 가진 공격자가 가짜 계정을 대량으로 만드는 일은 막지 못한다(회원코드를 서버가 확인할 수 없기 때문이다). 가짜 계정은 비공개가 기본이라 순위를 어지럽히려면 공개로 올려야 하고, 그래도 순위에는 점수가 높은 100명만 나온다.
+- 서버가 알 수 없는 것: 회원코드가 정말 그 사람의 것인지, 한 사람이 여러 계정을 만드는지.
 
 ## 화면
 
 | 경로 | 내용 |
 |---|---|
 | `#/` | 메인 페이지. 리더보드와 그 위쪽의 검색창(검색창은 이 자리에만 있다). 리더보드는 두 탭이다. 학생 히트맵(공개한 선생님 전체의 캐릭터를 더한 지도, 학생 개별 스탯은 넣지 않음)과 선생님 순위. 순위에서 선생님을 누르면 그 선생님의 상세 화면으로 간다 |
-| `#/u/<닉네임>` | 공개한 선생님의 상세 화면. 탭은 오버뷰(기본, 학생 히트맵), 학생(썸네일), 학생 리스트, 스토리, 이벤트 스토리, 임무, 모모톡, 당번 · 메모리얼, 스케줄 |
-| `#/p` | 키로 연 선생님의 상세 화면(주소에 키를 싣지 않는다) |
+| `#/u/<public_id>` | 선생님의 상세 화면. 순위, 검색 결과, 애드온이 알려 준 주소로 열린다. 비공개 선생님도 이 주소로 열린다. 탭은 오버뷰(기본, 학생 히트맵), 학생(썸네일), 학생 리스트, 스토리, 이벤트 스토리, 임무, 모모톡, 당번 · 메모리얼, 스케줄 |
 
-검색창은 닉네임이면 공개한 선생님을 찾고, `닉네임#6자리` 키를 넣으면 공개 여부와 상관없이 그 선생님을 연다. 웹에는 공개 전환, 키 변경, 삭제가 없다. 이것들은 애드온에서만 한다(아래).
+검색창은 공개한 선생님의 닉네임 앞부분으로 찾는다(대소문자와 전각은 같게 본다). 한 명이면 바로 열고, 여럿이면 후보 목록을 보여 준다. 웹에는 공개 전환과 삭제가 없다. 이것들은 애드온에서만 한다(아래).
 
 업로드 화면도 없다. 데이터는 애드온에서만 올린다.
 
 ## 업로드와 버전
 
 ```
-ba-key-AMAS --upload https://<서버> [--public] [--nickname 이름]
+ba-key-AMAS --upload [https://<서버>] [--public] [--nickname 이름]   # 주소를 생략하면 https://key-amas.cxx.co.kr
 ```
 
 ```
 ba-key-AMAS --manage https://<서버> --visibility public|private
-ba-key-AMAS --manage https://<서버> --rekey
+ba-key-AMAS --forget-account
 ```
 
-공개 여부와 키 변경도 애드온에서만 한다. 저장한 키로 서버에 요청하며, 키를 바꾸면 저장된 키도 바뀐다.
+공개 여부도 애드온에서만 바꾼다. `--public`이 없으면 서버가 가진 공개 여부를 그대로 둔다(새 계정은 비공개).
 
-마지막 학생 스캔(`students.json`)과 진행 스캔(`latest.json`)을 보낸다. 닉네임은 진행 스캔이 읽은 계정 이름이다. 서버가 준 키는 `%APPDATA%/baocr/upload.json`에 서버와 닉네임별로 저장해, 다음 업로드가 같은 항목을 갱신한다. 키가 새어 나가지 않도록 https와 loopback 주소만 받는다.
+마지막 학생 스캔(`students.json`)과 진행 스캔(`latest.json`)을 보낸다. 닉네임은 진행 스캔이 읽은 계정 이름이다. 처음 올릴 때 회원코드를 묻고(위 "회원코드와 계정"), 이후에는 저장된 `account_id`로 같은 줄을 갱신한다. 업로드가 끝나면 그 선생님의 주소(`<서버>/#/u/<public_id>`)를 보여 준다. `account_id`가 새어 나가지 않도록 https와 loopback 주소만 받는다.
 
 버전은 `src/version.ts`가 관리한다. 서버가 받아들이는 범위를 정한다.
 
+- 업로드 규약 2부터 `account_id`로 계정을 알아본다. 규약 1(닉네임과 키)의 애드온은 426과 설치 링크를 받는다.
 - 애드온은 `x-amas-protocol`(업로드 규약 번호)과 `x-amas-addon`(애드온 버전) 헤더를 보낸다. 서버는 `MIN_PROTOCOL`부터 `PROTOCOL`까지를 받는다. 범위 밖이면 426이고, 응답에 설치 안내 링크(`download`)가 들어 있다.
 - 스캔 파일의 `schema_version`도 본다. 학생 명단이 `MIN_ROSTER_SCHEMA`, 진행 상태가 `MIN_PROGRESS_SCHEMA`보다 낮으면 426이다.
 - 서버를 고쳐 스키마가 바뀌거나, 새 애드온의 데이터를 받아야 할 때 `MIN_PROTOCOL`을 올려 구버전을 거부한다. 하위 호환이 되는 변경이면 범위를 그대로 둔다.
 - 브라우저의 요청(`Origin`, `Sec-Fetch-*` 헤더)은 403이다. 이 검사는 애드온을 식별할 뿐 인증하지는 않는다. 헤더는 누구나 보낼 수 있다.
-- 설치 링크는 `wrangler.jsonc`의 `ADDON_URL`이다. 지금은 GitHub 릴리즈 페이지를 가리키며, 주소가 정해지면 그 값만 바꾼다. `GET /api/version`이 서버 버전과 범위, 링크를 돌려준다.
+- 서버 주소는 `https://key-amas.cxx.co.kr`(Cloudflare 맞춤 도메인, 콘솔의 Worker 설정에서 연결)이고 애드온에 기본값으로 들어 있다(`scanner/crates/cli/src/upload.rs`의 `DEFAULT_SERVER`). 주소를 바꾸면 그 상수와 릴리스를 함께 갱신한다.
+- 설치 링크는 `wrangler.jsonc`의 `ADDON_URL`이다. GitHub 릴리즈 페이지를 가리키며, 바꿀 때는 그 값만 바꾼다. `GET /api/version`이 서버 버전과 범위, 링크를 돌려준다.
 
 ## API
 
@@ -59,21 +81,20 @@ ba-key-AMAS --manage https://<서버> --rekey
 
 | 경로 | 본문 | 응답 |
 |---|---|---|
-| `/api/upload` | `{nickname, key?, public?, roster, progress?}` (애드온 헤더 필요) | 새 닉네임이면 201과 새 키. 있는 닉네임은 맞는 `key`가 있어야 갱신하고, 없으면 409. `public`은 기본이 꺼짐 |
-| `/api/profile` | `{key}` | 닉네임, 계정, 학생 목록, 진행 상태, 분석(대표 3인과 합계) |
-| `/api/visibility` | `{key, public}` (애드온 헤더 필요) | 리더보드 공개 여부 변경 |
-| `/api/rekey` | `{key}` (애드온 헤더 필요) | 새 키 |
-| `/api/delete` | `{key}` (애드온 헤더 필요) | 삭제 |
+| `/api/upload` | `{account_id, nickname, public?, roster, progress?}` (애드온 헤더 필요) | 새 계정이면 201, 있으면 200(갱신). `{created, public_id, students, public, score}`. `public`을 보내지 않으면 공개 여부를 그대로 둔다 |
+| `/api/visibility` | `{account_id, public}` (애드온 헤더 필요) | 리더보드 공개 여부 변경. 없는 계정이면 404 |
+| `/api/delete` | `{account_id}` (애드온 헤더 필요) | 삭제. 없는 계정이면 404 |
+| `GET /api/search?q=` | 없음 | 공개한 선생님 중 닉네임이 `q`로 시작하는 사람 20명까지 `{matches: [{public_id, nickname, score, updated_at}]}` |
+| `GET /api/public?id=` | 없음 | `public_id`의 선생님 정보(크레딧과 AP 제외). 비공개 선생님도 열린다. 없으면 404 |
 | `GET /api/leaderboard/students` | 없음 | 공개한 선생님 전체의 캐릭터를 의상을 합쳐 더한 목록(캐릭터, 점수 합, 보유 인원, 의상). 학생 개별 스탯은 담지 않음 |
-| `GET /api/leaderboard` | 없음 | 공개 유저 100명까지, 점수 순. 60초 캐시 |
-| `GET /api/public?nickname=` | 없음 | 공개한 유저의 정보(크레딧과 AP 제외). 비공개면 404 |
+| `GET /api/leaderboard` | 없음 | 공개 유저 100명까지, 점수 순, `public_id` 포함. 60초 캐시 |
 | `GET /api/version` | 없음 | 서버 버전, 받는 업로드 규약 범위, 설치 링크 |
 
 `roster`는 스캐너의 `students.json` 그대로다. 서버가 알려진 필드만 범위를 검사해서 남기고 나머지는 버린다. 메모리얼 로비 해금은 `progress.duty.students`의 이름과 학생 이름을 맞춰 가져온다.
 
 ## 에셋
 
-게임 이미지는 저장소에 없고 `npm run assets`가 빌드 때 받아 온다. 모두 `.gitignore` 대상이다.
+게임 이미지는 저장소에 커밋되어 있고(정책은 [../docs/ASSETS.md](../docs/ASSETS.md)), `npm run assets`는 유지보수자가 다시 만들 때만 돌린다. 원본 입력인 `public/standing/`, `public/lobby/`, `scripts/.cache/`는 `.gitignore` 대상이다.
 
 | 스크립트 | 만드는 것 | 출처 |
 |---|---|---|
@@ -117,6 +138,7 @@ ba-key-AMAS --manage https://<서버> --rekey
 ## 보안 설정
 
 - 화면과 에셋은 `public/_headers`의 CSP(`default-src 'none'`, 스크립트와 스타일은 `'self'`만), `X-Frame-Options`, `nosniff`, `no-referrer`가 붙는다. API 응답은 `Cache-Control: no-store`다.
+- `account_id`와 회원코드는 URL, 응답, 로그에 나오지 않는다(`test/accounts.test.ts`가 확인한다).
 - 상태를 바꾸는 요청은 Origin이 다르면 거부하고, JSON이 아니면 거부한다(CSRF). 쿠키는 쓰지 않는다.
 - SQL은 모두 바인딩 인자로 쓴다.
 
@@ -124,21 +146,40 @@ ba-key-AMAS --manage https://<서버> --rekey
 
 ```
 npm ci
-npm run assets          # 학생 카탈로그와 초상화를 SchaleDB에서 받는다 (커밋하지 않는다)
-echo KEY_PEPPER=dev-only > .dev.vars
+npm run assets          # 유지보수자 전용: 이미지와 카탈로그를 처음부터 다시 만든다 (약 20분, 결과를 커밋하면 역사가 그만큼 커진다)
 npm run db:local
-npm run dev
-ba-key-AMAS --upload http://127.0.0.1:8787 --public
+npm run dev             # 먼저 scripts/sync-dev-vars.ts가 저장소 .env의 키로 .dev.vars를 만든다 (아래 .env 참고)
+ba-key-AMAS --upload http://127.0.0.1:8787 --public   # 처음에는 회원코드를 묻는다
 npm test ; npm run typecheck
+pwsh -File scripts/e2e-accounts.ps1          # wrangler dev 위에서 올려 보는 종단 시험
 ```
+
+## 로컬 `.env` (git이 무시한다)
+
+저장소 루트의 `.env`에 `BAOCR_ADDON_SIGNING_KEY=<키>`를 넣어 두면 로컬 작업이 모두 같은 키를 쓴다. 견본은 `.env.example`이다. `.env`는 `.gitignore`에 있어 커밋되지 않는다.
+
+- **빌드와 `cargo test`.** `scanner/crates/cli/build.rs`가 가장 가까운 `.env`(없으면 `BAOCR_ENV_FILE`이 가리키는 파일)를 읽어 컴파일러에 키를 넘긴다. 그래서 로컬 빌드도 공식 릴리스처럼 서명한다. 환경 변수 `BAOCR_ADDON_SIGNING_KEY`가 이미 있으면 그쪽이 우선이다(CI가 쓰는 경로). `.env`를 **처음 만든 뒤에는** `touch scanner/crates/cli/build.rs`로 한 번 다시 읽히게 하고, 이후 값을 바꾸면 cargo가 알아서 다시 빌드한다.
+- **로컬 서버(`npm run dev`).** `scripts/sync-dev-vars.ts`가 `.env`의 키를 `web/.dev.vars`의 `ADDON_SIGNING_KEY`로 옮긴다. 키가 없으면 `ALLOW_UNSIGNED_ADDON=1`을 쓰고(로컬 개발 전용) 그렇다고 알려 준다. `KEY_PEPPER`는 처음에 무작위로 만들어 두고 이후 유지한다.
+- **종단 시험.** `scripts/e2e-accounts.ps1`은 `-SigningKey`를 주지 않으면 `.env`의 키를 읽고, 실행 파일이 그 키로 빌드되었다고 보고 런타임에는 키를 건네지 않는다. 그러니 `.env`를 쓴 뒤에 빌드한 실행 파일을 `-Exe`로 줘야 한다.
+- 작업 트리(worktree)는 저장소 루트가 아니라서 각자 `.env`를 두거나 `BAOCR_ENV_FILE`로 한 파일을 가리켜야 한다. 키를 모든 작업 트리에 흩뿌리지 않는 쪽을 권한다.
+
+## 애드온 서명 키 설정
+
+1. 키를 한 번 만든다. `openssl rand -hex 32`
+2. 서버: 대시보드의 변수 및 비밀에 `ADDON_SIGNING_KEY`를 Secret으로 넣는다(`KEY_PEPPER`와 다른 값). 없으면 업로드가 모두 500으로 거부된다.
+3. 애드온: GitHub 저장소 Settings, Secrets and variables, Actions에 `ADDON_SIGNING_KEY`로 같은 값을 넣고, 릴리스 워크플로가 `BAOCR_ADDON_SIGNING_KEY`로 컴파일 때 넘긴다(`cargo build` 환경 변수). 로컬 개발에서는 같은 변수를 실행할 때 줄 수 있다.
+4. 키를 바꿀 때: 새 키로 릴리스를 내고, 서버에는 새 키를 `ADDON_SIGNING_KEY`, 옛 키를 `ADDON_SIGNING_KEY_PREV`로 둔다. 옛 애드온이 업데이트될 시간을 준 뒤 `ADDON_SIGNING_KEY_PREV`를 지운다.
 
 ## Cloudflare 깃 연결 배포
 
-1. `npx wrangler d1 create ba-key-amas`를 한 번 실행하고 나온 ID를 `wrangler.jsonc`의 `database_id`에 넣는다.
+전체 순서와 릴리즈 순서, 롤백은 [../docs/DEPLOY.md](../docs/DEPLOY.md)에 있다.
+
+1. D1 데이터베이스 `ba-key-amas`는 이미 만들어 두었고 그 ID가 `wrangler.jsonc`의 `database_id`에 있다.
 2. 대시보드에서 Workers Builds로 이 저장소를 연결하고 Root directory를 `web`으로 한다.
-3. Build command는 `npm ci && npm run assets`, Deploy command는 `npx wrangler d1 migrations apply ba-key-amas --remote && npx wrangler deploy`로 한다. 마이그레이션은 자동으로 돌지 않아서 배포 명령에 넣었다.
-4. 비밀값 `KEY_PEPPER`는 대시보드의 Variables and secrets에 Secret으로 넣는다. 바꾸면 기존 키가 모두 무효가 되므로 한 번 정하고 유지한다.
-5. 초상화와 `src/catalog.json`은 저장소에 없고 빌드 때 만든다. 게임 이미지를 저장소에 두지 않기 위해서다.
+3. Build command는 `npm ci`, Deploy command는 `npx wrangler d1 migrations apply ba-key-amas --remote && npx wrangler deploy`로 한다. 마이그레이션은 자동으로 돌지 않아서 배포 명령에 넣었다.
+4. 비밀값 `KEY_PEPPER`는 대시보드의 Variables and secrets에 Secret으로 넣는다(32바이트 이상의 무작위 값). 바꾸면 기존 계정이 모두 끊기므로 한 번 정하고 유지한다. 새어 나가면 위 위협 모델을 본다.
+   마이그레이션 `0007`은 사용자 표를 새로 만들며 이전 모양의 행을 지운다(배포 전 시험 행만 있다는 전제). 데이터가 쌓인 뒤에는 이런 마이그레이션을 쓰지 않는다.
+5. 이미지와 `src/catalog.json`은 저장소에 커밋되어 있다([../docs/ASSETS.md](../docs/ASSETS.md)). `npm run assets`는 유지보수자가 다시 만들 때만 쓴다.
 
 ---
 

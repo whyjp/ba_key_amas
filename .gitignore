@@ -18,12 +18,14 @@ dist-go/
 *.exe
 .hermes_transcript.txt
 
-models/
 scanner/target/
 scanner/Cargo.lock.bak
 
-# wiki DB is built locally from public data and not redistributed
-wikidb/wiki.db
+# wikidb/wiki.db is a committed seed (see docs/SEED-DATA.md); only its scratch files are ignored
 wikidb/wiki.db.tmp
 web/node_modules/
 wikidb/*.bak
+
+# local secrets, never committed (copy .env.example to .env)
+.env
+.env.local

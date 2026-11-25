@@ -76,8 +76,11 @@ fn the_squad_keeps_its_slot_order_through_the_popup_and_is_forgotten_on_leaving(
     let mut observer = Observer::new(&ocr, &students);
     let name = |ids: &[i64]| ids.iter().map(|id| students.iter().find(|s| s.id == *id).unwrap().name.clone()).collect::<Vec<_>>();
 
+    // (the squad and lobby screens carry no popup, so those readings use a frame without its tab pixels: the text and
+    // the pixels of one frame always agree)
+    let no_popup = image::RgbImage::new(img.width(), img.height());
     // the 편성 screen gives the slot order
-    let on_squad = observer.observe(&img, &recorded_boxes("squad"), Scene::Unknown);
+    let on_squad = observer.observe(&no_popup, &recorded_boxes("squad"), Scene::Unknown);
     assert_eq!(on_squad.scene, Scene::Squad);
     let order = name(&on_squad.squad);
     assert_eq!(order, vec!["호시노(무장)", "하나코(수영복)", "시로코*테러", "사오리(드레스)", "아코", "키사키"]);
@@ -88,7 +91,7 @@ fn the_squad_keeps_its_slot_order_through_the_popup_and_is_forgotten_on_leaving(
         assert_eq!(name(&in_popup.squad), order, "selected cards in the grid do not reorder the squad");
     }
     // leaving for the main menu forgets it
-    let lobby = observer.observe(&img, &recorded_boxes("lobby"), Scene::Unknown);
+    let lobby = observer.observe(&no_popup, &recorded_boxes("lobby"), Scene::Unknown);
     assert_eq!(lobby.scene, Scene::Lobby);
     assert!(lobby.squad.is_empty());
 }

@@ -32,6 +32,7 @@ serde_json.workspace = true
 image.workspace = true
 clap = { version = "4", features = ["derive"] }
 ureq = { version = "2", features = ["json"] }
+hmac-sha256 = "1"
 baocr-names = { path = "../names" }
 
 [dev-dependencies]

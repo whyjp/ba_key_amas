@@ -23,6 +23,8 @@ pub enum Icon {
     Attack(TypeTag),
     /// The student's armor type, a fixed fact from the database.
     Armor(TypeTag),
+    /// Attack and armor type side by side in one row, for places too short for two stacked badges.
+    Pair(TypeTag, TypeTag),
 }
 
 /// The game's colours for attack and armor types.
@@ -101,6 +103,7 @@ fn extent(icon: &Icon) -> (f32, f32) {
         Icon::Fit(_) => (19.0, 19.0),
         Icon::Special => (30.0, 17.0),
         Icon::Attack(_) | Icon::Armor(_) => (TYPE_BADGE, TYPE_BADGE),
+        Icon::Pair(..) => (TYPE_BADGE * 2.0 + GAP, TYPE_BADGE),
     }
 }
 
@@ -223,6 +226,10 @@ fn draw_icon(img: &mut RgbaImage, fonts: &Fonts, icon: &Icon, x: f32, y: f32, k:
             let glyph = tag.glyph.to_string();
             let tw = text_width(&fonts.bold, px, &glyph);
             draw_text(img, &fonts.bold, px, x + (w - tw) / 2.0, y + (h - px * 1.2) / 2.0, TEXT, 1.0, &glyph);
+        }
+        Icon::Pair(attack, armor) => {
+            draw_icon(img, fonts, &Icon::Attack(*attack), x, y, k);
+            draw_icon(img, fonts, &Icon::Armor(*armor), x + (TYPE_BADGE + GAP) * k, y, k);
         }
         Icon::Special => {
             fill_rrect(img, x - edge, y - edge, w + edge * 2.0, h + edge * 2.0, h * 0.3, |_, _| (OUTLINE, 0.85));

@@ -7,8 +7,9 @@
 use baocr_core::ocr_api::{Ocr, TextBox};
 use baocr_extract::raid::{RaidRef, RaidTracker};
 use baocr_extract::scene::{classify_in, squad_names_in, Layout, MissionRef, MissionTracker, Scene};
+use crate::portrait;
 use baocr_extract::{read_card_names, CardName};
-use baocr_pixels::{quick_card_selected, quick_tab_is_striker};
+use baocr_pixels::{quick_card_labels, quick_card_selected, quick_tab_is_striker, quick_thumb_cards};
 use baocr_wikidb::{StudentBrief, Wiki};
 use image::RgbImage;
 
@@ -24,6 +25,9 @@ pub struct Observation {
     pub cards: Vec<CardName>,
     /// The squad being edited, strikers and specials in slot order, as far as it has been seen.
     pub squad: Vec<i64>,
+    /// Who stands in each of the six slots of the squad strip (four strikers, two specials): the strikers' portraits are
+    /// told by their pictures (the slots carry no name), the specials by the names under the popup.
+    pub slots: [Option<i64>; 6],
     /// The kind of student the grid's active tab lists: "Main" (STRIKER) or "Support" (SPECIAL).
     pub grid_kind: Option<&'static str>,
     /// The screen ratio of the frame this was read from: where marks are placed depends on it.
@@ -32,7 +36,7 @@ pub struct Observation {
 
 impl Observation {
     pub fn new(scene: Scene) -> Observation {
-        Observation { scene, mission: None, raid: None, cards: Vec::new(), squad: Vec::new(), grid_kind: None, layout: Layout::Ratio43 }
+        Observation { scene, mission: None, raid: None, cards: Vec::new(), squad: Vec::new(), slots: [None; 6], grid_kind: None, layout: Layout::Ratio43 }
     }
 
     /// The 빠른 편성 popup is up but its grid shows no names (compact view).
@@ -44,6 +48,43 @@ impl Observation {
 /// A frame with at most this many text boxes, right after the main menu, is the idle main menu.
 const IDLE_MAX_BOXES: usize = 1;
 
+/// Name labels are 12 to 14 px text, so a card's name is now and then not read for a frame or two while nothing on
+/// screen has changed. Taking its icons down for that frame makes the icons blink. A card that was read at a place
+/// and is missing from an otherwise identical reading is kept for a few readings; any scroll or tab change (the other
+/// cards no longer sit where they did) forgets everything at once.
+#[derive(Debug, Default)]
+struct CardMemory {
+    cards: Vec<CardName>,
+    kind: Option<&'static str>,
+    /// How many readings in a row the kept cards have been carried over.
+    age: u8,
+}
+
+/// Readings a missing card is carried over for.
+const CARD_MEMORY_READINGS: u8 = 2;
+/// Two labels at the same place, in frame pixels.
+const SAME_PLACE: f32 = 4.0;
+
+impl CardMemory {
+    fn steady(&mut self, fresh: Vec<CardName>, kind: Option<&'static str>) -> Vec<CardName> {
+        let same = |a: &CardName, b: &CardName| (a.x - b.x).abs() < SAME_PLACE && (a.y0 - b.y0).abs() < SAME_PLACE;
+        let unmoved = self.kind == kind && !fresh.is_empty() && fresh.iter().filter(|f| self.cards.iter().any(|p| same(f, p))).count() * 2 >= fresh.len();
+        let missing: Vec<CardName> = if unmoved { self.cards.iter().filter(|p| !fresh.iter().any(|f| same(f, p))).cloned().collect() } else { Vec::new() };
+        let mut cards = fresh;
+        if missing.is_empty() {
+            self.age = 0;
+        } else if self.age < CARD_MEMORY_READINGS {
+            self.age += 1;
+            cards.extend(missing);
+        } else {
+            self.age = 0;
+        }
+        self.cards = cards.clone();
+        self.kind = kind;
+        cards
+    }
+}
+
 pub struct Observer<'a> {
     ocr: &'a dyn Ocr,
     students: &'a [StudentBrief],
@@ -52,11 +93,15 @@ pub struct Observer<'a> {
     squad: Vec<i64>,
     /// The last screen that was recognised (the idle lobby is told from it: it has no text of its own).
     last: Scene,
+    cards: CardMemory,
+    /// Whether each student is a striker (true) or a special, and each one's name: what the portraits are matched among.
+    strikers: std::collections::HashMap<i64, bool>,
+    names: std::collections::HashMap<i64, String>,
 }
 
 impl<'a> Observer<'a> {
     pub fn new(ocr: &'a dyn Ocr, students: &'a [StudentBrief]) -> Observer<'a> {
-        Observer { ocr, students, tracker: MissionTracker::default(), raid_tracker: RaidTracker::default(), squad: Vec::new(), last: Scene::Unknown }
+        Observer { ocr, students, tracker: MissionTracker::default(), raid_tracker: RaidTracker::default(), squad: Vec::new(), last: Scene::Unknown, cards: CardMemory::default(), strikers: students.iter().map(|s| (s.id, s.squad_type == "Main")).collect(), names: students.iter().map(|s| (s.id, s.name.clone())).collect() }
     }
 
     /// Forget the mission and the squad (the game was closed: what was known is not true any more).
@@ -65,6 +110,7 @@ impl<'a> Observer<'a> {
         self.raid_tracker = RaidTracker::default();
         self.squad.clear();
         self.last = Scene::Unknown;
+        self.cards = CardMemory::default();
     }
 
     /// `boxes`: the frame's free-text OCR. `fallback`: the screen to assume when the text
@@ -74,6 +120,13 @@ impl<'a> Observer<'a> {
         let mut scene = classify_in(boxes, None, layout);
         if scene == Scene::Unknown {
             scene = fallback;
+        }
+        // The 빠른 편성 popup is modal: while it is up, the text may fail to name it for a frame (a glow on its title,
+        // the cursor over it), or the screen behind it (the squad screen) may be named instead. Read as "the popup is
+        // gone", that takes every icon down and puts them back a moment later. The active tab's red fill says the popup
+        // is still there.
+        if matches!(scene, Scene::Unknown | Scene::Squad) && quick_tab_is_striker(img).is_some() {
+            scene = Scene::QuickFormation;
         }
         // After the main menu the game hides every menu when the player is idle: art and no text.
         if scene == Scene::Unknown && boxes.len() <= IDLE_MAX_BOXES && matches!(self.last, Scene::Lobby | Scene::LobbyIdle) {
@@ -99,12 +152,16 @@ impl<'a> Observer<'a> {
             }
             Scene::QuickFormation => {
                 obs.grid_kind = quick_tab_is_striker(img).map(|striker| if striker { "Main" } else { "Support" });
-                obs.cards = read_card_names(self.ocr, img, boxes);
+                // with the names hidden (the grid's thumbnail view) the cards are told by their pictures
+                let fresh = if quick_card_labels(img).is_empty() { self.thumb_cards(img, obs.grid_kind) } else { read_card_names(self.ocr, img, boxes) };
+                obs.cards = self.cards.steady(fresh, obs.grid_kind);
                 for c in &obs.cards {
                     if let Some(s) = Wiki::match_student_as(self.students, &c.text, obs.grid_kind) {
                         // a student already in the squad keeps their slot; only changes move anyone
                         let at = self.squad.iter().position(|id| *id == s.id);
-                        match (quick_card_selected(img, c.x.round() as i32, c.y0.round() as i32), at) {
+                        // the selection band is placed from the name label, which lies 106 px under a bare card's top
+                        let label_y = c.y0.round() as i32 + if c.bare { 106 } else { 0 };
+                        match (quick_card_selected(img, c.x.round() as i32, label_y), at) {
                             (true, None) => self.squad.push(s.id),
                             (false, Some(i)) => {
                                 self.squad.remove(i);
@@ -123,8 +180,61 @@ impl<'a> Observer<'a> {
             }
             _ => {}
         }
-        obs.squad = self.squad.clone();
+        obs.slots = self.slots(img, scene, layout);
+        obs.squad = if scene == Scene::QuickFormation { obs.slots.iter().flatten().copied().collect() } else { self.squad.clone() };
         obs
+    }
+
+    /// The cards of the grid's thumbnail view, each told by its picture (only what is believed is named).
+    /// Two students are costumes of one character.
+    fn kin(&self, a: i64, b: i64) -> bool {
+        match (self.names.get(&a), self.names.get(&b)) {
+            (Some(x), Some(y)) => portrait::base_name(x) == portrait::base_name(y),
+            _ => false,
+        }
+    }
+
+    fn thumb_cards(&self, img: &RgbImage, kind: Option<&'static str>) -> Vec<CardName> {
+        let Some(kind) = kind else { return Vec::new() };
+        let striker = kind == "Main";
+        let book = portrait::Book::bundled();
+        let same = |a: i64, b: i64| self.names.get(&a) == self.names.get(&b);
+        quick_thumb_cards(img)
+            .into_iter()
+            .filter_map(|card| {
+                let m = book.identify(&portrait::probe(img, card.cx as f32, card.picture_y() as f32), &|id| self.strikers.get(&id) == Some(&striker), &same)?;
+                let name = self.names.get(&m.id).filter(|_| m.trusted_with(&|a, b| self.kin(a, b)))?;
+                Some(CardName { text: name.clone(), x: card.cx as f32, y0: card.top() as f32, bare: true })
+            })
+            .collect()
+    }
+
+    /// The six slots of the strip. In the popup the strikers' pictures say who they are; where a picture is not
+    /// believed, the names read elsewhere fill the slot in order, as before.
+    fn slots(&self, img: &RgbImage, scene: Scene, layout: Layout) -> [Option<i64>; 6] {
+        let is_striker = |id: &i64| self.strikers.get(id) == Some(&true);
+        let named_strikers: Vec<i64> = self.squad.iter().copied().filter(is_striker).collect();
+        let specials: Vec<i64> = self.squad.iter().copied().filter(|id| !is_striker(id)).collect();
+        let mut slots = [None; 6];
+        if scene == Scene::QuickFormation {
+            let book = portrait::Book::bundled();
+            let same = |a: i64, b: i64| self.names.get(&a) == self.names.get(&b);
+            for (k, slot) in slots.iter_mut().enumerate().take(4) {
+                let (cx, cy) = portrait::slot_centre(k, layout);
+                *slot = book.identify(&portrait::probe(img, cx, cy), &|id| self.strikers.get(&id) == Some(&true), &same).filter(|m| m.trusted_with(&|a, b| self.kin(a, b))).map(|m| m.id);
+            }
+        }
+        let seen: Vec<i64> = slots.iter().flatten().copied().collect();
+        let mut rest = named_strikers.into_iter().filter(|id| !seen.contains(id));
+        for slot in slots.iter_mut().take(4) {
+            if slot.is_none() {
+                *slot = rest.next();
+            }
+        }
+        for (k, id) in specials.into_iter().take(2).enumerate() {
+            slots[4 + k] = Some(id);
+        }
+        slots
     }
 }
 
@@ -235,6 +345,54 @@ mod tests {
         let mission = see("mission-info");
         assert!(mission.raid.is_none() && mission.mission.is_some(), "a mission screen forgets the raid");
         assert!(see("raid-formation-empty").mission.is_none(), "and a raid screen the mission");
+    }
+
+    #[test]
+    fn the_popup_stays_the_popup_when_its_title_is_not_read_for_a_frame() {
+        /// Reads nothing, but scores every name it is offered (as a real model does), so the card reading can run.
+        struct Blank;
+        impl Ocr for Blank {
+            fn boxes(&self, _: &RgbImage) -> anyhow::Result<Vec<TextBox>> {
+                Ok(Vec::new())
+            }
+            fn line(&self, _: &RgbImage) -> anyhow::Result<(String, f32)> {
+                Ok((String::new(), 0.0))
+            }
+            fn choose(&self, _: &RgbImage, names: &[String]) -> anyhow::Result<(usize, Vec<f32>)> {
+                Ok((0, vec![f32::NEG_INFINITY; names.len()]))
+            }
+        }
+        let ocr = Blank;
+        let mut o = Observer::new(&ocr, &[]);
+        let popup = image::open(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../fixtures/screens/quick-formation.png")).expect("fixture").to_rgb8();
+        // no text read at all (the title was missed): the red tab still says "popup"
+        assert_eq!(o.observe(&popup, &[], Scene::Unknown).scene, Scene::QuickFormation);
+        // a frame without the popup is not mistaken for it
+        let lobby = RgbImage::new(1280, 960);
+        assert_eq!(o.observe(&lobby, &[], Scene::Unknown).scene, Scene::Unknown);
+    }
+
+    #[test]
+    fn a_card_missed_for_a_frame_keeps_its_icons_but_a_scroll_forgets_every_card() {
+        let card = |name: &str, x: f32, y0: f32| CardName { text: name.into(), x, y0, bare: false };
+        let (a, b, c) = (card("a", 100.0, 400.0), card("b", 210.0, 400.0), card("c", 320.0, 400.0));
+        let mut m = CardMemory::default();
+        assert_eq!(m.steady(vec![a.clone(), b.clone(), c.clone()], Some("Main")).len(), 3);
+        // c is missing from two identical readings in a row: still there
+        assert_eq!(m.steady(vec![a.clone(), b.clone()], Some("Main")).len(), 3);
+        assert_eq!(m.steady(vec![a.clone(), b.clone()], Some("Main")).len(), 3);
+        // missing for a third time: really gone
+        assert_eq!(m.steady(vec![a.clone(), b.clone()], Some("Main")).len(), 2);
+        assert_eq!(m.steady(vec![a.clone(), b.clone()], Some("Main")).len(), 2, "and it does not come back by itself");
+        // a scroll moves every card: nothing from before is kept
+        let mut m = CardMemory::default();
+        m.steady(vec![a.clone(), b.clone(), c.clone()], Some("Main"));
+        let scrolled = vec![card("d", 100.0, 300.0), card("e", 210.0, 300.0)];
+        assert_eq!(m.steady(scrolled.clone(), Some("Main")), scrolled);
+        // so does the other tab
+        let mut m = CardMemory::default();
+        m.steady(vec![a.clone(), b.clone(), c], Some("Main"));
+        assert_eq!(m.steady(vec![a, b], Some("Support")).len(), 2);
     }
 
     #[test]

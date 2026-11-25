@@ -240,6 +240,12 @@ const CARD_HALF_WIDTH: i32 = 52;
 /// A grid card's outline relative to its name label: (left, top, right, bottom) around its centre
 /// and above/below the label's top.
 const CARD_FRAME: (i32, i32, i32, i32) = (-55, -106, 55, 41);
+/// In the thumbnail view the card is the portrait alone: the column of icons starts as far under the card's top as it
+/// does in the named view (where the label is 106 px under the card's top), and the card is this tall.
+const THUMB_LABEL_BELOW_TOP: i32 = 106;
+const THUMB_CARD_HEIGHT: i32 = 98;
+/// The icon column of a bare card starts this far under its top: a full column (verdict, the two types, face) is 83 px tall.
+const THUMB_COLUMN_BELOW_TOP: i32 = 12;
 /// The grid's viewport: a card whose portrait is mostly scrolled out of it gets no icons.
 const GRID_ICONS_TOP: i32 = 322;
 const GRID_ICONS_BOTTOM: i32 = 600;
@@ -271,19 +277,29 @@ fn popup_spots(layout: Layout) -> PopupSpots {
     }
 }
 
-/// What goes on one student's portrait: how well it suits the battle and the terrain face,
-/// or just "SP" for a special that is not rated. Without a known mission nothing can be
-/// rated, and only the terrain face (when the terrain is known) remains.
-fn marks_of(s: &StudentBrief, brief: Option<&MissionBrief>, terrain: Option<&str>, types: &TypeTable) -> (Vec<Icon>, Option<baocr_overlay::Grade>) {
+/// What goes on one student's portrait, top to bottom: how well it suits the battle (or "SP" for a special
+/// that is not rated), then the attack and armor type, then the terrain face. The types are the student's
+/// own facts, so they are shown whether or not a mission is known: the verdict never takes their place.
+/// Without a known mission nothing can be rated, and the types and the terrain face (when known) remain.
+fn marks_of(s: &StudentBrief, brief: Option<&MissionBrief>, terrain: Option<&str>, types: &TypeTable, paired: bool) -> (Vec<Icon>, Option<baocr_overlay::Grade>) {
     let face = terrain.and_then(|t| s.adaptation(t)).map(Icon::Face);
+    let kinds = type_icons(s, paired);
     match brief.map(|b| rate(s, b, terrain, types)) {
         Some(Rating::Rated(fit)) => {
             let grade = grade_of(fit);
-            (std::iter::once(Icon::Fit(grade)).chain(face).collect(), Some(grade))
+            (std::iter::once(Icon::Fit(grade)).chain(kinds).chain(face).collect(), Some(grade))
         }
-        Some(Rating::NotRated(_)) => (vec![Icon::Special], None),
-        // no mission to rate against: the fixed facts of the student, straight from the database
-        None => (attack_icon(&s.bullet_type).into_iter().chain(armor_icon(&s.armor_type)).chain(face).collect(), None),
+        Some(Rating::NotRated(_)) => (std::iter::once(Icon::Special).chain(kinds).collect(), None),
+        None => (kinds.into_iter().chain(face).collect(), None),
+    }
+}
+
+/// The attack and armor type badges: two stacked ones, or one row when `paired` (the squad strip has
+/// little height to spare).
+fn type_icons(s: &StudentBrief, paired: bool) -> Vec<Icon> {
+    match (paired, attack_icon(&s.bullet_type), armor_icon(&s.armor_type)) {
+        (true, Some(Icon::Attack(a)), Some(Icon::Armor(r))) => vec![Icon::Pair(a, r)],
+        (_, a, r) => a.into_iter().chain(r).collect(),
     }
 }
 
@@ -321,19 +337,28 @@ pub fn card_marks_in(cards: &[CardName], students: &[StudentBrief], brief: Optio
     cards
         .iter()
         .filter_map(|c| {
-            let top = c.y0.round() as i32 - COLUMN_TOP_ABOVE_NAME;
+            // a card without a name label is placed by its own top: the label sits THUMB_LABEL_BELOW_TOP under it in the other view
+            let y0 = c.y0.round() as i32 + if c.bare { THUMB_LABEL_BELOW_TOP } else { 0 };
+            let top = y0 - COLUMN_TOP_ABOVE_NAME;
             if !(spots.grid_icons_top..=spots.grid_icons_bottom).contains(&top) {
                 return None;
             }
             let s = Wiki::match_student_as(students, &c.text, kind)?;
-            let (icons, grade) = marks_of(&s, brief, terrain, types);
+            // pictures only: the card is short, so lay the icons out as on the squad strip (the two types side by side,
+            // the column on the card's right edge and inside its height); the named view has room for them stacked
+            let (icons, grade) = marks_of(&s, brief, terrain, types, c.bare);
             if icons.is_empty() {
                 return None;
             }
-            let (cx, y0) = (c.x.round() as i32, c.y0.round() as i32);
-            let mark = Mark::column_from_top(cx + CARD_HALF_WIDTH, top, icons);
+            let cx = c.x.round() as i32;
+            let mark = if c.bare {
+                Mark::column_from_top(cx + CARD_FRAME.2, c.y0.round() as i32 + THUMB_COLUMN_BELOW_TOP, icons)
+            } else {
+                Mark::column_from_top(cx + CARD_HALF_WIDTH, top, icons)
+            };
+            let (frame_top, frame_bottom) = if c.bare { (y0 - THUMB_LABEL_BELOW_TOP, y0 - THUMB_LABEL_BELOW_TOP + THUMB_CARD_HEIGHT) } else { (y0 + CARD_FRAME.1, y0 + CARD_FRAME.3) };
             Some(match grade {
-                Some(grade) => mark.framed(Frame { left: cx + CARD_FRAME.0, top: y0 + CARD_FRAME.1, right: cx + CARD_FRAME.2, bottom: y0 + CARD_FRAME.3, grade }),
+                Some(grade) => mark.framed(Frame { left: cx + CARD_FRAME.0, top: frame_top, right: cx + CARD_FRAME.2, bottom: frame_bottom, grade }),
                 None => mark,
             })
         })
@@ -358,9 +383,7 @@ impl Widget for PortraitIcons {
     }
 }
 
-/// Right edges of the six slots of the squad strip at the bottom of the 빠른 편성 popup:
-/// four strikers, then two specials (frame pixels). The icon columns straddle these edges.
-const SLOT_RIGHT_EDGES: [i32; 6] = [111, 205, 300, 392, 490, 579];
+use crate::portrait::SLOT_RIGHT_EDGES;
 /// Top of the column: below the leader badge of the first slot.
 const SLOT_COLUMN_TOP: i32 = 700;
 /// A slot's outline: this far left of its right edge, between these rows, this far right of it.
@@ -373,13 +396,25 @@ pub fn slot_marks(team: &[StudentBrief], brief: Option<&MissionBrief>, terrain: 
 
 /// [`slot_marks`] for a frame of the given layout.
 pub fn slot_marks_in(team: &[StudentBrief], brief: Option<&MissionBrief>, terrain: Option<&str>, types: &TypeTable, layout: Layout) -> Vec<Mark> {
+    let mut slots: [Option<StudentBrief>; 6] = Default::default();
+    for (i, s) in team.iter().filter(|s| s.squad_type == "Main").take(4).enumerate() {
+        slots[i] = Some(s.clone());
+    }
+    for (i, s) in team.iter().filter(|s| s.squad_type != "Main").take(2).enumerate() {
+        slots[4 + i] = Some(s.clone());
+    }
+    slot_marks_at(&slots, brief, terrain, types, layout)
+}
+
+/// Marks for the squad strip when who stands in each slot is known (an empty or unknown slot gets none).
+pub fn slot_marks_at(slots: &[Option<StudentBrief>; 6], brief: Option<&MissionBrief>, terrain: Option<&str>, types: &TypeTable, layout: Layout) -> Vec<Mark> {
     let spots = popup_spots(layout);
-    let strikers = team.iter().filter(|s| s.squad_type == "Main").take(4).enumerate().map(|(i, s)| (i, s));
-    let specials = team.iter().filter(|s| s.squad_type != "Main").take(2).enumerate().map(|(i, s)| (4 + i, s));
-    strikers
-        .chain(specials)
+    slots
+        .iter()
+        .enumerate()
+        .filter_map(|(slot, s)| s.as_ref().map(|s| (slot, s)))
         .filter_map(|(slot, s)| {
-            let (icons, grade) = marks_of(s, brief, terrain, types);
+            let (icons, grade) = marks_of(s, brief, terrain, types, true);
             if icons.is_empty() {
                 return None;
             }
@@ -408,7 +443,7 @@ impl Widget for SlotStats {
     }
     fn render(&self, cx: &Context) -> Option<Output> {
         // the strip's place on a raid's popup is not known: no icons rather than icons on the wrong things
-        (cx.obs.scene == Scene::QuickFormation && cx.obs.raid.is_none()).then(|| Output::Marks(slot_marks_in(&cx.team(), cx.brief(), cx.terrain(), cx.types, cx.obs.layout)))
+        (cx.obs.scene == Scene::QuickFormation && cx.obs.raid.is_none()).then(|| Output::Marks(slot_marks_at(&cx.slot_students(), cx.brief(), cx.terrain(), cx.types, cx.obs.layout)))
     }
 }
 
@@ -487,37 +522,39 @@ mod tests {
     }
 
     #[test]
-    fn portrait_marks_carry_the_grade_a_terrain_face_and_a_frame_and_skip_rows_scrolled_out() {
+    fn portrait_marks_carry_the_grade_the_attack_and_armor_type_a_terrain_face_and_a_frame_and_skip_rows_scrolled_out() {
         let (b, t) = (brief(), types());
         let students = squad();
         let cards = vec![
-            CardName { text: "시로코*테러".into(), x: 736.0, y0: 429.0 },
-            CardName { text: "하나코(수영복)".into(), x: 1181.0, y0: 432.0 },
-            CardName { text: "하나코(수영복)".into(), x: 1181.0, y0: 370.0 }, // portrait mostly above the grid
-            CardName { text: "알수없음".into(), x: 900.0, y0: 430.0 },
+            CardName { text: "시로코*테러".into(), x: 736.0, y0: 429.0, bare: false },
+            CardName { text: "하나코(수영복)".into(), x: 1181.0, y0: 432.0, bare: false },
+            CardName { text: "하나코(수영복)".into(), x: 1181.0, y0: 370.0, bare: false }, // portrait mostly above the grid
+            CardName { text: "알수없음".into(), x: 900.0, y0: 430.0, bare: false },
         ];
         let marks = card_marks(&cards, &students, Some(&b), Some("Outdoor"), &t, None);
         assert_eq!(marks.len(), 2, "a row scrolled out and an unknown name get no marks");
-        assert_eq!(marks[0].icons, vec![Icon::Fit(Grade::Excellent), Icon::Face(4)]);
-        assert_eq!(marks[1].icons, vec![Icon::Fit(Grade::Poor), Icon::Face(2)]);
+        let (pierce, heavy) = (Icon::Attack(TypeTag { hue: Hue::Yellow, glyph: '관' }), Icon::Armor(TypeTag { hue: Hue::Yellow, glyph: '중' }));
+        let (mystic, unarmed) = (Icon::Attack(TypeTag { hue: Hue::Blue, glyph: '신' }), Icon::Armor(TypeTag { hue: Hue::Blue, glyph: '특' }));
+        // the verdict and the student's own types are both there: the verdict does not take the types' place
+        assert_eq!(marks[0].icons, vec![Icon::Fit(Grade::Excellent), pierce.clone(), heavy.clone(), Icon::Face(4)]);
+        assert_eq!(marks[1].icons, vec![Icon::Fit(Grade::Poor), mystic, unarmed, Icon::Face(2)]);
         // the column's middle is on the portrait's right edge, its top just below the badge
         assert_eq!((marks[0].cx, marks[0].top(), marks[0].vertical), (736 + 52, 429 - 68, true));
         let frame = marks[0].frame.unwrap();
         assert_eq!((frame.left, frame.right, frame.grade), (736 - 55, 736 + 55, Grade::Excellent));
         // no mission known: nothing to rate, so the fixed facts from the database: attack type, armor type, terrain face
-        let pierce = Icon::Attack(TypeTag { hue: Hue::Yellow, glyph: '관' });
-        let heavy = Icon::Armor(TypeTag { hue: Hue::Yellow, glyph: '중' });
         assert_eq!(card_marks(&cards, &students, None, Some("Outdoor"), &t, None)[0].icons, vec![pierce.clone(), heavy.clone(), Icon::Face(4)]);
         assert_eq!(card_marks(&cards, &students, None, None, &t, None)[0].icons, vec![pierce, heavy], "without a terrain the face is left out, the types stay");
     }
 
     #[test]
-    fn a_special_judged_by_skill_gets_only_sp_and_no_frame() {
+    fn a_special_judged_by_skill_gets_sp_and_its_types_but_no_frame() {
         let (b, t) = (brief(), types());
         let students = squad();
-        let cards = vec![CardName { text: "아코".into(), x: 736.0, y0: 429.0 }, CardName { text: "이로하".into(), x: 847.0, y0: 429.0 }];
+        let cards = vec![CardName { text: "아코".into(), x: 736.0, y0: 429.0, bare: false }, CardName { text: "이로하".into(), x: 847.0, y0: 429.0, bare: false }];
         let marks = card_marks(&cards, &students, Some(&b), Some("Outdoor"), &t, Some("Support"));
-        assert_eq!(marks[0].icons, vec![Icon::Special]);
+        let (mystic, light) = (Icon::Attack(TypeTag { hue: Hue::Blue, glyph: '신' }), Icon::Armor(TypeTag { hue: Hue::Red, glyph: '경' }));
+        assert_eq!(marks[0].icons, vec![Icon::Special, mystic, light]);
         assert!(marks[0].frame.is_none());
         assert_eq!(marks[1].icons[0], Icon::Fit(Grade::Excellent), "an attacker special is rated like a striker");
     }
@@ -528,9 +565,9 @@ mod tests {
         let striker = student(10, "호시노(무장)", "Pierce", "HeavyArmor", 1, "Main", "DamageDealer");
         let special = student(11, "호시노(무장)", "Mystic", "HeavyArmor", 1, "Support", "Healer");
         let students = vec![striker, special];
-        let cards = vec![CardName { text: "호시노(무장)".into(), x: 736.0, y0: 429.0 }];
+        let cards = vec![CardName { text: "호시노(무장)".into(), x: 736.0, y0: 429.0, bare: false }];
         assert!(card_marks(&cards, &students, Some(&b), None, &t, None).is_empty(), "no tab known, two different students");
-        assert_eq!(card_marks(&cards, &students, Some(&b), None, &t, Some("Support"))[0].icons, vec![Icon::Special]);
+        assert_eq!(card_marks(&cards, &students, Some(&b), None, &t, Some("Support"))[0].icons[0], Icon::Special);
         assert!(matches!(card_marks(&cards, &students, Some(&b), None, &t, Some("Main"))[0].icons[0], Icon::Fit(_)));
     }
 
@@ -540,7 +577,7 @@ mod tests {
         let team = vec![squad()[0].clone(), squad()[3].clone(), squad()[5].clone()];
         let marks = slot_marks(&team, Some(&b), Some("Outdoor"), &t);
         assert_eq!(marks.iter().map(|m| (m.cx, m.top())).collect::<Vec<_>>(), vec![(111, 700), (205, 700), (490, 700)]);
-        assert_eq!(marks[2].icons, vec![Icon::Special]);
+        assert_eq!(marks[2].icons[0], Icon::Special);
         assert!(slot_marks(&[], Some(&b), None, &t).is_empty());
     }
 
@@ -599,7 +636,7 @@ mod tests {
         let labels = baocr_pixels::quick_card_labels(&shot.to_rgb8());
         let mut students = squad();
         students.extend((0..6).map(|i| student(20 + i, &format!("학생{i}"), ["Pierce", "Explosion", "Mystic"][i as usize % 3], ["HeavyArmor", "Unarmed", "LightArmor"][i as usize % 3], (i as u8 * 2) % 5, "Main", "DamageDealer")));
-        let cards: Vec<CardName> = labels.iter().enumerate().map(|(i, l)| CardName { text: students[i % students.len()].name.clone(), x: l.cx as f32, y0: l.y0 as f32 }).collect();
+        let cards: Vec<CardName> = labels.iter().enumerate().map(|(i, l)| CardName { text: students[i % students.len()].name.clone(), x: l.cx as f32, y0: l.y0 as f32, bare: false }).collect();
         let mut marks = card_marks(&cards, &students, Some(&b), Some("Outdoor"), &t, None);
         marks.extend(slot_marks(&team, Some(&b), Some("Outdoor"), &t));
         for w in [1280u32, 640, 458] {

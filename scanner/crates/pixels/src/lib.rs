@@ -742,6 +742,71 @@ pub fn quick_card_labels(img: &RgbImage) -> Vec<CardLabel> {
     out
 }
 
+/// A card of the 빠른 편성 grid in its thumbnail view (pictures only, no name labels).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ThumbCard {
+    /// Horizontal centre of the card.
+    pub cx: i32,
+    /// Top of the solid colour band (its class colour) along the portrait's bottom: the one thing on the card that
+    /// is flat colour from side to side, so it fixes the row wherever the grid has been scrolled to.
+    pub bar_top: i32,
+}
+
+impl ThumbCard {
+    /// Centre of the portrait's picture.
+    pub fn picture_y(&self) -> i32 {
+        self.bar_top - 28
+    }
+    /// Top of the card's white tile.
+    pub fn top(&self) -> i32 {
+        self.bar_top - 79
+    }
+}
+
+/// Does the row `y` hold the class colour band across the 28 px around `cx`: saturated and the same colour all along.
+fn is_class_band(img: &RgbImage, cx: i32, y: i32) -> bool {
+    let samples: Vec<[i32; 3]> = (-14..=14).step_by(4).map(|d| img.get_pixel((cx + d) as u32, y as u32).0.map(i32::from)).collect();
+    let saturated = samples.iter().filter(|p| p.iter().max().unwrap() - p.iter().min().unwrap() >= 90).count();
+    let mut med = [0i32; 3];
+    for (c, m) in med.iter_mut().enumerate() {
+        let mut v: Vec<i32> = samples.iter().map(|p| p[c]).collect();
+        v.sort_unstable();
+        *m = v[v.len() / 2];
+    }
+    let flat = samples.iter().filter(|p| (0..3).all(|c| (p[c] - med[c]).abs() <= 24)).count();
+    saturated * 5 >= samples.len() * 4 && flat * 5 >= samples.len() * 4
+}
+
+/// The cards of the thumbnail view whose portrait is whole in the grid's viewport, wherever it has been scrolled to.
+pub fn quick_thumb_cards(img: &RgbImage) -> Vec<ThumbCard> {
+    let dy = centred_dy(img);
+    let (grid_top, grid_bottom) = (GRID_TOP + dy, (GRID_BOTTOM + dy).min(img.height() as i32 - 1));
+    let mut out = Vec::new();
+    for k in 0..LABEL_COLUMNS {
+        let cx = LABEL_LEFT + LABEL_WIDTH / 2 + k * LABEL_PITCH;
+        if (cx + 15) as u32 >= img.width() {
+            continue;
+        }
+        let mut runs: Vec<(i32, i32)> = Vec::new();
+        for y in grid_top..=grid_bottom {
+            if is_class_band(img, cx, y) {
+                match runs.last_mut() {
+                    Some(r) if y - r.1 <= 1 => r.1 = y,
+                    _ => runs.push((y, y)),
+                }
+            }
+        }
+        for (s, e) in runs {
+            // the band is 7 px thick; a card whose picture is cut off by the viewport's top is not whole
+            if (4..=10).contains(&(e - s + 1)) && s - 56 >= grid_top {
+                out.push(ThumbCard { cx, bar_top: s });
+            }
+        }
+    }
+    out.sort_by_key(|c| (c.bar_top / 40, c.cx));
+    out
+}
+
 /// The label's text as ink (dark on white), ready for the closed-set reader.
 pub fn quick_label_ink(img: &RgbImage, l: &CardLabel) -> GrayImage {
     let (x0, x1) = (l.cx - LABEL_WIDTH / 2 + 3, l.cx + LABEL_WIDTH / 2 - 3);

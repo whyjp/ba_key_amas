@@ -368,6 +368,7 @@ a.nick:hover { background: var(--sky); }
 .lead-strip h1 { margin: 0 0 2px; }
 .lead-strip .hint { margin: 0; }
 .lead-actions { display: flex; gap: 8px; }
+.addon-note { flex-basis: 100%; margin: 0; font-size: .85em; }
 a.button.ghost-link { background: var(--white); color: var(--navy); }
 a.button.ghost-link:hover { background: var(--sky); }
 
