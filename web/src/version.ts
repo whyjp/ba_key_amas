@@ -9,7 +9,7 @@
 // This identifies the add-on, it does not authenticate it: anything can send these headers. What it does
 // prevent is the website, old add-ons and honest mistakes uploading data this server cannot read.
 
-export const SERVER_VERSION = "0.3.0";
+export const SERVER_VERSION = "0.4.0";
 // 2: accounts are keyed by `account_id` (the hash of the member code). Contract 1 sent a nickname and a key.
 export const PROTOCOL = 2;
 export const MIN_PROTOCOL = 2;

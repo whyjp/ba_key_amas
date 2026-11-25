@@ -144,6 +144,14 @@ test("a score made by an older rule is made again from the stored students when 
   assert.equal(s.users()[0]?.score_version, SCORE_VERSION);
 });
 
+test("the version endpoint names the server, the score rule and the upload contract (the footer shows them)", async () => {
+  const s = new Server();
+  const v = (await s.call("GET", "/api/version")).json;
+  assert.equal(v.score, SCORE_VERSION);
+  assert.equal(v.protocol, PROTOCOL);
+  assert.match(v.server, /^\d+\.\d+\.\d+$/);
+});
+
 test("search matches a nickname prefix with case and width folded, the exact name first", async () => {
   const s = new Server();
   await s.upload(A, "Sodapop", ["아루"], { public: true });

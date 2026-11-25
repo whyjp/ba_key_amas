@@ -235,7 +235,7 @@ async function limited(req: Request, env: Env): Promise<Response | null> {
 async function handleApi(req: Request, env: Env, path: string): Promise<Response> {
   if (req.method === "GET" && path === "/api/leaderboard") return (await limited(req, env)) ?? leaderboard(env);
   if (req.method === "GET" && path === "/api/leaderboard/students") return (await limited(req, env)) ?? communityStudents(env);
-  if (req.method === "GET" && path === "/api/version") return json(200, { server: SERVER_VERSION, protocol: PROTOCOL, min_protocol: MIN_PROTOCOL, download: env.ADDON_URL ?? DEFAULT_ADDON_URL });
+  if (req.method === "GET" && path === "/api/version") return json(200, { server: SERVER_VERSION, score: SCORE_VERSION, protocol: PROTOCOL, min_protocol: MIN_PROTOCOL, download: env.ADDON_URL ?? DEFAULT_ADDON_URL });
   if (req.method === "GET" && path === "/api/public") return (await limited(req, env)) ?? publicProfile(env, new URL(req.url).searchParams.get("id") ?? "");
   if (req.method === "GET" && path === "/api/search") return (await limited(req, env)) ?? search(env, new URL(req.url).searchParams.get("q") ?? "");
   if (req.method !== "POST") return json(405, { error: "POST 만 받습니다" }, { allow: "POST, GET" });

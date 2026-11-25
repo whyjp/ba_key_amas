@@ -92,3 +92,11 @@ function route() {
 
 addEventListener("hashchange", route);
 route();
+
+/** The footer's version line: the server, the scoring rule and the upload contract (what the add-on has to speak). */
+function showVersion(v) {
+  const out = document.getElementById("version");
+  if (!out || typeof v.server !== "string") return;
+  out.textContent = ["서버 v" + v.server, typeof v.score === "number" ? "점수 기준 v" + v.score : "", typeof v.protocol === "number" ? "업로드 규격 " + v.protocol : ""].filter(Boolean).join(" · ");
+}
+get("/api/version").then(showVersion).catch(() => {});
