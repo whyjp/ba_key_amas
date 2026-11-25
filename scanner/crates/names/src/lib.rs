@@ -251,6 +251,27 @@ pub fn snap(raw: &str) -> Option<String> {
     (d <= limit && margin >= 1).then(|| RESOLVER.entries[i].name.clone())
 }
 
+/// The plain names (no outfit, no `*`) of exactly `letters` syllables that are closest to `raw`, all of them when several are
+/// equally close, and none when the closest is more than two jamo away. For a reading whose length the picture contradicts:
+/// the plate is three syllables wide and the reading has two, so the missing syllable is looked for among the names of three.
+pub fn nearest_of_length(raw: &str, letters: usize) -> Vec<String> {
+    let cleaned = clean_name(raw);
+    let cj = to_jamo(&cleaned);
+    let mut best = (usize::MAX, Vec::new());
+    for (e, j) in RESOLVER.entries.iter().zip(&RESOLVER.jamo) {
+        if e.name.contains(['(', '*']) || e.name.chars().count() != letters {
+            continue;
+        }
+        let d = edit_distance(&cj, j);
+        if d < best.0 {
+            best = (d, vec![e.name.clone()]);
+        } else if d == best.0 && !best.1.contains(&e.name) {
+            best.1.push(e.name.clone());
+        }
+    }
+    if best.0 <= 2 { best.1 } else { Vec::new() }
+}
+
 /// Resolves each candidate and keeps the closest (exact > corrected > unlisted).
 pub fn best_name(cands: &[&str]) -> String {
     let rank = |s: &str| match s {
@@ -504,6 +525,15 @@ pub fn closest_word(raw: &str, vocab: &[&str]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_dropped_syllable_is_looked_for_among_names_of_the_plates_length() {
+        let three = nearest_of_length("아네", 3);
+        assert!(three.contains(&"아야네".to_string()) && three.contains(&"아카네".to_string()), "{three:?}");
+        assert!(three.iter().all(|n| n.chars().count() == 3));
+        assert!(nearest_of_length("아네", 2).contains(&"아루".to_string()));
+        assert!(nearest_of_length("쀍뛟", 3).is_empty(), "nothing within two jamo");
+    }
 
     #[test]
     fn resolve_name_cases() {

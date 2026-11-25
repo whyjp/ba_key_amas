@@ -620,7 +620,8 @@ fn reread_plates(ocr: &dyn Ocr, look: &mut Look) {
         let hangul = b.text.chars().any(|c| ('가'..='힣').contains(&c));
         let plate = b.y0 > header + 60.0 && bottom.is_none_or(|lim| b.y1 < lim) && hangul && b.x1 - b.x0 < 200.0 && b.y1 - b.y0 < 40.0;
         if plate {
-            b.text = reread_plate(ocr, img, b);
+            let read = squash(&reread_plate(ocr, img, b));
+            b.text = by_width(ocr, img, b, read);
         }
     }
     // a student plate is a dark slate-blue pill; text over the lobby behind the window (a lone "글") is not one. The
@@ -707,8 +708,51 @@ fn reread_plate(ocr: &dyn Ocr, img: &RgbImage, b: &TextBox) -> String {
 /// (`--eval-plates`) scores the same code the scan runs. Returns the raw text, with no dictionary applied.
 pub fn read_plate(ocr: &dyn Ocr, plate: &RgbImage) -> String {
     match plate_box(ocr, plate) {
-        Some(b) => squash(&reread_plate(ocr, plate, &b)),
+        Some(b) => by_width(ocr, plate, &b, squash(&reread_plate(ocr, plate, &b))),
         None => String::new(),
+    }
+}
+
+/// How many syllables a plain name's ink is wide, from the width of the letters' box on a plate. Measured on the 160 labelled
+/// plates (frame scale): one syllable 16 px, two 34 to 38, three 43 to 50, four 59.
+fn letters_by_width(width: f32) -> usize {
+    match width {
+        w if w < 26.0 => 1,
+        w if w < 41.0 => 2,
+        w if w < 54.0 => 3,
+        _ => 4,
+    }
+}
+
+/// A reading of a plain name (no outfit, no `*`) that is not a dictionary name and has fewer syllables than the plate is wide:
+/// the detector dropped a letter (a plate that says 아야네 read as "아네"). The names of the width's length that are closest to
+/// the reading are the candidates; when several are as close, the recogniser scores each against the plate's picture and the
+/// best fitting one is taken. Anything else stays as read.
+fn by_width(ocr: &dyn Ocr, plate: &RgbImage, b: &TextBox, read: String) -> String {
+    if read.contains(['(', '*', ')']) || baocr_names::all_names().iter().any(|n| *n == read) {
+        return read;
+    }
+    let (have, want) = (read.chars().filter(|c| ('가'..='힣').contains(c)).count(), letters_by_width(b.x1 - b.x0));
+    if have >= want {
+        return read;
+    }
+    let names = baocr_names::nearest_of_length(&read, want);
+    match names.len() {
+        0 => read,
+        1 => names[0].clone(),
+        _ => {
+            let (x0, y0) = ((b.x0 as i32 - 4).max(0) as u32, (b.y0 as i32 - 4).max(0) as u32);
+            let (x1, y1) = ((b.x1 as u32 + 4).min(plate.width()), (b.y1 as u32 + 4).min(plate.height()));
+            if x1 <= x0 + 8 || y1 <= y0 + 8 {
+                return read;
+            }
+            let crop = image::imageops::crop_imm(plate, x0, y0, x1 - x0, y1 - y0).to_image();
+            let line = image::imageops::resize(&crop, crop.width() * 4, crop.height() * 4, image::imageops::FilterType::CatmullRom);
+            match ocr.choose(&line, &names) {
+                Ok((i, _)) => names[i].clone(),
+                Err(_) => read,
+            }
+        }
     }
 }
 
@@ -766,6 +810,12 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn a_plates_width_gives_its_syllable_count() {
+        // widths measured on the labelled plates: 슌 16, 하레 35, 아야네 49, a four-letter name 59
+        assert_eq!([16.0, 35.0, 49.0, 59.0].map(letters_by_width), [1, 2, 3, 4]);
+    }
 
     #[test]
     fn clock_texts() {
