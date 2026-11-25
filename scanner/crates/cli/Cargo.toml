@@ -12,6 +12,8 @@ path = "src/main.rs"
 [features]
 # OCR on the GPU through DirectML (about 2.7x faster on the fixtures; ships DirectML.dll beside the exe)
 directml = ["baocr-ocr/directml"]
+# TrOCR comparison in --eval-plates (BAOCR_TROCR=<model folder>): off by default, not part of the shipped exe
+trocr = ["baocr-ocr/trocr"]
 
 [dependencies]
 baocr-core.workspace = true
