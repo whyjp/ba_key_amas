@@ -18,6 +18,7 @@ mod roster;
 mod scan;
 mod watch;
 mod window;
+pub mod probe;
 
 #[cfg(test)]
 mod fake;
