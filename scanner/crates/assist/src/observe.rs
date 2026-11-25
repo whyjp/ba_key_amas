@@ -102,6 +102,10 @@ pub struct Observer<'a> {
     grids: Vec<KnownGrid>,
     /// The fingerprint of the last grid that was not one of those, seen by `grid_settled`.
     pending: Option<Vec<(i32, i32, u64)>>,
+    /// The grid read last and when: a scroll slows down for a while after it has nearly stopped, moving the labels a pixel
+    /// or two at a time, and each of those frames is a new grid to the fingerprints. The grid is read once the labels have
+    /// nearly stopped; for a moment afterwards a frame whose labels are within a few pixels of those is that grid.
+    tail: Option<Tail>,
     /// Whether each student is a striker (true) or a special, and each one's name: what the portraits are matched among.
     strikers: std::collections::HashMap<i64, bool>,
     names: std::collections::HashMap<i64, String>,
@@ -109,7 +113,7 @@ pub struct Observer<'a> {
 
 impl<'a> Observer<'a> {
     pub fn new(ocr: &'a dyn Ocr, students: &'a [StudentBrief]) -> Observer<'a> {
-        Observer { ocr, students, tracker: MissionTracker::default(), raid_tracker: RaidTracker::default(), squad: Vec::new(), last: Scene::Unknown, cards: CardMemory::default(), grids: Vec::new(), pending: None, strikers: students.iter().map(|s| (s.id, s.squad_type == "Main")).collect(), names: students.iter().map(|s| (s.id, s.name.clone())).collect() }
+        Observer { ocr, students, tracker: MissionTracker::default(), raid_tracker: RaidTracker::default(), squad: Vec::new(), last: Scene::Unknown, cards: CardMemory::default(), grids: Vec::new(), pending: None, tail: None, strikers: students.iter().map(|s| (s.id, s.squad_type == "Main")).collect(), names: students.iter().map(|s| (s.id, s.name.clone())).collect() }
     }
 
     /// Forget the mission and the squad (the game was closed: what was known is not true any more).
@@ -120,6 +124,7 @@ impl<'a> Observer<'a> {
         self.last = Scene::Unknown;
         self.cards = CardMemory::default();
         self.grids.clear();
+        self.tail = None;
     }
 
     /// `boxes`: the frame's free-text OCR. `fallback`: the screen to assume when the text
@@ -162,7 +167,14 @@ impl<'a> Observer<'a> {
             Scene::QuickFormation => {
                 obs.grid_kind = quick_tab_is_striker(img).map(|striker| if striker { "Main" } else { "Support" });
                 let snapshot = grid_snapshot(img);
-                if let Some(known) = self.grids.iter().find(|g| g.kind == obs.grid_kind && !g.cards.is_empty() && same_grid(&g.snapshot, &snapshot)) {
+                let in_tail = self.tail.as_ref().is_some_and(|tail| tail.kind == obs.grid_kind && tail.holds(&snapshot));
+                if in_tail {
+                    // the labels are still settling a pixel or two from where they were read: the same cards, moved a little
+                    let tail = self.tail.as_ref().expect("in the tail");
+                    obs.cards = tail.cards.iter().map(|c| tail.moved(c, &snapshot)).collect();
+                    self.cards.cards = obs.cards.clone();
+                    self.cards.kind = obs.grid_kind;
+                } else if let Some(known) = self.grids.iter().find(|g| g.kind == obs.grid_kind && !g.cards.is_empty() && same_grid(&g.snapshot, &snapshot)) {
                     // the same grid as one read lately: the names are known, only who is selected is looked at again
                     obs.cards = known.cards.clone();
                     self.cards.cards = obs.cards.clone();
@@ -170,7 +182,9 @@ impl<'a> Observer<'a> {
                 } else {
                     // with the names hidden (the grid's thumbnail view) the cards are told by their pictures
                     let fresh = if quick_card_labels(img).is_empty() { self.thumb_cards(img, obs.grid_kind) } else { read_card_names(self.ocr, img, boxes) };
+                    trace("  cards read");
                     obs.cards = self.cards.steady(fresh, obs.grid_kind);
+                    self.tail = Some(Tail { at: std::time::Instant::now(), places: snapshot.iter().map(|g| (g.0, g.1)).collect(), cards: obs.cards.clone(), kind: obs.grid_kind });
                     self.grids.push(KnownGrid { snapshot, cards: obs.cards.clone(), kind: obs.grid_kind });
                     if self.grids.len() > 3 {
                         self.grids.remove(0);
@@ -204,7 +218,9 @@ impl<'a> Observer<'a> {
         if scene != Scene::QuickFormation {
             self.grids.clear();
         }
+        trace("  cards and squad done");
         obs.slots = self.slots(img, scene, layout);
+        trace("  slots done");
         obs.squad = if scene == Scene::QuickFormation { obs.slots.iter().flatten().copied().collect() } else { self.squad.clone() };
         obs
     }
@@ -216,8 +232,13 @@ impl<'a> Observer<'a> {
     pub fn grid_unchanged(&self, img: &RgbImage) -> bool {
         self.last == Scene::QuickFormation && quick_tab_is_striker(img).is_some() && {
             let now = grid_snapshot(img);
-            self.grids.iter().any(|g| same_grid(&g.snapshot, &now))
+            self.grids.iter().any(|g| same_grid(&g.snapshot, &now)) || self.tail.as_ref().is_some_and(|tail| tail.holds(&now))
         }
+    }
+
+    /// Whether the last screen read was the 빠른 편성 popup.
+    pub fn in_popup(&self) -> bool {
+        self.last == Scene::QuickFormation
     }
 
     /// Whether the frame is the 빠른 편성 popup, already being read, on its STRIKER tab. There the text of the grid part
@@ -236,7 +257,8 @@ impl<'a> Observer<'a> {
             return true;
         }
         let now = grid_snapshot(img);
-        let settled = self.pending.as_deref() == Some(&now[..]);
+        // held still: the same cards, each within a few pixels of where it was a look ago (a scroll's last pixels come slowly)
+        let settled = self.pending.as_deref().is_some_and(|before| near_places(before.iter().map(|g| (g.0, g.1)), now.iter().map(|g| (g.0, g.1)), SETTLED_PX));
         self.pending = if settled { None } else { Some(now) };
         settled
     }
@@ -297,6 +319,53 @@ impl<'a> Observer<'a> {
         }
         slots
     }
+}
+
+/// `BAOCR_TRACE=1`: a line with the wall clock in milliseconds (the add-on's loop prints the same kind).
+fn trace(what: &str) {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if *ON.get_or_init(|| std::env::var_os("BAOCR_TRACE").is_some()) {
+        let ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis());
+        eprintln!("trace {ms} {what}");
+    }
+}
+
+/// How far a label may be from its place a look ago, in frame pixels, for the grid to count as held still.
+const SETTLED_PX: i32 = 3;
+/// How far from the places it was read at a label may be and still belong to the grid read last, and for how long after that
+/// read that is believed (the tail of a scroll).
+const TAIL_PX: i32 = 6;
+const TAIL_MS: u128 = 900;
+
+/// The grid read last, with the places of its cards.
+struct Tail {
+    at: std::time::Instant,
+    places: Vec<(i32, i32)>,
+    cards: Vec<CardName>,
+    kind: Option<&'static str>,
+}
+
+impl Tail {
+    /// Whether `now` shows the cards of this grid within the tail's reach: as many cards at places within TAIL_PX.
+    fn holds(&self, now: &[(i32, i32, u64)]) -> bool {
+        self.at.elapsed().as_millis() < TAIL_MS && near_places(self.places.iter().copied(), now.iter().map(|g| (g.0, g.1)), TAIL_PX)
+    }
+
+    /// `card` at the place its label has now.
+    fn moved(&self, card: &CardName, now: &[(i32, i32, u64)]) -> CardName {
+        let top = if card.bare { 79 } else { 0 };
+        let (x, y) = (card.x as i32, card.y0 as i32 + top);
+        match now.iter().min_by_key(|g| (g.0 - x).abs() + (g.1 - y).abs()).filter(|g| (g.0 - x).abs() <= TAIL_PX && (g.1 - y).abs() <= TAIL_PX) {
+            Some(g) => CardName { x: g.0 as f32, y0: (g.1 - top) as f32, ..card.clone() },
+            None => card.clone(),
+        }
+    }
+}
+
+/// Whether two lists of places are the same number of cards, each within `px` of its pair.
+fn near_places(a: impl Iterator<Item = (i32, i32)>, b: impl Iterator<Item = (i32, i32)>, px: i32) -> bool {
+    let (a, b): (Vec<_>, Vec<_>) = (a.collect(), b.collect());
+    !a.is_empty() && a.len() == b.len() && a.iter().zip(&b).all(|(p, q)| (p.0 - q.0).abs() <= px && (p.1 - q.1).abs() <= px)
 }
 
 /// A grid that was read: how it looked and the names found on it.

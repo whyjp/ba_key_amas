@@ -304,6 +304,11 @@ impl<'a, S: Surface> Assistant<'a, S> {
         self.observer.grid_unchanged(img)
     }
 
+    /// See [`Observer::in_popup`].
+    pub fn in_popup(&self) -> bool {
+        self.observer.in_popup()
+    }
+
     /// See [`Observer::striker_popup`].
     pub fn striker_popup(&self, img: &RgbImage) -> bool {
         self.observer.striker_popup(img)

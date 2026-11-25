@@ -51,6 +51,13 @@ const WAIT_PAUSE: Duration = Duration::from_millis(1000);
 const PROBE_STILL: f32 = 1.2;
 /// Pause between probes while icons are up: a change takes them down within about this plus the probe's few ms.
 const PROBE_PAUSE: Duration = Duration::from_millis(70);
+/// A probe step this big is a screen moving (a scroll, a change of screen), not a click's small change.
+const PROBE_BIG: f32 = 4.0;
+/// Pause between probes while the picture is moving: they are about 25 ms each, which is the pace of the watch.
+const PROBE_STEP_PAUSE: Duration = Duration::from_millis(8);
+/// How long the picture is watched by probes before it is captured anyway (a battle never holds still, and the capture is
+/// where a battle is told).
+const PROBE_MOTION_CAP: Duration = Duration::from_millis(400);
 /// Capture failures in a row before the window is given up and looked for again.
 const MAX_CAPTURE_FAILURES: u32 = 3;
 
@@ -64,6 +71,15 @@ fn pause_for(in_battle: bool, moving: bool, read: bool, still: u32, icons_up: bo
         IDLE_PAUSE
     } else {
         SETTLING_PAUSE
+    }
+}
+
+/// `BAOCR_TRACE=1`: one line per step of a reading with the wall clock in milliseconds, to see where the time of a reaction goes.
+fn trace(what: &str) {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if *ON.get_or_init(|| std::env::var_os("BAOCR_TRACE").is_some()) {
+        let ms = SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis());
+        eprintln!("trace {ms} {what}");
     }
 }
 
@@ -137,6 +153,15 @@ fn run_on<S: Surface>(surface: S, ocr: Arc<dyn Ocr>, session: &HcuSession, regio
     // A probe of the picture when it was read: while a probe says it is the same, nothing is captured (BAOCR_PROBE=0 turns this off)
     let prober = if std::env::var("BAOCR_PROBE").is_ok_and(|v| v == "0") { None } else { Prober::new(Mode::Halftone).ok() };
     let mut handled_probe: Option<Vec<u8>> = None;
+    // the picture that is not the one that was read: when it began to change, how many looks in a row it held still, whether a
+    // step as big as a scroll was seen, whether the icons were taken down for it already
+    struct Motion {
+        since: Instant,
+        calm: u32,
+        big: bool,
+        down: bool,
+    }
+    let (mut motion, mut prev_probe): (Option<Motion>, Option<Vec<u8>>) = (None, None);
     let mut icons_up = false;
     let mut said_waiting = false;
     let mut prof = Profile::from_env();
@@ -277,15 +302,44 @@ fn run_on<S: Surface>(surface: S, ocr: Arc<dyn Ocr>, session: &HcuSession, regio
             }
         }
         let Some(r) = region else { continue };
-        // The view that was read is still on screen: a full capture and its key (110 ms, most of a core in 빠른 편성,
-        // where the loop does not slow down while icons are up) would only say so again. A probe takes about 18 ms.
-        if let (Some(prober), Some(seen), true) = (prober.as_ref(), handled_probe.as_ref(), handled.is_some() && !gate.in_battle()) {
+        // Where the picture is, by probes (about 25 ms each; a full capture and its key are 110 ms): the one that was read, still
+        // changing, or held still but not the one that was read. Only in the last case, or when it never holds still, is it captured.
+        let (mut settled_by_probe, mut scrolled) = (false, false);
+        if let (Some(prober), false) = (prober.as_ref(), gate.in_battle()) {
             if let Ok(now) = prof.time("probe", || look_at_game(prober)) {
-                if probe_distance(seen, &now) < PROBE_STILL {
+                let step = prev_probe.as_ref().map_or(f32::MAX, |p| probe_distance(p, &now));
+                let same_as_read = handled.is_some() && handled_probe.as_ref().is_some_and(|h| probe_distance(h, &now) < PROBE_STILL);
+                prev_probe = Some(now);
+                if same_as_read {
+                    motion = None;
                     still = still.saturating_add(1);
                     wait(&mut assistant, if icons_up { PROBE_PAUSE } else { pause_for(false, false, true, still, icons_up) });
                     continue;
                 }
+                let m = motion.get_or_insert(Motion { since: Instant::now(), calm: 0, big: false, down: false });
+                if step >= PROBE_STILL {
+                    m.calm = 0;
+                    m.big |= step >= PROBE_BIG;
+                    if !m.down {
+                        trace(&format!("probe moved by {step:.1}"));
+                        m.down = true;
+                        // icons placed for the old view would sit on the wrong things until the new one is read
+                        if std::env::var_os("BAOCR_OVERLAY_CAPTURABLE").is_none() {
+                            prof.time("transition", || assistant.transition());
+                        }
+                    }
+                } else {
+                    m.calm += 1;
+                }
+                // inside the popup the grid is captured while it moves (its labels tell when it holds still, long before the
+                // pictures on the cards have all loaded and the probes call the picture calm)
+                if m.calm < 2 && m.since.elapsed() < PROBE_MOTION_CAP && !assistant.in_popup() {
+                    wait(&mut assistant, PROBE_STEP_PAUSE);
+                    continue;
+                }
+                settled_by_probe = m.calm >= 2;
+                scrolled = m.big;
+                trace(if settled_by_probe { "probes settled" } else { "probe watch gave up" });
             }
         }
         let img = match prof.time("capture", || game_capture(hcu, r)) {
@@ -304,6 +358,7 @@ fn run_on<S: Surface>(surface: S, ocr: Arc<dyn Ocr>, session: &HcuSession, regio
                 continue;
             }
         };
+        trace("captured");
         // the combat screen is told by a few pixels, before anything else is done with the frame
         let battle_flip = prof.time("battle", || gate.feed(looks_like_battle(&img)));
         if let Some(entered) = battle_flip {
@@ -321,7 +376,9 @@ fn run_on<S: Surface>(surface: S, ocr: Arc<dyn Ocr>, session: &HcuSession, regio
             let moving = prev.as_ref().map_or(true, |p| frame_distance(p, &key) >= STILL);
             (key, moving)
         });
-        still = if moving { 0 } else { still + 1 };
+        // two probes in a row held still: the frame just captured is the settled one, there is no need to see it twice
+        let moving = moving && !settled_by_probe;
+        still = if moving { 0 } else if settled_by_probe { (still + 1).max(1) } else { still + 1 };
         prev = Some(key);
         // With BAOCR_OVERLAY_CAPTURABLE (screenshots of the add-on) the icons are in the frames this reads, so showing them
         // looks like the screen moving and would take them down again; that mode keeps them up.
@@ -330,12 +387,17 @@ fn run_on<S: Surface>(surface: S, ocr: Arc<dyn Ocr>, session: &HcuSession, regio
             prof.time("transition", || assistant.transition());
         }
         let new_view = handled.as_ref().map_or(true, |h| frame_distance(h, &key) > STILL);
-        if still >= 1 && new_view {
+        // inside the popup a grid whose labels hold still is read before the whole picture does (its portraits load for a second)
+        let popup_frame = assistant.in_popup() && baocr_pixels::quick_tab_is_striker(&img).is_some();
+        if new_view && (still >= 1 || popup_frame) {
             // The grid of 빠른 편성 is as it was read (a student was put in the squad or taken out): its text is known, the
             // 700 ms of recognising the whole frame again are skipped and the squad is read from pixels.
             let known = assistant.grid_unchanged(&img);
+            trace(if known { "grid known" } else { "grid new" });
             // a grid that is new inside the popup is read once it has held still for two looks (a click shakes the picture)
-            if !known && !assistant.grid_settled(&img) {
+            // (after a scroll, which the probes watched move and stop, the grid is settled: a click's shake is the small step)
+            let go = if known { still >= 1 } else { (still >= 1 && settled_by_probe && scrolled) || assistant.grid_settled(&img) };
+            if !go {
                 wait(&mut assistant, SETTLING_PAUSE);
                 continue;
             }
@@ -354,11 +416,14 @@ fn run_on<S: Surface>(surface: S, ocr: Arc<dyn Ocr>, session: &HcuSession, regio
                 Screen::Roster => Scene::StudentList,
                 Screen::Other => Scene::Unknown,
             });
+            trace("text read");
             let scene = prof.time("observe+present", || assistant.on_frame(&img, &boxes, fallback));
+            trace("observed and presented");
             println!("screen: {scene:?}");
             icons_up = scene == Scene::QuickFormation;
             handled = Some(key);
             handled_probe = prober.as_ref().and_then(|p| look_at_game(p).ok());
+            motion = None;
         }
         let read = handled.as_ref().is_some_and(|h| frame_distance(h, &key) <= STILL);
         wait(&mut assistant, pause_for(false, moving, read, still, icons_up));

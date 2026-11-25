@@ -79,6 +79,14 @@ class Bench:
         if not any("QuickFormation" in l for l in self.assist_lines()):
             raise SystemExit("the add-on did not read 빠른 편성 (is the game on that screen, are the models found?)")
         time.sleep(4)
+        # the grid back at its top (a scroll that did not take in an earlier run would leave another card where the click goes)
+        x0, y0, w, h = self.origin
+        u.SetCursorPos(x0 + int(550 * w / 800), y0 + int(300 * h / 600))
+        time.sleep(0.2)
+        for _ in range(6):
+            u.mouse_event(0x0800, 0, 0, 120, 0)
+            time.sleep(0.02)
+        time.sleep(2.5)
 
     def assist_lines(self):
         with open(self.err_path, "rb") as f:
@@ -126,6 +134,9 @@ class Bench:
                 shown = time.time() - t_input[0]
                 break
             time.sleep(0.005)
+        if os.environ.get('LATENCY_INPUTS'):
+            with open(os.environ['LATENCY_INPUTS'], 'a') as f:
+                f.write(f'{what} {int(t_input[0] * 1000)}\n')
         time.sleep(0.6)
         stop.set()
         th.join()
