@@ -153,6 +153,41 @@ pub fn look_at_game(prober: &Prober) -> Result<Probe> {
     prober.look(client.0, client.1, client.2, client.3)
 }
 
+/// A frame of the game taken straight from the screen at 1280 pixels wide (what `game_capture` brings through the HCU, which
+/// takes about 100 ms to do it), for looks that come one after another while the picture moves.
+#[cfg(windows)]
+pub fn grab_game_frame(prober: &Prober) -> Result<image::RgbImage> {
+    let (client, _) = crate::window::game_client_and_desktop(crate::GAME_TITLE)?;
+    let (x, y, w, h) = client;
+    if w <= 0 || h <= 0 {
+        bail!("empty game area");
+    }
+    let (ow, oh) = (1280i32, ((1280.0 * h as f64 / w as f64).round() as i32).max(1));
+    unsafe {
+        let screen = sys::GetDC(0);
+        let dc = sys::CreateCompatibleDC(screen);
+        let bmp = sys::CreateCompatibleBitmap(screen, ow, oh);
+        let old = sys::SelectObject(dc, bmp);
+        sys::SetStretchBltMode(dc, prober.mode() as i32);
+        let ok = sys::StretchBlt(dc, 0, 0, ow, oh, screen, x, y, w, h, sys::SRCCOPY_CAPTUREBLT) != 0;
+        let mut bgra = vec![0u8; (ow * oh * 4) as usize];
+        let mut info = sys::BitmapInfoHeader { size: std::mem::size_of::<sys::BitmapInfoHeader>() as u32, width: ow, height: -oh, planes: 1, bit_count: 32, compression: 0, size_image: 0, x_ppm: 0, y_ppm: 0, clr_used: 0, clr_important: 0 };
+        let lines = if ok { sys::GetDIBits(dc, bmp, 0, oh as u32, bgra.as_mut_ptr() as *mut std::ffi::c_void, &mut info, 0) } else { 0 };
+        sys::SelectObject(dc, old);
+        sys::DeleteObject(bmp);
+        sys::DeleteDC(dc);
+        sys::ReleaseDC(0, screen);
+        if lines != oh {
+            bail!("the screen grab gave {lines} of {oh} lines");
+        }
+        let mut rgb = Vec::with_capacity((ow * oh * 3) as usize);
+        for p in bgra.chunks_exact(4) {
+            rgb.extend_from_slice(&[p[2], p[1], p[0]]);
+        }
+        image::RgbImage::from_raw(ow as u32, oh as u32, rgb).ok_or_else(|| anyhow!("bad frame size"))
+    }
+}
+
 #[cfg(not(windows))]
 pub struct Prober;
 

@@ -18,7 +18,7 @@ use baocr_assist::{read_library, Assistant, Command, Observation, Observer, Sett
 use baocr_core::ocr_api::Ocr;
 use baocr_extract::scene::Scene;
 use baocr_extract::Options;
-use baocr_hcu::probe::{look_at_game, probe_distance, Mode, Prober};
+use baocr_hcu::probe::{grab_game_frame, look_at_game, probe_distance, Mode, Prober};
 use baocr_hcu::{check_aspect, detect_region, game_capture, parse_frame_region, screen_kind, Hcu, HcuSession, Screen};
 use baocr_overlay::{set_escape_target, BannerState, Overlay};
 use baocr_pixels::{fast_frame_key, frame_distance, looks_like_battle};
@@ -343,7 +343,10 @@ fn run_on<S: Surface>(surface: S, ocr: Arc<dyn Ocr>, session: &HcuSession, regio
                 trace(if settled_by_probe { "probes settled" } else { "probe watch gave up" });
             }
         }
-        let img = match prof.time("capture", || game_capture(hcu, r)) {
+        // inside the popup the looks come one after another while the grid moves: the screen is read directly (35 ms; through the
+        // HCU 95 ms, with the same cards on every frame compared)
+        let direct = if assistant.in_popup() { prober.as_ref().and_then(|p| grab_game_frame(p).ok()) } else { None };
+        let img = match prof.time("capture", || direct.map_or_else(|| game_capture(hcu, r), Ok)) {
             Ok(i) => {
                 failures = 0;
                 i
