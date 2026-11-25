@@ -12,6 +12,8 @@ export interface Entry {
   armor: string | null;
   position?: string | null;
   squad: string | null;
+  /** The rarity the student is recruited at (1 to 3 stars); promoting to 4 or 5 is a big step of its own. */
+  star?: number | null;
   equipment?: string[] | null;
 }
 

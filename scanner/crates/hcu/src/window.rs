@@ -84,8 +84,20 @@ pub fn auto_region(frame: (u32, u32)) -> Result<[f64; 4]> {
     Ok(to_frame_region(client, virt, frame))
 }
 
-/// Detect the region with a passive HCU screenshot (no input) for the frame size.
+/// Detect the region. The frame size is what a screenshot of the desktop would be delivered at, which follows from
+/// the desktop's size, so no screenshot is taken while it matches the frame HCU last saw: one costs about 100 ms
+/// (a copy of the whole desktop), and this runs once a second while the game is not there and every few seconds
+/// while it is (10 percent of a core, doing nothing).
 pub fn detect_region(h: &crate::Hcu) -> Result<[f64; 4]> {
+    let (client, virt) = game_client_and_desktop(crate::GAME_TITLE)?;
+    if client.2 <= 0 || client.3 <= 0 {
+        bail!("the game window has an empty client area");
+    }
+    let frame = crate::native::delivered_size((virt.2 as u32, virt.3 as u32));
+    if h.frame_size() == Some((frame.0 as i64, frame.1 as i64)) {
+        return Ok(to_frame_region(client, virt, frame));
+    }
+    // the desktop changed (or nothing was captured yet): ask HCU what it delivers now
     let rec = h.screenshot()?;
     auto_region((rec.screen.width as u32, rec.screen.height as u32))
 }

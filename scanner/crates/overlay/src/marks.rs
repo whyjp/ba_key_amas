@@ -7,7 +7,8 @@
 //! their whole portrait (a ring for the best, a veil for the worst) so the candidates stand
 //! out across the grid at a glance. A special that is not rated by type gets a quiet "SP".
 use crate::panel::{Grade, Tone};
-use crate::render::{draw_text, fill_rrect, stroke_rrect, text_width, Fonts, TEXT};
+use crate::render::{draw_text, fill_rrect, over, stroke_rrect, text_width, Fonts, TEXT};
+use std::collections::HashMap;
 use image::{Rgba, RgbaImage};
 
 /// One small icon.
@@ -244,8 +245,8 @@ fn draw_icon(img: &mut RgbaImage, fonts: &Fonts, icon: &Icon, x: f32, y: f32, k:
 
 /// The portrait's own tint: a bright ring for the best, a thinner one for the good, a veil
 /// over the poor. Average gets nothing.
-fn draw_frame(img: &mut RgbaImage, f: &Frame, k: f32) {
-    let (x, y) = (f.left as f32 * k, f.top as f32 * k);
+fn draw_frame(img: &mut RgbaImage, f: &Frame, k: f32, origin: (f32, f32)) {
+    let (x, y) = (f.left as f32 * k - origin.0, f.top as f32 * k - origin.1);
     let (w, h) = ((f.right - f.left) as f32 * k, (f.bottom - f.top) as f32 * k);
     let r = 7.0 * k;
     match f.grade {
@@ -266,32 +267,118 @@ fn draw_frame(img: &mut RgbaImage, f: &Frame, k: f32) {
     }
 }
 
-/// Render the marks onto a transparent layer of `client_w` x `client_h` pixels.
-pub fn render_marks(client_w: u32, client_h: u32, marks: &[Mark], fonts: &Fonts) -> RgbaImage {
-    let mut img = RgbaImage::from_pixel(client_w, client_h, Rgba([0, 0, 0, 0]));
-    let frame_k = client_w as f32 / 1280.0;
-    let k = icon_scale(client_w);
-    // portrait tints first, so no icon is ever under one
-    for m in marks {
-        if let Some(f) = &m.frame {
-            draw_frame(&mut img, f, frame_k);
+/// Margin around a frame or an icon column that the glow and the anti-aliasing can reach (in icon scale units).
+const FRAME_PAD: f32 = 12.0;
+/// Room around an icon in its copy for its outline (in icon scale units).
+const ICON_MARGIN: f32 = 4.0;
+
+/// Lays `src` over `dst` with its top left corner at (`dx`, `dy`), pixel by pixel with the usual alpha blend.
+fn blend_over(dst: &mut RgbaImage, src: &RgbaImage, dx: i64, dy: i64) {
+    for (sx, sy, p) in src.enumerate_pixels() {
+        if p[3] == 0 {
+            continue;
+        }
+        let (x, y) = (sx as i64 + dx, sy as i64 + dy);
+        if x >= 0 && y >= 0 && (x as u32) < dst.width() && (y as u32) < dst.height() {
+            over(dst.get_pixel_mut(x as u32, y as u32), [p[0], p[1], p[2]], p[3] as f32 / 255.0);
         }
     }
+}
+
+/// The part of the client area the marks can touch, as (left, top, right, bottom) in client pixels (a margin is
+/// included for the glow around a frame and for anti-aliasing), or None when there is nothing to draw.
+pub fn marks_bounds(client_w: u32, client_h: u32, marks: &[Mark]) -> Option<(i32, i32, i32, i32)> {
+    let frame_k = client_w as f32 / 1280.0;
+    let k = icon_scale(client_w);
+    let pad = FRAME_PAD * k.max(1.0);
+    let mut b: Option<(f32, f32, f32, f32)> = None;
+    let mut add = |l: f32, t: f32, r: f32, bt: f32| {
+        b = Some(match b {
+            Some((a, c, d, e)) => (a.min(l), c.min(t), d.max(r), e.max(bt)),
+            None => (l, t, r, bt),
+        });
+    };
+    for m in marks {
+        if let Some(f) = &m.frame {
+            add(f.left as f32 * frame_k - pad, f.top as f32 * frame_k - pad, f.right as f32 * frame_k + pad, f.bottom as f32 * frame_k + pad);
+        }
+        let total = span(&m.icons, m.vertical) * k;
+        let wide = m.icons.iter().map(|i| extent(i).0).fold(0.0f32, f32::max) * k;
+        let high = m.icons.iter().map(|i| extent(i).1).fold(0.0f32, f32::max) * k;
+        if m.vertical {
+            let (x, y) = (m.cx as f32 * frame_k, m.top() as f32 * frame_k);
+            add(x - wide / 2.0 - pad, y - pad, x + wide / 2.0 + pad, y + total + pad);
+        } else {
+            let (x, y) = (m.cx as f32 * frame_k - total / 2.0, m.cy as f32 * frame_k);
+            add(x - pad, y - high / 2.0 - pad, x + total + pad, y + high / 2.0 + pad);
+        }
+    }
+    let (l, t, r, bt) = b?;
+    let (l, t) = ((l.floor() as i32).max(0), (t.floor() as i32).max(0));
+    let (r, bt) = ((r.ceil() as i32).min(client_w as i32), (bt.ceil() as i32).min(client_h as i32));
+    (r > l && bt > t).then_some((l, t, r, bt))
+}
+
+/// Render the marks onto a transparent image that covers only where they are drawn. Returns it and the position of
+/// its top left corner in the client area. A layer the size of the whole game cost 12 ms (at 1280x960) to 49 ms (at
+/// 2560x1920) to clear, draw and hand to the window for 24 marks, and the compositor blends every pixel of it.
+pub fn render_marks_clipped(client_w: u32, client_h: u32, marks: &[Mark], fonts: &Fonts) -> (RgbaImage, (i32, i32)) {
+    let Some((x0, y0, x1, y1)) = marks_bounds(client_w, client_h, marks) else { return (RgbaImage::from_pixel(1, 1, Rgba([0, 0, 0, 0])), (0, 0)) };
+    let mut img = RgbaImage::from_pixel((x1 - x0) as u32, (y1 - y0) as u32, Rgba([0, 0, 0, 0]));
+    let origin = (x0 as f32, y0 as f32);
+    let frame_k = client_w as f32 / 1280.0;
+    let k = icon_scale(client_w);
+    // portrait tints first, so no icon is ever under one. The frames of a grid are all one size, so each size and grade
+    // is drawn once and copied to the other places (to the pixel: the copy is placed on the nearest whole pixel).
+    let pad = FRAME_PAD * k.max(1.0);
+    let mut sprites: HashMap<(i32, i32, Grade), RgbaImage> = HashMap::new();
+    for m in marks {
+        if let Some(f) = &m.frame {
+            let sprite = sprites.entry((f.right - f.left, f.bottom - f.top, f.grade)).or_insert_with(|| {
+                let (w, h) = (((f.right - f.left) as f32 * frame_k + 2.0 * pad).ceil() as u32, ((f.bottom - f.top) as f32 * frame_k + 2.0 * pad).ceil() as u32);
+                let mut s = RgbaImage::from_pixel(w, h, Rgba([0, 0, 0, 0]));
+                draw_frame(&mut s, &Frame { left: 0, top: 0, right: f.right - f.left, bottom: f.bottom - f.top, grade: f.grade }, frame_k, (-pad, -pad));
+                s
+            });
+            let (dx, dy) = ((f.left as f32 * frame_k - origin.0 - pad).round() as i64, (f.top as f32 * frame_k - origin.1 - pad).round() as i64);
+            blend_over(&mut img, sprite, dx, dy);
+        }
+    }
+    // the same icon (a grade, a type) stands on many portraits: drawn once, copied to each place
+    let mut icon_sprites: HashMap<Icon, RgbaImage> = HashMap::new();
+    let margin = ICON_MARGIN * k;
+    let mut put = |img: &mut RgbaImage, icon: &Icon, x: f32, y: f32| {
+        let sprite = icon_sprites.entry(icon.clone()).or_insert_with(|| {
+            let (w, h) = ((extent(icon).0 * k + 2.0 * margin).ceil() as u32, (extent(icon).1 * k + 2.0 * margin).ceil() as u32);
+            let mut s = RgbaImage::from_pixel(w, h, Rgba([0, 0, 0, 0]));
+            draw_icon(&mut s, fonts, icon, margin, margin, k);
+            s
+        });
+        blend_over(img, sprite, (x - margin).round() as i64, (y - margin).round() as i64);
+    };
     for m in marks {
         let total = span(&m.icons, m.vertical) * k;
         let (mut x, mut y) = if m.vertical { (m.cx as f32 * frame_k, m.top() as f32 * frame_k) } else { (m.cx as f32 * frame_k - total / 2.0, m.cy as f32 * frame_k) };
         for icon in &m.icons {
             let (w, h) = (extent(icon).0 * k, extent(icon).1 * k);
             if m.vertical {
-                draw_icon(&mut img, fonts, icon, x - w / 2.0, y, k);
+                put(&mut img, icon, x - w / 2.0 - origin.0, y - origin.1);
                 y += h + GAP * k;
             } else {
-                draw_icon(&mut img, fonts, icon, x, y - h / 2.0, k);
+                put(&mut img, icon, x - origin.0, y - h / 2.0 - origin.1);
                 x += w + GAP * k;
             }
         }
     }
-    img
+    (img, (x0, y0))
+}
+
+/// Render the marks onto a transparent layer of `client_w` x `client_h` pixels (the whole client area).
+pub fn render_marks(client_w: u32, client_h: u32, marks: &[Mark], fonts: &Fonts) -> RgbaImage {
+    let mut full = RgbaImage::from_pixel(client_w, client_h, Rgba([0, 0, 0, 0]));
+    let (part, (x, y)) = render_marks_clipped(client_w, client_h, marks, fonts);
+    image::imageops::replace(&mut full, &part, x as i64, y as i64);
+    full
 }
 
 #[cfg(test)]
@@ -313,6 +400,49 @@ mod tests {
                 Icon::Face(3),
             ])])
             .collect()
+    }
+
+    #[test]
+    fn a_grid_of_equal_frames_is_drawn_as_it_would_be_frame_by_frame() {
+        let Some(f) = load_fonts() else { return };
+        let marks: Vec<Mark> = (0..12)
+            .map(|i| {
+                let (x, y) = (600 + 110 * (i % 4), 322 + 104 * (i / 4));
+                let grade = if i % 3 == 0 { Grade::Excellent } else { Grade::Good };
+                Mark::column_from_top(x + 55, y + 38, vec![]).framed(Frame { left: x, top: y, right: x + 110, bottom: y + 98, grade })
+            })
+            .collect();
+        // the scale is one at 1280 wide, so every frame lands on a whole pixel and the copy must be exact
+        let (fast, at) = render_marks_clipped(1280, 960, &marks, &f);
+        let mut direct = RgbaImage::from_pixel(fast.width(), fast.height(), Rgba([0, 0, 0, 0]));
+        for m in marks.iter().filter_map(|m| m.frame.as_ref()) {
+            draw_frame(&mut direct, m, 1.0, (at.0 as f32, at.1 as f32));
+        }
+        // a glow where two frames meet is blended in another order, which rounds differently by a step or two
+        let worst = fast.pixels().zip(direct.pixels()).map(|(a, b)| (0..4).map(|i| (a[i] as i32 - b[i] as i32).abs()).max().unwrap_or(0)).max().unwrap_or(0);
+        assert!(worst <= 3, "the copied frames differ from the drawn ones by {worst}");
+    }
+
+    #[test]
+    fn copied_icons_cover_the_same_pixels_as_drawn_ones_to_within_half_a_pixel() {
+        let Some(f) = load_fonts() else { return };
+        let icons = vec![Icon::Fit(Grade::Excellent), Icon::Attack(TypeTag { hue: Hue::Red, glyph: '폭' }), Icon::Armor(TypeTag { hue: Hue::Yellow, glyph: '중' }), Icon::Face(3)];
+        let (client_w, client_h) = (1280u32, 960u32);
+        let marks: Vec<Mark> = (0..6).map(|i| Mark::column_from_top(660 + 110 * (i % 3), 360 + 120 * (i / 3), icons.clone())).collect();
+        let (fast, at) = render_marks_clipped(client_w, client_h, &marks, &f);
+        let mut direct = RgbaImage::from_pixel(fast.width(), fast.height(), Rgba([0, 0, 0, 0]));
+        let k = icon_scale(client_w);
+        for m in &marks {
+            let (x, mut y) = (m.cx as f32, m.top() as f32);
+            for icon in &m.icons {
+                let (w, h) = (extent(icon).0 * k, extent(icon).1 * k);
+                draw_icon(&mut direct, &f, icon, x - w / 2.0 - at.0 as f32, y - at.1 as f32, k);
+                y += h + GAP * k;
+            }
+        }
+        let covered = |img: &RgbaImage| img.pixels().filter(|p| p[3] > 128).count() as f64;
+        let (a, b) = (covered(&fast), covered(&direct));
+        assert!((a - b).abs() / b < 0.03, "{a} pixels covered by the copies, {b} by the drawn icons");
     }
 
     #[test]

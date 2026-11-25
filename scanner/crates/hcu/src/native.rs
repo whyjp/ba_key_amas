@@ -139,9 +139,17 @@ pub struct Settle {
 impl Settle {
     pub const OFF: Settle = Settle { cap: Duration::ZERO, step: Duration::from_millis(60) };
 
-    /// 600 ms unless `BAOCR_HCU_SETTLE_MS` says otherwise (0 = do not wait).
+    /// After a wheel movement: 600 ms unless `BAOCR_HCU_SETTLE_MS` says otherwise (0 = do not wait).
     pub fn from_env() -> Self {
         let ms = std::env::var("BAOCR_HCU_SETTLE_MS").ok().and_then(|v| v.trim().parse::<u64>().ok()).unwrap_or(600);
+        Settle { cap: Duration::from_millis(ms), ..Settle::OFF }
+    }
+
+    /// After a click: none unless `BAOCR_HCU_CLICK_SETTLE_MS` says otherwise. Every caller that clicks waits for the
+    /// screen to change and hold still itself (`settle`, `wait_stable_next`), and the game never holds still to the
+    /// pixel (an animated background), so this wait always ran to its cap: 600 ms of the 730 ms a click took.
+    pub fn click_from_env() -> Self {
+        let ms = std::env::var("BAOCR_HCU_CLICK_SETTLE_MS").ok().and_then(|v| v.trim().parse::<u64>().ok()).unwrap_or(0);
         Settle { cap: Duration::from_millis(ms), ..Settle::OFF }
     }
 }
@@ -166,6 +174,8 @@ pub struct NativeRunner<D: Desktop> {
     /// Exact title of the only window input may reach; None = whichever window the frame showed there.
     target: Option<String>,
     settle: Settle,
+    /// The wait after input that is only clicks (`settle` is for the rest).
+    click_settle: Settle,
     audit: Option<Box<dyn AuditSink>>,
 }
 
@@ -189,7 +199,7 @@ struct Outcome<'a> {
 impl<D: Desktop> NativeRunner<D> {
     /// No target window, no settling, no audit log: the bare protocol with the frame guards.
     pub fn new(desktop: D) -> Self {
-        Self { desktop, state: Mutex::new(State::default()), target: None, settle: Settle::OFF, audit: None }
+        Self { desktop, state: Mutex::new(State::default()), target: None, settle: Settle::OFF, click_settle: Settle::OFF, audit: None }
     }
 
     /// Input is only sent when the window under the point has exactly this title.
@@ -200,6 +210,11 @@ impl<D: Desktop> NativeRunner<D> {
 
     pub fn with_settle(mut self, settle: Settle) -> Self {
         self.settle = settle;
+        self
+    }
+
+    pub fn with_click_settle(mut self, settle: Settle) -> Self {
+        self.click_settle = settle;
         self
     }
 
@@ -352,7 +367,8 @@ impl<D: Desktop> NativeRunner<D> {
             }
             return Ok(self.finish(actions, &located, done, Some(Outcome { code, hint: &hint, emitted: false }), started));
         }
-        self.wait_still(located.first().map(|l| l.window.rect));
+        let only_clicks = actions.iter().all(|a| matches!(a, Action::Click { .. }));
+        self.wait_still(located.first().map(|l| l.window.rect), if only_clicks { self.click_settle } else { self.settle });
         Ok(self.finish(actions, &located, done, None, started))
     }
 
@@ -392,8 +408,8 @@ impl<D: Desktop> NativeRunner<D> {
 
     /// Returns once the window the input went to has stopped changing, or after the cap: what
     /// the game shows right after a click is often still moving, and the caller reads it next.
-    fn wait_still(&self, area: Option<[i32; 4]>) {
-        let (Some(area), true) = (area, self.settle.cap > Duration::ZERO) else { return };
+    fn wait_still(&self, area: Option<[i32; 4]>, settle: Settle) {
+        let (Some(area), true) = (area, settle.cap > Duration::ZERO) else { return };
         let (ox, oy, w, h) = self.desktop.bounds();
         let (x0, y0) = (area[0].max(ox), area[1].max(oy));
         let (x1, y1) = (area[2].min(ox + w as i32), area[3].min(oy + h as i32));
@@ -403,8 +419,8 @@ impl<D: Desktop> NativeRunner<D> {
         let started = Instant::now();
         let mut prev: Option<RgbImage> = None;
         loop {
-            std::thread::sleep(self.settle.step);
-            if started.elapsed() >= self.settle.cap {
+            std::thread::sleep(settle.step);
+            if started.elapsed() >= settle.cap {
                 return;
             }
             let Ok(cur) = self.desktop.grab(x0, y0, (x1 - x0) as u32, (y1 - y0) as u32) else { return };
@@ -1130,7 +1146,7 @@ mod tests {
         *fake.wins.lock().unwrap() = vec![win(13, "Blue Archive", [0, 0, 400, 300])];
         let click = ["gui", "click", "100", "100", "--records"];
         let settle = Settle { cap: Duration::from_millis(600), step: Duration::from_millis(60) };
-        let r = game_runner(&fake).with_settle(settle);
+        let r = game_runner(&fake).with_click_settle(settle);
         ask(&r, &["gui", "screenshot"]);
         let t = Instant::now();
         ask(&r, &click);
@@ -1142,10 +1158,16 @@ mod tests {
         println!("settle latency: still screen {still:?}, never-still screen {moving:?} (cap 600 ms, step 60 ms)");
         assert!(still < Duration::from_millis(300), "{still:?}");
         assert!(moving >= Duration::from_millis(540) && moving < Duration::from_millis(900), "{moving:?}");
-        let off = game_runner(&fake).with_settle(Settle::OFF);
+        let off = game_runner(&fake).with_click_settle(Settle::OFF);
         ask(&off, &["gui", "screenshot"]);
         let t = Instant::now();
         ask(&off, &click);
         assert!(t.elapsed() < Duration::from_millis(50));
+        // the wait that is set for wheel movements does not hold up a click: callers wait for the screen themselves
+        let wheel_only = game_runner(&fake).with_settle(settle);
+        ask(&wheel_only, &["gui", "screenshot"]);
+        let t = Instant::now();
+        ask(&wheel_only, &click);
+        assert!(t.elapsed() < Duration::from_millis(50), "{:?}", t.elapsed());
     }
 }
