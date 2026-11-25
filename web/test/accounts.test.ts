@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { prepareWorkerImport, MemoryD1 } from "./helpers/d1.ts";
 import { MIN_PROTOCOL, PROTOCOL } from "../src/version.ts";
+import { SCORE_VERSION } from "../src/score.ts";
 import { addonSignature, SIGNATURE_WINDOW_SECONDS } from "../src/security.ts";
 
 prepareWorkerImport();
@@ -130,6 +131,17 @@ test("a public account is on the leaderboard under its public id", async () => {
   const board = (await s.call("GET", "/api/leaderboard")).json.entries;
   assert.equal(board.length, 1);
   assert.equal(board[0].public_id, up.json.public_id);
+});
+
+test("a score made by an older rule is made again from the stored students when the leaderboard is read", async () => {
+  const s = new Server();
+  await s.upload(A, "예전", ["아루", "하루"], { public: true });
+  const fresh = (await s.call("GET", "/api/leaderboard")).json.entries[0].score;
+  assert.ok(fresh > 0);
+  s.d1.db.exec("UPDATE users SET score = 1, score_version = 2");
+  const board = (await s.call("GET", "/api/leaderboard")).json.entries;
+  assert.equal(board[0].score, fresh, "scored again with the current rule, without another upload");
+  assert.equal(s.users()[0]?.score_version, SCORE_VERSION);
 });
 
 test("search matches a nickname prefix with case and width folded, the exact name first", async () => {

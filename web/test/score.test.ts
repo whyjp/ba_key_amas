@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { aggregate, analyze, baseName, bondPoints, OUTFIT_DECAY, summarize, type OwnedStudent } from "../src/score.ts";
+import { aggregate, analyze, baseName, BOND_EXP, bondPoints, growthPoints, OUTFIT_DECAY, starPoints, summarize, upgradePoints, weaponPoints, type OwnedStudent } from "../src/score.ts";
 import { parseUpload } from "../src/validate.ts";
 
 const s = (name: string, o: Partial<OwnedStudent> = {}): OwnedStudent => ({
@@ -15,11 +15,51 @@ test("only a trailing parenthesis is an outfit", () => {
   assert.equal(baseName("(이상)"), "(이상)");
 });
 
-test("bond points grow with rank and jump at 60", () => {
-  assert.equal(bondPoints(30), 60);
-  assert.ok(bondPoints(31) - bondPoints(30) > bondPoints(30) - bondPoints(29), "a rank past 30 is worth more than one before it");
-  assert.ok(bondPoints(60) - bondPoints(59) >= 100, "rank 60 is a milestone");
+test("the bond table is the community's experience table (checked at its published totals)", () => {
+  assert.equal(BOND_EXP.length, 101, "rank 0 to 100");
+  assert.deepEqual([BOND_EXP[10], BOND_EXP[20], BOND_EXP[30], BOND_EXP[50], BOND_EXP[100]], [300, 1845, 6180, 29175, 240225]);
+});
+
+test("bond points follow the experience a rank takes, with a bonus on crossing 30 and 60", () => {
+  assert.ok(bondPoints(10) < bondPoints(20) && bondPoints(20) < bondPoints(30));
+  assert.ok(bondPoints(30) - bondPoints(29) > 25, "rank 30 is a milestone");
+  assert.ok(bondPoints(60) - bondPoints(59) > 55, "rank 60 is a bigger one");
+  // a rank past 60 costs far more experience than one before 30, and is worth more
   assert.ok(bondPoints(61) - bondPoints(60) > bondPoints(31) - bondPoints(30));
+  assert.ok(bondPoints(100) > bondPoints(60) && bondPoints(100) < 4 * bondPoints(60), "rank 100 is the top, not the whole score");
+  assert.equal(bondPoints(0), 0);
+  assert.equal(bondPoints(500), bondPoints(100), "a misread rank above the top is the top");
+});
+
+test("promoting to 4 and 5 stars is worth far more than the cheap early stars", () => {
+  assert.equal(starPoints(3, 3), 0, "nothing above the rarity the student came with");
+  assert.ok(starPoints(5, 3) >= 90, "3 stars to 5 stars");
+  assert.ok(starPoints(4, 3) >= 40);
+  assert.ok(starPoints(3, 1) < 20, "1 star to 3 stars is cheap");
+  assert.equal(starPoints(5, 1), starPoints(3, 1) + starPoints(5, 3), "a 1 star student pays the early steps and then the same dear ones");
+  assert.equal(starPoints(5, null), starPoints(5, 3), "an unknown rarity is taken as the common 3 stars");
+});
+
+test("unique weapon stars cost more with every star, and the weapon level adds", () => {
+  assert.equal(weaponPoints(null, null), 0);
+  const [one, two, three, four] = [1, 2, 3, 4].map((n) => weaponPoints(n, 30));
+  assert.ok(one !== undefined && two !== undefined && three !== undefined && four !== undefined);
+  assert.ok(two - one >= 50 && three - two > two - one && four - three > three - two, "each star costs more shards than the last");
+  assert.ok(weaponPoints(1, 60) > weaponPoints(1, 30));
+});
+
+test("levels past 80 (the level limit) are worth more each than the ones before", () => {
+  const at = (level: number) => growthPoints(s("a", { level }));
+  assert.ok(at(90) - at(80) > 4 * (at(80) - at(70)));
+});
+
+test("the costly items count in full and the rest at the growth weight", () => {
+  const base = analyze([s("a", { level: 80, stars: 3, base_stars: 3 })]).characters[0];
+  const five = analyze([s("a", { level: 80, stars: 5, base_stars: 3 })]).characters[0];
+  const weapon = analyze([s("a", { level: 80, stars: 5, base_stars: 3, uw_stars: 4, uw_level: 60 })]).characters[0];
+  assert.ok(five && base && weapon);
+  assert.equal(Math.round((five.total - base.total) * 10) / 10, starPoints(5, 3), "the promotion adds its points unscaled");
+  assert.equal(Math.round((weapon.total - five.total) * 10) / 10, Math.round(weaponPoints(4, 60) * 10) / 10);
 });
 
 test("outfits share one character, the plain outfit first", () => {
@@ -43,16 +83,15 @@ test("many outfits cannot outrun one deeply loved outfit", () => {
   assert.ok((loved.characters[0]?.total ?? 0) > (wardrobe.characters[0]?.total ?? 0));
 });
 
-test("relationship counts more than growth", () => {
-  const grown = s("육성형", { level: 90, stars: 5, ex_skill: 5, normal_skill: 10, passive_skill: 10, sub_skill: 10, uw_stars: 4, uw_level: 60, bond: 1 });
-  const bonded = s("인연형", { bond: 60, pinned: true, memorial: true });
-  const a = analyze([grown, bonded]);
-  assert.equal(a.top[0]?.base, "인연형");
+test("a bond at the top beats a fully grown student, and a full growth beats a middling bond", () => {
+  const grown = s("육성형", { level: 90, stars: 5, base_stars: 3, ex_skill: 5, normal_skill: 10, passive_skill: 10, sub_skill: 10, uw_stars: 4, uw_level: 60, bond: 1 });
+  assert.equal(analyze([grown, s("인연형", { bond: 100, pinned: true, memorial: true })]).top[0]?.base, "인연형");
+  assert.equal(analyze([grown, s("인연형", { bond: 60, pinned: true, memorial: true })]).top[0]?.base, "육성형");
 });
 
-test("a unique weapon is the biggest growth item", () => {
-  const plain = analyze([s("a", { level: 90, stars: 5 })]).characters[0]?.growthPoints ?? 0;
-  const weapon = analyze([s("a", { level: 90, stars: 5, uw_stars: 1, uw_level: 30 })]).characters[0]?.growthPoints ?? 0;
+test("owning a unique weapon adds its own points", () => {
+  const plain = upgradePoints(s("a", { level: 90, stars: 5 }));
+  const weapon = upgradePoints(s("a", { level: 90, stars: 5, uw_stars: 1, uw_level: 30 }));
   assert.ok(weapon - plain >= 40);
 });
 
