@@ -6,7 +6,8 @@
 //! It can be started before the game, after it, or while it restarts: the window is looked
 //! for again whenever it is not known, and forgotten when it stops answering.
 use anyhow::{bail, Result};
-use crate::account_dialog;
+use crate::account_key;
+use crate::clipboard;
 use crate::dump::DumpSurface;
 use crate::profile::Profile;
 use crate::progress_scan;
@@ -101,6 +102,7 @@ fn run_on<S: Surface>(surface: S, ocr: Arc<dyn Ocr>, session: &HcuSession, regio
     let settings_path = Settings::default_path();
     let mut assistant = Assistant::new(Observer::new(&*ocr, &students), &wiki, &students, &types, Settings::load(&settings_path), Some(settings_path.clone()), surface);
     assistant.set_library(read_library(out));
+    assistant.set_account_saved(upload::saved_account_id(&crate::upload_store()).is_some());
     let stop = Arc::new(AtomicBool::new(false));
     let flag = stop.clone();
     ctrlc::set_handler(move || flag.store(true, Ordering::Relaxed))?;
@@ -130,14 +132,44 @@ fn run_on<S: Surface>(surface: S, ocr: Arc<dyn Ocr>, session: &HcuSession, regio
                 }
                 Command::Upload => {
                     assistant.begin_upload();
-                    let req = upload::Request { server: upload::DEFAULT_SERVER.to_string(), nickname: None, public: false, students_dir: out.to_path_buf(), progress_dir: crate::progress_dir(), store: crate::upload_store() };
-                    let said = match upload::run(&req, &upload::Sources::from_env(), &mut account_dialog::ask) {
-                        Ok(text) => text,
-                        Err(e) => format!("실패: {e:#}"),
-                    };
-                    println!("upload: {said}");
-                    assistant.upload_finished(&said);
+                    let store = crate::upload_store();
+                    let code = assistant.member_code().map(str::to_string);
+                    let outcome = (|| -> Result<upload::Uploaded> {
+                        // a code pasted on the card is kept as its hash, like one typed in a terminal
+                        if let Some(code) = &code {
+                            let code = account_key::parse_member_code(code)?;
+                            upload::save_account_id(&store, &account_key::account_id(&code))?;
+                        }
+                        let req = upload::Request { server: upload::DEFAULT_SERVER.to_string(), nickname: None, students_dir: out.to_path_buf(), progress_dir: crate::progress_dir(), store: store.clone() };
+                        upload::send(&req, &upload::Sources::from_env(), &mut |_| bail!("회원코드를 붙여넣어 주세요"))
+                    })();
+                    let saved = upload::saved_account_id(&store).is_some();
+                    match outcome {
+                        Ok(u) => {
+                            let text = format!("업로드 완료 · 공개 ({} 명, 점수 {})\n{}", u.students, u.score, u.url);
+                            println!("upload: {text}");
+                            assistant.upload_finished(&text, Some(u.url));
+                        }
+                        Err(e) => {
+                            println!("upload failed: {e:#}");
+                            assistant.upload_finished(&format!("업로드 실패: {e:#}"), None);
+                        }
+                    }
+                    if saved {
+                        assistant.set_member_code("");
+                    }
+                    assistant.set_account_saved(saved);
                 }
+                Command::PasteMemberCode => match clipboard::get_text() {
+                    Some(text) => assistant.set_member_code(&text),
+                    None => assistant.say("클립보드에 글자가 없습니다"),
+                },
+                Command::OpenUrl(url) => {
+                    if !(clipboard::is_openable(&url, upload::DEFAULT_SERVER) && clipboard::open_url(&url)) {
+                        assistant.say("페이지를 열지 못했습니다");
+                    }
+                }
+                Command::CopyText(text) => assistant.say(if clipboard::set_text(&text) { "주소를 복사했습니다" } else { "복사하지 못했습니다" }),
                 Command::StartProgressScan => {
                     let Some(r) = region else {
                         println!("progress scan: the game window is not found");

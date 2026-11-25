@@ -53,15 +53,14 @@
 ## 업로드와 버전
 
 ```
-ba-key-AMAS --upload [https://<서버>] [--public] [--nickname 이름]   # 주소를 생략하면 https://key-amas.cxx.co.kr
+ba-key-AMAS --upload [https://<서버>] [--nickname 이름]   # 주소를 생략하면 https://key-amas.cxx.co.kr
 ```
 
 ```
-ba-key-AMAS --manage https://<서버> --visibility public|private
 ba-key-AMAS --forget-account
 ```
 
-공개 여부도 애드온에서만 바꾼다. `--public`이 없으면 서버가 가진 공개 여부를 그대로 둔다(새 계정은 비공개).
+업로드는 곧 리더보드 공개 동의다. 애드온은 항상 `public: true`로 올리고, 비공개로 바꾸는 기능은 제공하지 않는다(서버의 `/api/visibility`는 남아 있지만 애드온이 부르지 않는다).
 
 마지막 학생 스캔(`students.json`)과 진행 스캔(`latest.json`)을 보낸다. 닉네임은 진행 스캔이 읽은 계정 이름이다. 처음 올릴 때 회원코드를 묻고(위 "회원코드와 계정"), 이후에는 저장된 `account_id`로 같은 줄을 갱신한다. 업로드가 끝나면 그 선생님의 주소(`<서버>/#/u/<public_id>`)를 보여 준다. `account_id`가 새어 나가지 않도록 https와 loopback 주소만 받는다.
 
@@ -149,7 +148,7 @@ npm ci
 npm run assets          # 유지보수자 전용: 이미지와 카탈로그를 처음부터 다시 만든다 (약 20분, 결과를 커밋하면 역사가 그만큼 커진다)
 npm run db:local
 npm run dev             # 먼저 scripts/sync-dev-vars.ts가 저장소 .env의 키로 .dev.vars를 만든다 (아래 .env 참고)
-ba-key-AMAS --upload http://127.0.0.1:8787 --public   # 처음에는 회원코드를 묻는다
+ba-key-AMAS --upload http://127.0.0.1:8787   # 처음에는 회원코드를 묻는다
 npm test ; npm run typecheck
 pwsh -File scripts/e2e-accounts.ps1          # wrangler dev 위에서 올려 보는 종단 시험
 ```

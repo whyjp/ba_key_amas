@@ -38,7 +38,7 @@
 <g><rect x="240" y="27" width="196" height="58" rx="8" fill="#1f3a63"/>
 <text x="338" y="49" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">baocr</text>
 <text x="338" y="67" fill="#dbe4f0" font-size="10.5" text-anchor="middle">애드온 루프, 스캔, doctor (바이너리)</text>
-<text x="428" y="79" fill="#b7c4d6" font-size="9" text-anchor="end">2569줄</text></g>
+<text x="428" y="79" fill="#b7c4d6" font-size="9" text-anchor="end">2661줄</text></g>
 <g><rect x="458" y="27" width="196" height="58" rx="8" fill="#777777"/>
 <text x="556" y="49" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">namedict</text>
 <text x="556" y="67" fill="#dbe4f0" font-size="10.5" text-anchor="middle">도구: 이름 사전을 만든다</text>
@@ -46,7 +46,7 @@
 <g><rect x="22" y="139" width="196" height="58" rx="8" fill="#2f6f9f"/>
 <text x="120" y="161" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">assist</text>
 <text x="120" y="179" fill="#dbe4f0" font-size="10.5" text-anchor="middle">옵저버, 위젯, 어시스턴트, 설정</text>
-<text x="210" y="191" fill="#b7c4d6" font-size="9" text-anchor="end">3623줄</text></g>
+<text x="210" y="191" fill="#b7c4d6" font-size="9" text-anchor="end">3713줄</text></g>
 <g><rect x="240" y="139" width="196" height="58" rx="8" fill="#8a5a1c"/>
 <text x="338" y="161" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">hcu</text>
 <text x="338" y="179" fill="#dbe4f0" font-size="10.5" text-anchor="middle">데스크톱 제어, 스캔 루프, 안전장치</text>

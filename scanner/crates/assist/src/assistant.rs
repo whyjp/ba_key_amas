@@ -33,6 +33,10 @@ const BUTTON_PROGRESS_SCAN: &str = "scan:progress";
 /// Both scan sections carry an upload button; it sends the last student scan and progress scan together.
 const BUTTON_UPLOAD_STUDENTS: &str = "upload:students";
 const BUTTON_UPLOAD_PROGRESS: &str = "upload:progress";
+const BUTTON_CODE_PASTE: &str = "code:paste";
+const BUTTON_CODE_CHANGE: &str = "code:change";
+const BUTTON_LINK_OPEN: &str = "upload:open";
+const BUTTON_LINK_COPY: &str = "upload:copy";
 /// Sent by the card's 종료 button and by the tray icon's 종료.
 const BUTTON_QUIT: &str = "quit";
 /// Folds and unfolds the student-list section.
@@ -40,7 +44,7 @@ const BUTTON_STUDENT_SECTION: &str = "section:student";
 
 /// Something the player asked for that the add-on itself does not do: the program's main loop
 /// carries it out (the scan is the only thing that sends input to the game).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     /// Scan the student list; `deep` also reads the popup and the two tabs of each student.
     StartScan { deep: bool },
@@ -48,6 +52,12 @@ pub enum Command {
     StartProgressScan,
     /// Send the last student scan and progress scan to the web server.
     Upload,
+    /// Take the member code from the clipboard (the card shows it and sends it with the upload).
+    PasteMemberCode,
+    /// Open a page of the web server in the browser.
+    OpenUrl(String),
+    /// Put a text on the clipboard.
+    CopyText(String),
     /// End the add-on.
     Quit,
 }
@@ -92,6 +102,12 @@ pub struct Assistant<'a, S: Surface> {
     upload_note: Vec<String>,
     /// An upload is under way (the main loop is waiting for the server).
     uploading: bool,
+    /// The member code pasted on the card, until an upload has used it (then only its hash is kept, in the account file).
+    member_code: Option<String>,
+    /// An account is already saved: no code is asked for.
+    account_saved: bool,
+    /// The page of the last upload.
+    upload_link: Option<String>,
     scan_state: RefCell<BannerState>,
     /// The player's mouse and keyboard are blocked while the scan runs.
     input_locked: bool,
@@ -139,6 +155,9 @@ impl<'a, S: Surface> Assistant<'a, S> {
             scanning: false,
             upload_note: Vec::new(),
             uploading: false,
+            member_code: None,
+            account_saved: false,
+            upload_link: None,
             scan_state: RefCell::new(BannerState::counting(0)),
             input_locked: false,
             commands: Vec::new(),
@@ -217,6 +236,23 @@ impl<'a, S: Surface> Assistant<'a, S> {
         self.forget();
     }
 
+    /// Whether an account is saved from an earlier upload.
+    pub fn set_account_saved(&mut self, saved: bool) {
+        self.account_saved = saved;
+        self.present();
+    }
+
+    /// The member code pasted from the clipboard (surrounding blanks dropped); an empty text clears it.
+    pub fn set_member_code(&mut self, text: &str) {
+        let code = text.trim();
+        self.member_code = (!code.is_empty()).then(|| code.to_string());
+        self.present();
+    }
+
+    pub fn member_code(&self) -> Option<&str> {
+        self.member_code.as_deref()
+    }
+
     /// An upload starts: the card says so until the server has answered.
     pub fn begin_upload(&mut self) {
         self.uploading = true;
@@ -224,9 +260,16 @@ impl<'a, S: Surface> Assistant<'a, S> {
         self.present();
     }
 
+    /// A line under the upload buttons (the link of the last upload stays).
+    pub fn say(&mut self, text: &str) {
+        self.upload_note = vec![text.to_string()];
+        self.present();
+    }
+
     /// The upload ended: `text` is what to show, one line per line.
-    pub fn upload_finished(&mut self, text: &str) {
+    pub fn upload_finished(&mut self, text: &str, link: Option<String>) {
         self.uploading = false;
+        self.upload_link = link;
         self.upload_note = text.lines().map(str::to_string).filter(|l| !l.trim().is_empty()).collect();
         self.present();
     }
@@ -331,8 +374,32 @@ impl<'a, S: Surface> Assistant<'a, S> {
             return false;
         }
         if event == BUTTON_UPLOAD_STUDENTS || event == BUTTON_UPLOAD_PROGRESS {
-            if !self.scanning && !self.uploading && !self.commands.contains(&Command::Upload) {
+            if self.uploading || self.scanning {
+                return false;
+            }
+            if !self.account_saved && self.member_code.is_none() {
+                self.upload_note = vec!["회원코드를 먼저 붙여넣어 주세요 (아래 업로드 항목)".into()];
+                return true;
+            }
+            if !self.commands.contains(&Command::Upload) {
                 self.commands.push(Command::Upload);
+            }
+            return false;
+        }
+        if event == BUTTON_CODE_PASTE {
+            if !self.commands.contains(&Command::PasteMemberCode) {
+                self.commands.push(Command::PasteMemberCode);
+            }
+            return false;
+        }
+        if event == BUTTON_CODE_CHANGE {
+            self.account_saved = false;
+            self.member_code = None;
+            return true;
+        }
+        if event == BUTTON_LINK_OPEN || event == BUTTON_LINK_COPY {
+            if let Some(url) = self.upload_link.clone() {
+                self.commands.push(if event == BUTTON_LINK_OPEN { Command::OpenUrl(url) } else { Command::CopyText(url) });
             }
             return false;
         }
@@ -367,9 +434,20 @@ impl<'a, S: Surface> Assistant<'a, S> {
         rows.push(Row::Heading("진행 상태".into()));
         rows.push(Row::Button { id: BUTTON_PROGRESS_SCAN.into(), label: "진행 상태 스캔".into(), value: "시작".into(), on: false });
         rows.push(Row::Button { id: BUTTON_UPLOAD_PROGRESS.into(), label: "스캔 결과 업로드".into(), value: "전송".into(), on: false });
+        rows.push(Row::Heading("업로드".into()));
+        if self.account_saved {
+            rows.push(Row::Button { id: BUTTON_CODE_CHANGE.into(), label: "계정".into(), value: "저장됨 · 바꾸기".into(), on: false });
+        } else {
+            rows.push(Row::Info { label: "회원코드".into(), value: self.member_code.clone().unwrap_or_else(|| "붙여넣기 필요".into()) });
+            rows.push(Row::Button { id: BUTTON_CODE_PASTE.into(), label: "회원코드 붙여넣기".into(), value: "클립보드".into(), on: false });
+        }
         if let Some((first, rest)) = self.upload_note.split_first() {
-            rows.push(Row::Info { label: "업로드".into(), value: first.clone() });
+            rows.push(Row::Info { label: "결과".into(), value: first.clone() });
             rows.extend(rest.iter().map(|l| Row::Note(l.clone())));
+        }
+        if self.upload_link.is_some() {
+            rows.push(Row::Button { id: BUTTON_LINK_OPEN.into(), label: "내 페이지".into(), value: "열기".into(), on: false });
+            rows.push(Row::Button { id: BUTTON_LINK_COPY.into(), label: "주소".into(), value: "복사".into(), on: false });
         }
         rows.push(Row::Heading("표시".into()));
         rows.push(Row::Button { id: BUTTON_INGAME.into(), label: "인게임 표시".into(), value: on_off(self.settings.ingame_visible), on: self.settings.ingame_visible });
@@ -875,7 +953,16 @@ mod tests {
         click(&r, "scan:progress");
         a.poll();
         assert_eq!(a.take_commands(), vec![Command::StartProgressScan]);
-        // the upload button of either scan section asks for the upload, once
+        // without an account or a code the upload button asks for the code; with one it asks for the upload, once
+        click(&r, "upload:progress");
+        a.poll();
+        assert!(a.take_commands().is_empty());
+        assert!(rows_of(r.fake.0.borrow().main.as_ref().unwrap()).contains("회원코드를 먼저"));
+        click(&r, "code:paste");
+        a.poll();
+        assert_eq!(a.take_commands(), vec![Command::PasteMemberCode]);
+        a.set_member_code("  AB12CD34EF56G \n");
+        assert_eq!(a.member_code(), Some("AB12CD34EF56G"));
         click(&r, "upload:progress");
         click(&r, "upload:progress");
         a.poll();
@@ -884,9 +971,12 @@ mod tests {
         click(&r, "upload:progress");
         a.poll();
         assert!(a.take_commands().is_empty(), "no second upload while one is under way");
-        a.upload_finished("updated (106 students)
-your page: https://example.test/#/u/x");
+        a.upload_finished("updated (106 students)\nyour page: https://example.test/#/u/x", Some("https://example.test/#/u/x".into()));
         assert!(rows_of(r.fake.0.borrow().main.as_ref().unwrap()).contains("your page"), "the answer stays on the card");
+        click(&r, "upload:open");
+        click(&r, "upload:copy");
+        a.poll();
+        assert_eq!(a.take_commands(), vec![Command::OpenUrl("https://example.test/#/u/x".into()), Command::CopyText("https://example.test/#/u/x".into())]);
         a.begin_scan();
         click(&r, "scan:progress");
         a.poll();

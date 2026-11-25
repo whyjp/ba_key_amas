@@ -7,7 +7,7 @@
 //!   --scan-arrows        scan student profiles with the right arrow (drives the game via HCU)
 //!   --watch              passive updater: screenshots only, stores changed values
 //!   --grab <png>         save the current game region (no input)
-mod account_dialog;
+mod clipboard;
 mod account_key;
 mod assist;
 mod dump;
@@ -67,18 +67,15 @@ struct Args {
     /// Send the last student scan and progress scan to a ba-key-AMAS web server (https, or http://localhost); without a value, the official server. No game input. The first time it asks for the member code (see the note below).
     #[arg(long, value_name = "SERVER_URL", num_args = 0..=1, default_missing_value = upload::DEFAULT_SERVER)]
     upload: Option<String>,
-    /// Show this account on the server's leaderboard or not: --manage <SERVER_URL> --visibility public|private. Add-on only; the website cannot.
+    /// Disabled: uploading is the consent to be shown on the leaderboard, so there is no way to make an account private.
     #[arg(long, value_name = "SERVER_URL", num_args = 0..=1, default_missing_value = upload::DEFAULT_SERVER)]
     manage: Option<String>,
-    /// --manage: show this account on the leaderboard (public) or not (private).
+    /// Disabled together with --manage.
     #[arg(long, value_name = "public|private")]
     visibility: Option<String>,
     /// Forget the saved account value (the hash of the member code), so the next --upload asks for a member code again.
     #[arg(long)]
     forget_account: bool,
-    /// --upload: show this account on the server's leaderboard (default: private).
-    #[arg(long)]
-    public: bool,
     /// --upload: the nickname to upload under (default: the account nickname the progress scan read).
     #[arg(long)]
     nickname: Option<String>,
@@ -225,19 +222,12 @@ fn real_main() -> Result<()> {
         return Ok(());
     }
     if let Some(server) = &args.upload {
-        let req = upload::Request { server: server.clone(), nickname: args.nickname.clone(), public: args.public, students_dir: args.out_dir(), progress_dir: progress_dir(), store: upload_store() };
+        let req = upload::Request { server: server.clone(), nickname: args.nickname.clone(), students_dir: args.out_dir(), progress_dir: progress_dir(), store: upload_store() };
         println!("{}", upload::run(&req, &upload::Sources::from_env(), &mut account_key::read_hidden)?);
         return Ok(());
     }
-    if let Some(server) = &args.manage {
-        let public = match args.visibility.as_deref() {
-            Some("public") => true,
-            Some("private") => false,
-            _ => bail!("--manage needs --visibility public|private"),
-        };
-        let req = upload::Manage { server: server.clone(), public, store: upload_store() };
-        println!("{}", upload::manage(&req, &upload::Sources::from_env(), &mut account_key::read_hidden)?);
-        return Ok(());
+    if args.manage.is_some() || args.visibility.is_some() {
+        bail!("업로드는 곧 공개 동의입니다. 공개 여부를 바꾸는 기능은 제공하지 않습니다");
     }
     if let Some(png) = &args.boxes {
         let img = image::open(png)?.to_rgb8();

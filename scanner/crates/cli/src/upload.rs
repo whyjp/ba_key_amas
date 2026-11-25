@@ -19,8 +19,6 @@ pub const UPLOAD_PROTOCOL: u32 = 2;
 pub struct Request {
     pub server: String,
     pub nickname: Option<String>,
-    /// `--public`: show this account on the leaderboard. Without it the server keeps what it has (new accounts are private).
-    pub public: bool,
     pub students_dir: PathBuf,
     pub progress_dir: PathBuf,
     pub store: PathBuf,
@@ -47,7 +45,7 @@ pub fn saved_account_id(path: &Path) -> Option<String> {
     v["account_id"].as_str().filter(|s| account_key::is_account_id(s)).map(str::to_string)
 }
 
-fn save_account_id(path: &Path, id: &str) -> Result<()> {
+pub fn save_account_id(path: &Path, id: &str) -> Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
@@ -144,37 +142,30 @@ fn profile_url(server: &str, public_id: &str) -> String {
     format!("{}/#/u/{public_id}", server.trim_end_matches('/'))
 }
 
-pub fn run(req: &Request, src: &Sources, ask: &mut dyn FnMut(&str) -> Result<String>) -> Result<String> {
+/// What the server said about an upload.
+pub struct Uploaded {
+    pub created: bool,
+    pub students: Value,
+    pub score: Value,
+    /// The player's page on the server.
+    pub url: String,
+}
+
+/// Sends the scans. Uploading is the consent to appear on the leaderboard, so the account is always public.
+pub fn send(req: &Request, src: &Sources, ask: &mut dyn FnMut(&str) -> Result<String>) -> Result<Uploaded> {
     check_server(&req.server)?;
     let roster = read_json(&req.students_dir.join("students.json")).context("run the student scan first")?;
     let progress = read_json(&req.progress_dir.join("latest.json")).ok();
     let nickname = req.nickname.clone().or_else(|| nickname_of(&progress)).ok_or_else(|| anyhow!("no account nickname: run the progress scan or pass --nickname"))?;
     let id = resolve_account_id(&req.store, src, ask)?;
-    let out = post_json(&format!("{}/api/upload", req.server.trim_end_matches('/')), build_body(&id, &nickname, req.public, roster, progress))?;
+    let out = post_json(&format!("{}/api/upload", req.server.trim_end_matches('/')), build_body(&id, &nickname, true, roster, progress))?;
     let public_id = out["public_id"].as_str().ok_or_else(|| anyhow!("the server sent no public_id"))?;
-    Ok(format!(
-        "{} ({} students, score {}, {})\nyour page: {}",
-        if out["created"].as_bool().unwrap_or(false) { "new account" } else { "updated" },
-        out["students"],
-        out["score"],
-        if out["public"].as_bool().unwrap_or(false) { "public" } else { "private" },
-        profile_url(&req.server, public_id)
-    ))
+    Ok(Uploaded { created: out["created"].as_bool().unwrap_or(false), students: out["students"].clone(), score: out["score"].clone(), url: profile_url(&req.server, public_id) })
 }
 
-pub struct Manage {
-    pub server: String,
-    pub public: bool,
-    pub store: PathBuf,
-}
-
-/// Public or private is changed here and nowhere on the website.
-pub fn manage(req: &Manage, src: &Sources, ask: &mut dyn FnMut(&str) -> Result<String>) -> Result<String> {
-    check_server(&req.server)?;
-    let id = resolve_account_id(&req.store, src, ask)?;
-    let out = post_json(&format!("{}/api/visibility", req.server.trim_end_matches('/')), json!({ "account_id": id, "public": req.public }))?;
-    let link = out["public_id"].as_str().map(|p| format!("\nyour page: {}", profile_url(&req.server, p))).unwrap_or_default();
-    Ok(format!("leaderboard: {}{link}", if out["public"].as_bool().unwrap_or(false) { "public" } else { "private" }))
+pub fn run(req: &Request, src: &Sources, ask: &mut dyn FnMut(&str) -> Result<String>) -> Result<String> {
+    let u = send(req, src, ask)?;
+    Ok(format!("{} ({} students, score {}, public)\nyour page: {}", if u.created { "new account" } else { "updated" }, u.students, u.score, u.url))
 }
 
 /// The key the official release build signs its requests with. CI injects it at build time (the environment
