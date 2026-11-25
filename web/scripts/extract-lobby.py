@@ -122,60 +122,72 @@ def locate_by_thumbnail(big_gray, thumb_path: pathlib.Path):
     return best
 
 
-# The memorial card draws the cut over the whole tall card; the stats and their dark gradient cover its lower half (from
-# about 42 percent down), so the face has to sit in the upper part. Each student gets VARIANTS cuts with the face kept whole:
-# the whole picture at its widest, and two closer ones with the face placed differently. The card picks one at random.
-FACE_MAX_Y = 0.42   # the face's centre, as a fraction of the cut's height, stays above this
+# The memorial card draws the cut over the whole tall card, and the stats with their dark gradient cover its lower half (from
+# about 42 percent down), so the face has to sit in the upper part. The lobby pictures are landscape (mostly 1.48:1, some
+# 16:9), so a cut of the card's own 0.59:1 shape shows a third to a half of the picture's width, however tall it is. Each
+# student gets up to three cuts with the face whole: two that are wider than the card (their picture is as wide as the card
+# and ends in an extension of itself, blurred and darkened, that fills the text area) and one of the card's own shape. The
+# card draws one of them at random.
+FACE_MAX_Y = 0.42   # the face's centre, as a fraction of the card's height, stays above this
 FACE_MARGIN = 0.08  # and the face keeps this much of the cut's size clear of its edges
-VARIANTS = ((1.0, None, None), (1.0, 0.34, None), (0.8, 0.5, 0.27))  # zoom (1 = as wide as the picture allows), face x, face y
-MAX_FACE_SHARE = 0.7  # a variant is skipped when the face would fill more than this of its width
+FADE = 0.2          # a wide cut's last fifth fades into the extension
+VARIANTS = (0.78, 1.0, RATIO)  # the shapes (width / height) of the picture part: wide, wider, the card's own
+MAX_FACE_SHARE = 0.7  # a cut is skipped when the face would fill more than this of its width
 
 
-def window(img: Image.Image, face, spot, shift: float, zoom: float = 1.0, at=(None, None)):
-    """A portrait window of the picture. `zoom` 1 is the full height (or the whole width when the picture is narrower);
-    smaller is closer. Centre: with `at` (where the face should sit in the window, as fractions) the detected face, else
-    the matched thumbnail's centre (SchaleDB's own crop is framed on the character), else the face, else the middle.
-    The window is then nudged until the whole face sits inside with a margin and its centre is above FACE_MAX_Y.
-    `shift` moves it sideways afterwards (positive = right), as a fraction of its width: the hand-made correction for a
-    picture whose face still sits at an edge (`lobby_shift` in face-overrides.json).
-    Returns (left, top, width, height)."""
+def window(img: Image.Image, face, spot, shift: float, ratio: float, face_max: float):
+    """The window of the picture to show: as tall as the picture allows and `ratio` wide (the whole width when the picture is
+    narrower, then as tall as that gives). Centre: the matched thumbnail's centre (SchaleDB's own crop is framed on the
+    character), else the detected face, else the middle. The window is nudged until the whole face sits inside with a margin
+    and its centre is above `face_max` of the window's height. `shift` moves it sideways afterwards (positive = right), as a
+    fraction of its width (`lobby_shift` in face-overrides.json). Returns (left, top, width, height)."""
     w, h = img.size
-    cw0 = min(w, round(h * RATIO))
-    cw, ch = round(cw0 * zoom), round(cw0 * zoom / RATIO)
-    tx, ty = at
-    if face and tx is not None:
-        left = round(face[0] - tx * cw)
-        top = round(face[1] - ty * ch) if ty is not None else round((spot[1] if spot else face[1]) - ch / 2)
-    else:
-        cx = spot[0] if spot else (face[0] if face else w * 0.5)
-        cy = spot[1] if spot else (face[1] if face else h * 0.5)
-        left, top = round(cx - cw / 2), round(cy - ch / 2)
+    cw = min(w, round(h * ratio))
+    ch = round(cw / ratio)
+    cx = spot[0] if spot else (face[0] if face else w * 0.5)
+    cy = spot[1] if spot else (face[1] if face else h * 0.5)
+    left, top = round(cx - cw / 2), round(cy - ch / 2)
     if face:
         half = face[2] / 2
         m = FACE_MARGIN
         left = min(left, round(face[0] - half - m * cw))
         left = max(left, round(face[0] + half + m * cw - cw))
         top = min(top, round(face[1] - half - m * ch))
-        top = max(top, round(face[1] + half + m * ch - ch), round(face[1] - FACE_MAX_Y * ch))
+        top = max(top, round(face[1] + half + m * ch - ch), round(face[1] - face_max * ch))
     left = round(left + shift * cw)
-    left, top = max(0, min(left, w - cw)), max(0, min(top, h - ch))
-    return left, top, cw, ch
+    return max(0, min(left, w - cw)), max(0, min(top, h - ch)), cw, ch
 
 
-def cuts(img: Image.Image, face, spot, shift: float = 0.0, flip: bool = False):
-    """The cut variants of one picture as (picture, window): the first is the widest, the others are closer, each with the
-    face whole and in the upper part of the card."""
+def cut(img: Image.Image, face, spot, shift: float, ratio: float):
+    """One cut as (picture 760x1280, window). A cut wider than the card is drawn at the card's width over the extension."""
+    from PIL import ImageEnhance, ImageFilter
+    art_h = min(OUT_H, round(OUT_W / ratio))
+    left, top, cw, ch = window(img, face, spot, shift, ratio, FACE_MAX_Y * OUT_H / art_h)
+    art = img.crop((left, top, left + cw, top + ch)).resize((OUT_W, art_h), Image.LANCZOS)
+    if art_h >= OUT_H:
+        return art, (left, top, cw, ch)
+    bl, bt, bw, bh = window(img, face, spot, shift, RATIO, FACE_MAX_Y)
+    back = img.crop((bl, bt, bl + bw, bt + bh)).resize((OUT_W, OUT_H), Image.LANCZOS).filter(ImageFilter.GaussianBlur(24))
+    back = ImageEnhance.Brightness(ImageEnhance.Color(back).enhance(1.2)).enhance(0.8)
+    mask = Image.new("L", (OUT_W, art_h), 255)
+    fade = round(art_h * FADE)
+    for y in range(fade):
+        mask.paste(round(255 * (1 - (y + 1) / fade)), (0, art_h - fade + y, OUT_W, art_h - fade + y + 1))
+    back.paste(art, (0, 0), mask)
+    return back, (left, top, cw, ch)
+
+
+def cuts(img: Image.Image, face, spot, shift: float = 0.0):
+    """The cuts of one picture, the widest first; a cut that would be the same window as one made already is left out."""
     out = []
-    for k, (zoom, tx, ty) in enumerate(VARIANTS):
-        if k and face and face[2] > MAX_FACE_SHARE * min(img.size[0], round(img.size[1] * RATIO)) * zoom:
+    for ratio in VARIANTS:
+        if face and face[2] > MAX_FACE_SHARE * min(img.size[0], round(img.size[1] * ratio)):
             continue
-        if k and not face:
+        made = cut(img, face, spot, shift if ratio == RATIO else 0.0, ratio)
+        win = made[1]
+        if any(abs(win[0] - o[1][0]) < win[2] * 0.06 and abs(win[1] - o[1][1]) < win[3] * 0.06 and abs(win[2] - o[1][2]) < win[2] * 0.06 for o in out):
             continue
-        at = (None, None) if tx is None else ((1 - tx) if flip and k == 1 else tx, ty)
-        left, top, cw, ch = window(img, face, spot, shift if k == 0 else 0.0, zoom, at)
-        if any(abs(left - o[1][0]) < cw * 0.06 and abs(top - o[1][1]) < ch * 0.06 and abs(cw - o[1][2]) < cw * 0.06 for o in out):
-            continue  # the same cut as one made already
-        out.append((img.crop((left, top, left + cw, top + ch)).resize((OUT_W, OUT_H), Image.LANCZOS), (left, top, cw, ch)))
+        out.append(made)
     return out
 
 
@@ -248,7 +260,7 @@ def main() -> int:
         how[("face" if face else "thumbnail" if spot else "middle")] += 1
         img = Image.open(src).convert("RGB")
         shift = float(crop.OVERRIDES.get("lobby_shift", {}).get(str(sid), 0.0))
-        made = cuts(img, face, spot, shift, flip=sid % 2 == 1)
+        made = cuts(img, face, spot, shift)
         for old in out.glob(f"{sid}-*.webp"):
             old.unlink()
         for k, (cropped, _) in enumerate(made):
