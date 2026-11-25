@@ -58,6 +58,7 @@ def main() -> int:
             "attack": s.get("BulletType"),
             "armor": s.get("ArmorType"),
             "squad": s.get("SquadType"),
+            "star": s.get("StarGrade"),
             "position": (s.get("Position") or "").upper() or None,
             "equipment": s.get("Equipment"),
         }

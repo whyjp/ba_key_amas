@@ -54,7 +54,8 @@ async function ownAccount(env: Env, raw: unknown): Promise<Found> {
 const flag = (b: boolean | null): number | null => (b === null ? null : Number(b));
 
 function owned(s: StudentRow): OwnedStudent {
-  return { ...s, student_id: studentEntry(s.name, s.student_id)?.id ?? null };
+  const entry = studentEntry(s.name, s.student_id);
+  return { ...s, student_id: entry?.id ?? null, base_stars: entry?.star ?? null };
 }
 
 /** The leaderboard row stored with a user: the score, the count columns and the three best characters. */
@@ -129,6 +130,7 @@ async function upload(env: Env, up: Upload, accountId: string, client: Client, i
 
 function ownedFromRows(rows: Record<string, unknown>[]): OwnedStudent[] {
   return rows.map((r) => ({
+    base_stars: studentEntry(String(r.name), (r.student_id as number | null) ?? null)?.star ?? null,
     name: String(r.name), student_id: (r.student_id as number | null) ?? null, level: r.level as number | null, stars: r.stars as number | null,
     ex_skill: r.ex_skill as number | null, normal_skill: r.normal_skill as number | null, passive_skill: r.passive_skill as number | null, sub_skill: r.sub_skill as number | null,
     bond: r.bond as number | null, uw_stars: r.uw_stars as number | null, uw_level: r.uw_level as number | null,
@@ -197,8 +199,23 @@ async function communityStudents(env: Env): Promise<Response> {
   return json(200, { teachers: users.results.length, characters: aggregate(lists) }, { "cache-control": "public, max-age=60" });
 }
 
-/** Public users only, best first. Reads columns stored at upload, so it never touches the students table. */
+/** Users the leaderboard last scored with an older rule. */
+const RESCORE_BATCH = 20;
+
+/** Scores again, from the stored students, the users whose score was made by an older SCORE_VERSION, so a change of the
+ *  rule reaches the leaderboard without every teacher uploading again. A few per request: the rest follow on the next ones. */
+async function rescoreStale(env: Env): Promise<void> {
+  const stale = await env.DB.prepare("SELECT id FROM users WHERE score_version < ?1 LIMIT ?2").bind(SCORE_VERSION, RESCORE_BATCH).all<{ id: number }>();
+  for (const { id } of stale.results) {
+    const rows = await env.DB.prepare("SELECT * FROM students WHERE user_id = ?1").bind(id).all();
+    const board = boardColumns(analyze(ownedFromRows(rows.results)));
+    await env.DB.prepare("UPDATE users SET score = ?1, stats_json = ?2, top_json = ?3, chars_json = ?4, score_version = ?5 WHERE id = ?6").bind(board.score, board.stats, board.top, board.chars, SCORE_VERSION, id).run();
+  }
+}
+
+/** Public users only, best first. Reads columns stored at upload (or by `rescoreStale`), so it never reads the students table itself. */
 async function leaderboard(env: Env): Promise<Response> {
+  await rescoreStale(env);
   const rows = await env.DB.prepare("SELECT public_id, nickname, score, stats_json, top_json, updated_at FROM users WHERE public = 1 ORDER BY score DESC, updated_at ASC LIMIT 100").all<{
     public_id: string; nickname: string; score: number; stats_json: string | null; top_json: string | null; updated_at: number;
   }>();
