@@ -4,7 +4,7 @@ members = ["crates/overlay", "crates/namedict", "crates/wikidb", "crates/assist"
 
 [workspace.package]
 edition = "2021"
-version = "0.1.1"
+version = "0.1.2"
 
 [workspace.dependencies]
 baocr-core = { path = "crates/core" }
