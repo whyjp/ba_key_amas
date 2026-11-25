@@ -222,7 +222,7 @@ dependencies = [
 
 [[package]]
 name = "baocr"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "baocr-assist",
@@ -250,7 +250,7 @@ dependencies = [
 
 [[package]]
 name = "baocr-assist"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "baocr-core",
@@ -268,7 +268,7 @@ dependencies = [
 
 [[package]]
 name = "baocr-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "image",
@@ -280,7 +280,7 @@ dependencies = [
 
 [[package]]
 name = "baocr-equipment"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "baocr-core",
@@ -293,7 +293,7 @@ dependencies = [
 
 [[package]]
 name = "baocr-export"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "baocr-core",
@@ -308,7 +308,7 @@ dependencies = [
 
 [[package]]
 name = "baocr-extract"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "baocr-core",
@@ -324,7 +324,7 @@ dependencies = [
 
 [[package]]
 name = "baocr-hcu"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "baocr-core",
@@ -338,7 +338,7 @@ dependencies = [
 
 [[package]]
 name = "baocr-namedict"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -348,7 +348,7 @@ dependencies = [
 
 [[package]]
 name = "baocr-names"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "baocr-core",
@@ -361,7 +361,7 @@ dependencies = [
 
 [[package]]
 name = "baocr-ocr"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "baocr-core",
@@ -375,7 +375,7 @@ dependencies = [
 
 [[package]]
 name = "baocr-overlay"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ab_glyph",
  "anyhow",
@@ -384,7 +384,7 @@ dependencies = [
 
 [[package]]
 name = "baocr-pipeline"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "baocr-core",
@@ -400,7 +400,7 @@ dependencies = [
 
 [[package]]
 name = "baocr-pixels"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "baocr-core",
@@ -413,7 +413,7 @@ dependencies = [
 
 [[package]]
 name = "baocr-progress"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "baocr-core",
  "image",
@@ -424,7 +424,7 @@ dependencies = [
 
 [[package]]
 name = "baocr-wikidb"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "chrono",
