@@ -6,10 +6,12 @@
 //! It can be started before the game, after it, or while it restarts: the window is looked
 //! for again whenever it is not known, and forgotten when it stops answering.
 use anyhow::{bail, Result};
+use crate::account_dialog;
 use crate::dump::DumpSurface;
 use crate::profile::Profile;
 use crate::progress_scan;
 use crate::scan::{self, ScanRequest};
+use crate::upload;
 use baocr_assist::observe::BattleGate;
 use baocr_assist::{read_library, Assistant, Command, Observation, Observer, Settings, Surface};
 use baocr_core::ocr_api::Ocr;
@@ -125,6 +127,16 @@ fn run_on<S: Surface>(surface: S, ocr: Arc<dyn Ocr>, session: &HcuSession, regio
                 Command::Quit => {
                     println!("add-on closed");
                     return Ok(());
+                }
+                Command::Upload => {
+                    assistant.begin_upload();
+                    let req = upload::Request { server: upload::DEFAULT_SERVER.to_string(), nickname: None, public: false, students_dir: out.to_path_buf(), progress_dir: crate::progress_dir(), store: crate::upload_store() };
+                    let said = match upload::run(&req, &upload::Sources::from_env(), &mut account_dialog::ask) {
+                        Ok(text) => text,
+                        Err(e) => format!("실패: {e:#}"),
+                    };
+                    println!("upload: {said}");
+                    assistant.upload_finished(&said);
                 }
                 Command::StartProgressScan => {
                     let Some(r) = region else {

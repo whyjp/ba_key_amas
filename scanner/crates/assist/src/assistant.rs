@@ -30,6 +30,9 @@ const BUTTON_PLACE: &str = "place:";
 const BUTTON_SCAN: &str = "scan:start";
 const BUTTON_SCAN_DEEP: &str = "scan:deep";
 const BUTTON_PROGRESS_SCAN: &str = "scan:progress";
+/// Both scan sections carry an upload button; it sends the last student scan and progress scan together.
+const BUTTON_UPLOAD_STUDENTS: &str = "upload:students";
+const BUTTON_UPLOAD_PROGRESS: &str = "upload:progress";
 /// Sent by the card's 종료 button and by the tray icon's 종료.
 const BUTTON_QUIT: &str = "quit";
 /// Folds and unfolds the student-list section.
@@ -43,6 +46,8 @@ pub enum Command {
     StartScan { deep: bool },
     /// Read the account's progress (schedule ranks, story and event progress) from the game's screens.
     StartProgressScan,
+    /// Send the last student scan and progress scan to the web server.
+    Upload,
     /// End the add-on.
     Quit,
 }
@@ -83,6 +88,10 @@ pub struct Assistant<'a, S: Surface> {
     /// The age line last shown, to redraw only when the minute it names changes.
     age_shown: String,
     scanning: bool,
+    /// What the last upload said (a line each), shown under the upload buttons; empty before the first.
+    upload_note: Vec<String>,
+    /// An upload is under way (the main loop is waiting for the server).
+    uploading: bool,
     scan_state: RefCell<BannerState>,
     /// The player's mouse and keyboard are blocked while the scan runs.
     input_locked: bool,
@@ -128,6 +137,8 @@ impl<'a, S: Surface> Assistant<'a, S> {
             now: SystemTime::now(),
             age_shown: String::new(),
             scanning: false,
+            upload_note: Vec::new(),
+            uploading: false,
             scan_state: RefCell::new(BannerState::counting(0)),
             input_locked: false,
             commands: Vec::new(),
@@ -204,6 +215,20 @@ impl<'a, S: Surface> Assistant<'a, S> {
         self.scanning = false;
         self.library = info;
         self.forget();
+    }
+
+    /// An upload starts: the card says so until the server has answered.
+    pub fn begin_upload(&mut self) {
+        self.uploading = true;
+        self.upload_note = vec!["보내는 중...".into()];
+        self.present();
+    }
+
+    /// The upload ended: `text` is what to show, one line per line.
+    pub fn upload_finished(&mut self, text: &str) {
+        self.uploading = false;
+        self.upload_note = text.lines().map(str::to_string).filter(|l| !l.trim().is_empty()).collect();
+        self.present();
     }
 
     pub fn settings(&self) -> &Settings {
@@ -305,6 +330,12 @@ impl<'a, S: Surface> Assistant<'a, S> {
             }
             return false;
         }
+        if event == BUTTON_UPLOAD_STUDENTS || event == BUTTON_UPLOAD_PROGRESS {
+            if !self.scanning && !self.uploading && !self.commands.contains(&Command::Upload) {
+                self.commands.push(Command::Upload);
+            }
+            return false;
+        }
         if event == BUTTON_SCAN_DEEP {
             self.settings.scan_deep = !self.settings.scan_deep;
             return true;
@@ -331,9 +362,15 @@ impl<'a, S: Surface> Assistant<'a, S> {
             rows.push(Row::Hint { label: "갱신".into(), value: self.library.age_text(self.now), tip: self.library.exact_text() });
             rows.push(Row::Button { id: BUTTON_SCAN_DEEP.into(), label: "스캔 · 상세 포함".into(), value: on_off(self.settings.scan_deep), on: self.settings.scan_deep });
             rows.push(Row::Button { id: BUTTON_SCAN.into(), label: "학생 정보 스캔".into(), value: "시작".into(), on: false });
+            rows.push(Row::Button { id: BUTTON_UPLOAD_STUDENTS.into(), label: "스캔 결과 업로드".into(), value: "전송".into(), on: false });
         }
         rows.push(Row::Heading("진행 상태".into()));
         rows.push(Row::Button { id: BUTTON_PROGRESS_SCAN.into(), label: "진행 상태 스캔".into(), value: "시작".into(), on: false });
+        rows.push(Row::Button { id: BUTTON_UPLOAD_PROGRESS.into(), label: "스캔 결과 업로드".into(), value: "전송".into(), on: false });
+        if let Some((first, rest)) = self.upload_note.split_first() {
+            rows.push(Row::Info { label: "업로드".into(), value: first.clone() });
+            rows.extend(rest.iter().map(|l| Row::Note(l.clone())));
+        }
         rows.push(Row::Heading("표시".into()));
         rows.push(Row::Button { id: BUTTON_INGAME.into(), label: "인게임 표시".into(), value: on_off(self.settings.ingame_visible), on: self.settings.ingame_visible });
         for w in &self.widgets {
@@ -838,6 +875,18 @@ mod tests {
         click(&r, "scan:progress");
         a.poll();
         assert_eq!(a.take_commands(), vec![Command::StartProgressScan]);
+        // the upload button of either scan section asks for the upload, once
+        click(&r, "upload:progress");
+        click(&r, "upload:progress");
+        a.poll();
+        assert_eq!(a.take_commands(), vec![Command::Upload]);
+        a.begin_upload();
+        click(&r, "upload:progress");
+        a.poll();
+        assert!(a.take_commands().is_empty(), "no second upload while one is under way");
+        a.upload_finished("updated (106 students)
+your page: https://example.test/#/u/x");
+        assert!(rows_of(r.fake.0.borrow().main.as_ref().unwrap()).contains("your page"), "the answer stays on the card");
         a.begin_scan();
         click(&r, "scan:progress");
         a.poll();

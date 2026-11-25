@@ -7,6 +7,7 @@
 //!   --scan-arrows        scan student profiles with the right arrow (drives the game via HCU)
 //!   --watch              passive updater: screenshots only, stores changed values
 //!   --grab <png>         save the current game region (no input)
+mod account_dialog;
 mod account_key;
 mod assist;
 mod dump;
