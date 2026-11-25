@@ -9,7 +9,7 @@ use baocr_extract::raid::{RaidRef, RaidTracker};
 use baocr_extract::scene::{classify_in, squad_names_in, Layout, MissionRef, MissionTracker, Scene};
 use crate::portrait;
 use baocr_extract::{read_card_names, CardName};
-use baocr_pixels::{quick_card_labels, quick_card_selected, quick_tab_is_striker, quick_thumb_cards};
+use baocr_pixels::{quick_card_labels, quick_card_selected, quick_label_ink, quick_tab_is_striker, quick_thumb_cards};
 use baocr_wikidb::{StudentBrief, Wiki};
 use image::RgbImage;
 
@@ -94,6 +94,14 @@ pub struct Observer<'a> {
     /// The last screen that was recognised (the idle lobby is told from it: it has no text of its own).
     last: Scene,
     cards: CardMemory,
+    /// The grids read lately (the last three): where each card was, a fingerprint of its label (or of its picture when the
+    /// names are hidden), and the names read. While a frame shows the same as one of them, the grid was not scrolled and
+    /// no tab was pressed, so those names are still right and only the squad can have changed. Several are kept because a
+    /// click shakes the picture for a moment: the frame of that moment is a grid of its own, and the settled one that
+    /// follows is the one from before.
+    grids: Vec<KnownGrid>,
+    /// The fingerprint of the last grid that was not one of those, seen by `grid_settled`.
+    pending: Option<Vec<(i32, i32, u64)>>,
     /// Whether each student is a striker (true) or a special, and each one's name: what the portraits are matched among.
     strikers: std::collections::HashMap<i64, bool>,
     names: std::collections::HashMap<i64, String>,
@@ -101,7 +109,7 @@ pub struct Observer<'a> {
 
 impl<'a> Observer<'a> {
     pub fn new(ocr: &'a dyn Ocr, students: &'a [StudentBrief]) -> Observer<'a> {
-        Observer { ocr, students, tracker: MissionTracker::default(), raid_tracker: RaidTracker::default(), squad: Vec::new(), last: Scene::Unknown, cards: CardMemory::default(), strikers: students.iter().map(|s| (s.id, s.squad_type == "Main")).collect(), names: students.iter().map(|s| (s.id, s.name.clone())).collect() }
+        Observer { ocr, students, tracker: MissionTracker::default(), raid_tracker: RaidTracker::default(), squad: Vec::new(), last: Scene::Unknown, cards: CardMemory::default(), grids: Vec::new(), pending: None, strikers: students.iter().map(|s| (s.id, s.squad_type == "Main")).collect(), names: students.iter().map(|s| (s.id, s.name.clone())).collect() }
     }
 
     /// Forget the mission and the squad (the game was closed: what was known is not true any more).
@@ -111,6 +119,7 @@ impl<'a> Observer<'a> {
         self.squad.clear();
         self.last = Scene::Unknown;
         self.cards = CardMemory::default();
+        self.grids.clear();
     }
 
     /// `boxes`: the frame's free-text OCR. `fallback`: the screen to assume when the text
@@ -152,9 +161,21 @@ impl<'a> Observer<'a> {
             }
             Scene::QuickFormation => {
                 obs.grid_kind = quick_tab_is_striker(img).map(|striker| if striker { "Main" } else { "Support" });
-                // with the names hidden (the grid's thumbnail view) the cards are told by their pictures
-                let fresh = if quick_card_labels(img).is_empty() { self.thumb_cards(img, obs.grid_kind) } else { read_card_names(self.ocr, img, boxes) };
-                obs.cards = self.cards.steady(fresh, obs.grid_kind);
+                let snapshot = grid_snapshot(img);
+                if let Some(known) = self.grids.iter().find(|g| g.kind == obs.grid_kind && !g.cards.is_empty() && same_grid(&g.snapshot, &snapshot)) {
+                    // the same grid as one read lately: the names are known, only who is selected is looked at again
+                    obs.cards = known.cards.clone();
+                    self.cards.cards = obs.cards.clone();
+                    self.cards.kind = obs.grid_kind;
+                } else {
+                    // with the names hidden (the grid's thumbnail view) the cards are told by their pictures
+                    let fresh = if quick_card_labels(img).is_empty() { self.thumb_cards(img, obs.grid_kind) } else { read_card_names(self.ocr, img, boxes) };
+                    obs.cards = self.cards.steady(fresh, obs.grid_kind);
+                    self.grids.push(KnownGrid { snapshot, cards: obs.cards.clone(), kind: obs.grid_kind });
+                    if self.grids.len() > 3 {
+                        self.grids.remove(0);
+                    }
+                }
                 for c in &obs.cards {
                     if let Some(s) = Wiki::match_student_as(self.students, &c.text, obs.grid_kind) {
                         // a student already in the squad keeps their slot; only changes move anyone
@@ -180,12 +201,46 @@ impl<'a> Observer<'a> {
             }
             _ => {}
         }
+        if scene != Scene::QuickFormation {
+            self.grids.clear();
+        }
         obs.slots = self.slots(img, scene, layout);
         obs.squad = if scene == Scene::QuickFormation { obs.slots.iter().flatten().copied().collect() } else { self.squad.clone() };
         obs
     }
 
     /// The cards of the grid's thumbnail view, each told by its picture (only what is believed is named).
+    /// Whether the frame shows the 빠른 편성 grid exactly as it was last read (same cards at the same places, the tab
+    /// the same): nothing in it needs reading again but the squad, which pixels give. The caller may then skip the text
+    /// recognition of the whole frame (700 ms) and pass no text.
+    pub fn grid_unchanged(&self, img: &RgbImage) -> bool {
+        self.last == Scene::QuickFormation && quick_tab_is_striker(img).is_some() && {
+            let now = grid_snapshot(img);
+            self.grids.iter().any(|g| same_grid(&g.snapshot, &now))
+        }
+    }
+
+    /// Whether the frame is the 빠른 편성 popup, already being read, on its STRIKER tab. There the text of the grid part
+    /// of the frame is all that is needed (the specials' names under the popup, which the rest of the frame holds, do not change).
+    pub fn striker_popup(&self, img: &RgbImage) -> bool {
+        self.last == Scene::QuickFormation && quick_tab_is_striker(img) == Some(true)
+    }
+
+    /// Whether a grid that is new to the reader has held still for two looks in a row. Inside the popup a click shakes the
+    /// picture for a moment, and reading that moment (700 ms) only to read the settled frame again afterwards doubled the
+    /// time a change took to show. True when the frame is not a 빠른 편성 popup that was already read (the first look at
+    /// one, a scroll or a tab are read as soon as they are still, after one more look to see that the grid is the same).
+    pub fn grid_settled(&mut self, img: &RgbImage) -> bool {
+        if self.last != Scene::QuickFormation || quick_tab_is_striker(img).is_none() {
+            self.pending = None;
+            return true;
+        }
+        let now = grid_snapshot(img);
+        let settled = self.pending.as_deref() == Some(&now[..]);
+        self.pending = if settled { None } else { Some(now) };
+        settled
+    }
+
     /// Two students are costumes of one character.
     fn kin(&self, a: i64, b: i64) -> bool {
         match (self.names.get(&a), self.names.get(&b)) {
@@ -216,18 +271,24 @@ impl<'a> Observer<'a> {
         let named_strikers: Vec<i64> = self.squad.iter().copied().filter(is_striker).collect();
         let specials: Vec<i64> = self.squad.iter().copied().filter(|id| !is_striker(id)).collect();
         let mut slots = [None; 6];
+        // slots the game shows as EMPTY stay empty: no name read elsewhere may fill them
+        let mut empty = [false; 6];
         if scene == Scene::QuickFormation {
             let book = portrait::Book::bundled();
             let same = |a: i64, b: i64| self.names.get(&a) == self.names.get(&b);
             for (k, slot) in slots.iter_mut().enumerate().take(4) {
                 let (cx, cy) = portrait::slot_centre(k, layout);
+                if portrait::slot_is_empty(img, cx, cy) {
+                    empty[k] = true;
+                    continue;
+                }
                 *slot = book.identify(&portrait::probe(img, cx, cy), &|id| self.strikers.get(&id) == Some(&true), &same).filter(|m| m.trusted_with(&|a, b| self.kin(a, b))).map(|m| m.id);
             }
         }
         let seen: Vec<i64> = slots.iter().flatten().copied().collect();
         let mut rest = named_strikers.into_iter().filter(|id| !seen.contains(id));
-        for slot in slots.iter_mut().take(4) {
-            if slot.is_none() {
+        for (k, slot) in slots.iter_mut().enumerate().take(4) {
+            if slot.is_none() && !empty[k] {
                 *slot = rest.next();
             }
         }
@@ -236,6 +297,61 @@ impl<'a> Observer<'a> {
         }
         slots
     }
+}
+
+/// A grid that was read: how it looked and the names found on it.
+struct KnownGrid {
+    snapshot: Vec<(i32, i32, u64)>,
+    cards: Vec<CardName>,
+    kind: Option<&'static str>,
+}
+
+/// Whether `now` is the grid `known` was read from: every card in it is one of the known ones, at the same place and with the
+/// same label, and most of them are there (a card can be covered for a moment, by a toast or the pointer, while the squad
+/// changes; a scroll or a tab changes every place or label at once).
+fn same_grid(known: &[(i32, i32, u64)], now: &[(i32, i32, u64)]) -> bool {
+    !now.is_empty() && now.len() * 10 >= known.len() * 6 && now.iter().all(|c| known.contains(c))
+}
+
+/// The cards of the grid as one frame shows them: place and fingerprint. A card's label is a thresholded picture, so its
+/// bytes are the same in every frame of the same view; with the names hidden a coarse, quantised average of the picture
+/// stands in for it (a row scrolled in has other pictures at the same places).
+pub fn grid_snapshot(img: &RgbImage) -> Vec<(i32, i32, u64)> {
+    use std::hash::{Hash, Hasher};
+    let labels = quick_card_labels(img);
+    if !labels.is_empty() {
+        return labels
+            .iter()
+            .map(|l| {
+                let mut h = std::collections::hash_map::DefaultHasher::new();
+                quick_label_ink(img, l).as_raw().hash(&mut h);
+                (l.cx, l.y0, h.finish())
+            })
+            .collect();
+    }
+    quick_thumb_cards(img)
+        .iter()
+        .map(|c| {
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            let (cx, cy) = (c.cx, c.picture_y());
+            for gy in 0..4 {
+                for gx in 0..4 {
+                    let mut sum = [0u32; 3];
+                    for y in 0..10 {
+                        for x in 0..10 {
+                            let (px, py) = ((cx - 20 + gx * 10 + x).clamp(0, img.width() as i32 - 1), (cy - 20 + gy * 10 + y).clamp(0, img.height() as i32 - 1));
+                            let p = img.get_pixel(px as u32, py as u32).0;
+                            for i in 0..3 {
+                                sum[i] += p[i] as u32;
+                            }
+                        }
+                    }
+                    sum.map(|s| (s / 100) >> 5).hash(&mut h);
+                }
+            }
+            (c.cx, c.bar_top, h.finish())
+        })
+        .collect()
 }
 
 /// Decides when the add-on is in a battle from one reading per frame, so a single odd frame
@@ -415,5 +531,27 @@ mod tests {
         assert!(g.in_battle());
         g.reset();
         assert!(!g.in_battle());
+    }
+
+    fn fixture(name: &str) -> RgbImage {
+        image::open(format!("{}/../../../fixtures/screens/{name}.png", env!("CARGO_MANIFEST_DIR"))).unwrap().to_rgb8()
+    }
+
+    #[test]
+    fn the_grid_looks_the_same_when_only_the_squad_changed_and_different_when_it_was_scrolled_or_shown_by_pictures() {
+        // the same 빠른 편성 view with the fourth striker taken out of the squad and put back: the cards did not move
+        let (removed, readded) = (grid_snapshot(&fixture("quick-formation-empty-slot")), grid_snapshot(&fixture("quick-formation-readded")));
+        assert!(!removed.is_empty());
+        assert_eq!(removed, readded, "a squad change leaves the grid's fingerprint alone");
+        // another recording of the view (another scroll position and squad) and the thumbnail view differ
+        assert_ne!(removed, grid_snapshot(&fixture("quick-formation")));
+        let thumbs = grid_snapshot(&fixture("quick-thumbs"));
+        assert!(!thumbs.is_empty() && thumbs != removed);
+        assert_eq!(thumbs, grid_snapshot(&fixture("quick-thumbs")), "the fingerprint of one frame is stable");
+        // a card covered for a moment is still the same grid; a grid of other cards is not
+        assert!(same_grid(&removed, &removed[1..]));
+        assert!(!same_grid(&removed, &removed[..3]), "a few cards of many is not enough");
+        assert!(!same_grid(&removed, &thumbs) && !same_grid(&thumbs, &removed));
+        assert!(!same_grid(&removed, &[]));
     }
 }

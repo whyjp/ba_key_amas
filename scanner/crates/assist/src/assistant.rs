@@ -98,6 +98,8 @@ pub struct Assistant<'a, S: Surface> {
     now: SystemTime,
     /// The age line last shown, to redraw only when the minute it names changes.
     age_shown: String,
+    /// How many times the card and the icons were worked out (a test and the profile read it).
+    presented: Cell<u64>,
     scanning: bool,
     /// What the last upload said (a line each), shown under the upload buttons; empty before the first.
     upload_note: Vec<String>,
@@ -155,6 +157,7 @@ impl<'a, S: Surface> Assistant<'a, S> {
             game_present: false,
             now: SystemTime::now(),
             age_shown: String::new(),
+            presented: Cell::new(0),
             scanning: false,
             upload_note: Vec::new(),
             uploading: false,
@@ -195,9 +198,17 @@ impl<'a, S: Surface> Assistant<'a, S> {
     /// Time moves on: the age of the student list is redrawn when the minute it shows changes.
     pub fn tick(&mut self, now: SystemTime) {
         self.now = now;
-        if self.library.age_text(now) != self.age_shown {
+        let age = self.library.age_text(now);
+        if age != self.age_shown {
+            // remembered, or every tick finds the text "changed" and draws the whole card again (13 ms in 빠른 편성)
+            self.age_shown = age;
             self.present();
         }
+    }
+
+    /// How many times everything shown was worked out from the observation.
+    pub fn presented(&self) -> u64 {
+        self.presented.get()
     }
 
     /// Whether the player asked for something the main loop has to carry out.
@@ -286,6 +297,21 @@ impl<'a, S: Surface> Assistant<'a, S> {
 
     pub fn settings(&self) -> &Settings {
         &self.settings
+    }
+
+    /// Whether the frame shows the 빠른 편성 grid as it was last read, so that its text need not be read again.
+    pub fn grid_unchanged(&self, img: &RgbImage) -> bool {
+        self.observer.grid_unchanged(img)
+    }
+
+    /// See [`Observer::striker_popup`].
+    pub fn striker_popup(&self, img: &RgbImage) -> bool {
+        self.observer.striker_popup(img)
+    }
+
+    /// See [`Observer::grid_settled`].
+    pub fn grid_settled(&mut self, img: &RgbImage) -> bool {
+        self.observer.grid_settled(img)
     }
 
     /// A new settled frame: read it and show what follows from it.
@@ -580,7 +606,7 @@ impl<'a, S: Surface> Assistant<'a, S> {
         self.send_main(PanelState { scene, title: outside_title, rows, ..Default::default() });
         self.send_ingame((!ingame.is_empty()).then(|| PanelState { scene: String::new(), title: ingame_title, rows: ingame, ..Default::default() }));
         self.send_marks(if self.view_moving.get() { Vec::new() } else { marks });
-        // (`age_shown` is only read by `tick`, which takes `&mut self`; it is set there when shown)
+        self.presented.set(self.presented.get() + 1);
     }
 }
 
@@ -945,6 +971,25 @@ mod tests {
         assert!(r.fake.0.borrow().ingame.is_none());
         click(&r, "nonsense");
         assert!(!a.poll());
+    }
+
+    #[test]
+    fn a_tick_that_changes_nothing_does_not_work_the_card_out_again() {
+        let (r, ocr) = (rig(), NoOcr);
+        let mut a = assistant(&r, &ocr);
+        a.show(squad_obs(Scene::Squad));
+        let now = SystemTime::now();
+        a.tick(now);
+        let before = a.presented();
+        for k in 1..=20 {
+            a.tick(now + Duration::from_millis(100 * k));
+        }
+        assert_eq!(a.presented(), before, "twenty ticks inside one minute draw nothing");
+        a.set_library(LibraryInfo { updated: Some(now - Duration::from_secs(120)), count: 3 });
+        a.tick(now);
+        let after_library = a.presented();
+        a.tick(now + Duration::from_secs(61));
+        assert_eq!(a.presented(), after_library + 1, "the minute moving on is drawn once");
     }
 
     #[test]

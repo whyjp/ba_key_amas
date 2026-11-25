@@ -118,3 +118,18 @@ fn the_thumbnail_view_is_told_by_pictures() {
     }
     assert!(trusted >= 9, "at least half are believed: {trusted}/18");
 }
+
+/// The strip's slots after the fourth striker was taken out: the game draws a grey EMPTY plate there. That slot must read as
+/// empty and every filled one (also in the other recordings, including a grey-haired student) as filled.
+#[test]
+fn an_empty_slot_is_told_from_the_filled_ones() {
+    use baocr_assist::portrait::{slot_centre, slot_is_empty};
+    use baocr_extract::scene::Layout;
+    let read = |stem: &str, layout: Layout| -> Vec<bool> {
+        let img = image::open(fixture(&format!("{stem}.png"))).unwrap().to_rgb8();
+        (0..6).map(|k| { let (cx, cy) = slot_centre(k, layout); slot_is_empty(&img, cx, cy) }).collect()
+    };
+    assert_eq!(read("quick-formation-empty-slot", Layout::Ratio43), [false, false, false, true, false, false]);
+    assert_eq!(read("quick-formation", Layout::Ratio43), [false; 6]);
+    assert_eq!(read("w169-quick-formation", Layout::Ratio169), [false; 6]);
+}

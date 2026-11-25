@@ -67,6 +67,20 @@ fn pause_for(in_battle: bool, moving: bool, read: bool, still: u32, icons_up: bo
     }
 }
 
+/// The text boxes of the 빠른 편성 grid's part of the frame, in the frame's own coordinates.
+fn grid_part_boxes(ocr: &dyn Ocr, img: &image::RgbImage) -> Vec<baocr_core::ocr_api::TextBox> {
+    let (x, y, w, h) = baocr_pixels::quick_grid_crop(img);
+    let part = image::imageops::crop_imm(img, x, y, w, h).to_image();
+    let mut boxes = ocr.boxes(&part).unwrap_or_default();
+    for b in &mut boxes {
+        b.x0 += x as f32;
+        b.x1 += x as f32;
+        b.y0 += y as f32;
+        b.y1 += y as f32;
+    }
+    boxes
+}
+
 /// Wait `total`, answering clicks on the card meanwhile; a request for the main loop ends the wait.
 fn wait<S: Surface>(assistant: &mut Assistant<'_, S>, total: Duration) {
     let end = Instant::now() + total;
@@ -317,7 +331,23 @@ fn run_on<S: Surface>(surface: S, ocr: Arc<dyn Ocr>, session: &HcuSession, regio
         }
         let new_view = handled.as_ref().map_or(true, |h| frame_distance(h, &key) > STILL);
         if still >= 1 && new_view {
-            let boxes = prof.time("ocr", || ocr.boxes(&img).unwrap_or_default());
+            // The grid of 빠른 편성 is as it was read (a student was put in the squad or taken out): its text is known, the
+            // 700 ms of recognising the whole frame again are skipped and the squad is read from pixels.
+            let known = assistant.grid_unchanged(&img);
+            // a grid that is new inside the popup is read once it has held still for two looks (a click shakes the picture)
+            if !known && !assistant.grid_settled(&img) {
+                wait(&mut assistant, SETTLING_PAUSE);
+                continue;
+            }
+            // On the STRIKER tab only the grid's own part of the frame is read as text (the cards come out the same on every
+            // recorded frame); anything else, the first look at the popup, the SPECIAL tab, is read whole.
+            let boxes = if known {
+                Vec::new()
+            } else if assistant.striker_popup(&img) {
+                prof.time("ocr", || grid_part_boxes(&*ocr, &img))
+            } else {
+                prof.time("ocr", || ocr.boxes(&img).unwrap_or_default())
+            };
             // the student list and profile are told apart by pixels, only when the text names no screen
             let fallback = prof.time("kind", || match screen_kind(&img) {
                 Screen::Profile => Scene::StudentProfile,

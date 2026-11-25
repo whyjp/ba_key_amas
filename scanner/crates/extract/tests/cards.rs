@@ -88,3 +88,54 @@ fn a_blurred_capture_gives_fewer_names_but_never_a_wrong_one() {
         }
     }
 }
+
+/// Reading the cards without the free text of the whole frame (which takes 700 ms to get) gives the same names on every
+/// recorded 빠른 편성 frame: the closed-set reading and the width decide, the free text only ever agreed.
+#[test]
+fn the_cards_read_without_the_frames_free_text_are_the_same() {
+    let Some(ocr) = engine() else { return };
+    for name in ["quick-formation.png", "quick-formation-scrolled-a.png", "quick-formation-scrolled-b.png", "quick-formation-live-a.png", "quick-formation-empty-slot.png", "quick-formation-readded.png", "w169-quick-formation.png"] {
+        let img = frame(name);
+        let free = baocr_core::ocr_api::Ocr::boxes(&ocr, &img).unwrap();
+        let with: Vec<(String, i32, i32)> = read_card_names(&ocr, &img, &free).into_iter().map(|c| (c.text, c.x as i32, c.y0 as i32)).collect();
+        let without: Vec<(String, i32, i32)> = read_card_names(&ocr, &img, &[]).into_iter().map(|c| (c.text, c.x as i32, c.y0 as i32)).collect();
+        eprintln!("{name}: {} cards with the free text, {} without", with.len(), without.len());
+        for c in &with {
+            if !without.contains(c) {
+                eprintln!("   only with the free text: {c:?}");
+            }
+        }
+        for c in &without {
+            if !with.contains(c) {
+                eprintln!("   only without it: {c:?}");
+            }
+        }
+        assert_eq!(with, without, "{name}");
+    }
+}
+
+/// The text of the grid's own part of the frame (a fifth of the frame, 150 ms instead of 700) gives the same cards as the
+/// text of the whole frame on every recorded 빠른 편성 frame.
+#[test]
+fn the_cards_read_from_the_text_of_the_grid_part_alone_are_the_same() {
+    let Some(ocr) = engine() else { return };
+    for name in ["quick-formation.png", "quick-formation-scrolled-a.png", "quick-formation-scrolled-b.png", "quick-formation-live-a.png", "quick-formation-empty-slot.png", "quick-formation-readded.png", "w169-quick-formation.png"] {
+        let img = frame(name);
+        let whole = baocr_core::ocr_api::Ocr::boxes(&ocr, &img).unwrap();
+        let (x, y, w, h) = baocr_pixels::quick_grid_crop(&img);
+        let part = image::imageops::crop_imm(&img, x, y, w, h).to_image();
+        let t = std::time::Instant::now();
+        let mut boxes = baocr_core::ocr_api::Ocr::boxes(&ocr, &part).unwrap();
+        let took = t.elapsed();
+        for b in &mut boxes {
+            b.x0 += x as f32;
+            b.x1 += x as f32;
+            b.y0 += y as f32;
+            b.y1 += y as f32;
+        }
+        let cards = |free: &[baocr_core::ocr_api::TextBox]| -> Vec<(String, i32, i32)> { read_card_names(&ocr, &img, free).into_iter().map(|c| (c.text, c.x as i32, c.y0 as i32)).collect() };
+        let (a, b) = (cards(&whole), cards(&boxes));
+        eprintln!("{name}: {} cards from the whole frame, {} from the grid part ({took:?} for the part)", a.len(), b.len());
+        assert_eq!(a, b, "{name}");
+    }
+}

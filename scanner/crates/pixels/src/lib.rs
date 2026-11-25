@@ -678,6 +678,15 @@ pub fn same_cards(a: &[Card], b: &[Card]) -> bool {
     a.len() == b.len() && a.iter().zip(b).all(|(x, y)| signature_distance(&x.signature, &y.signature) <= 2.0)
 }
 
+/// The part of the frame that holds the 빠른 편성 grid's cards and their name labels, as (x, y, width, height): reading
+/// the text of this alone takes a fifth of what reading the whole frame does.
+pub fn quick_grid_crop(img: &RgbImage) -> (u32, u32, u32, u32) {
+    let dy = centred_dy(img);
+    let (x0, y0) = (LABEL_LEFT - 12, (GRID_TOP + dy - 12).max(0));
+    let (x1, y1) = ((LABEL_LEFT + LABEL_COLUMNS * LABEL_PITCH + 16).min(img.width() as i32), (GRID_BOTTOM + dy + 14).min(img.height() as i32));
+    (x0.max(0) as u32, y0 as u32, (x1 - x0).max(1) as u32, (y1 - y0).max(1) as u32)
+}
+
 /// A student card's name label in the 빠른 편성 grid: a solid dark-navy band under the
 /// portrait with the name in white. All figures are in the 1280x960 frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

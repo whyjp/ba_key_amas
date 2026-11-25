@@ -22,6 +22,15 @@ pub fn probe_distance(a: &[u8], b: &[u8]) -> f32 {
     a.iter().zip(b).map(|(x, y)| (*x as i32 - *y as i32).unsigned_abs() as u64).sum::<u64>() as f32 / a.len() as f32
 }
 
+/// How many of the 64x48 points differ by more than `by` (summed over the three channels, divided by three) between two
+/// probes. A student placed in the squad changes a dozen points a lot and the mean of the picture hardly at all.
+pub fn probe_changed_points(a: &[u8], b: &[u8], by: u32) -> usize {
+    if a.len() != b.len() {
+        return usize::MAX;
+    }
+    a.chunks_exact(3).zip(b.chunks_exact(3)).filter(|(x, y)| (0..3).map(|i| (x[i] as i32 - y[i] as i32).unsigned_abs()).sum::<u32>() / 3 > by).count()
+}
+
 #[cfg(windows)]
 mod sys {
     #[repr(C)]
