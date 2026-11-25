@@ -103,6 +103,7 @@ fn run_on<S: Surface>(surface: S, ocr: Arc<dyn Ocr>, session: &HcuSession, regio
     let mut assistant = Assistant::new(Observer::new(&*ocr, &students), &wiki, &students, &types, Settings::load(&settings_path), Some(settings_path.clone()), surface);
     assistant.set_library(read_library(out));
     assistant.set_account_saved(upload::saved_account_id(&crate::upload_store()).is_some());
+    assistant.set_page_link(upload::saved_page_url(&crate::upload_store()));
     let stop = Arc::new(AtomicBool::new(false));
     let flag = stop.clone();
     ctrlc::set_handler(move || flag.store(true, Ordering::Relaxed))?;
@@ -148,6 +149,7 @@ fn run_on<S: Surface>(surface: S, ocr: Arc<dyn Ocr>, session: &HcuSession, regio
                         Ok(u) => {
                             let text = format!("업로드 완료 · 공개 ({} 명, 점수 {})\n{}", u.students, u.score, u.url);
                             println!("upload: {text}");
+                            let _ = upload::save_page_url(&store, &u.url);
                             assistant.upload_finished(&text, Some(u.url));
                         }
                         Err(e) => {

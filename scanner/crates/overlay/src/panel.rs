@@ -163,6 +163,8 @@ pub struct PanelState {
     /// Draws a pin button left of the power icon: Some(true) when the card is pinned open,
     /// Some(false) when it folds into a tab. Set by the overlay, which owns the fold.
     pub pin: Option<bool>,
+    /// A gear button left of the pin (id, tooltip): opens the card's settings.
+    pub settings: Option<(String, String)>,
 }
 
 /// The id of the header's hit area: pressing it starts a drag instead of reporting a click.
@@ -396,6 +398,11 @@ pub fn render_panel_hits(width: u32, state: &PanelState, fonts: &Fonts) -> (Rgba
         let tip = if pinned { "접기" } else { "고정" };
         hits.push(Hit { id: PIN_BUTTON.into(), tip: Some(tip.into()), x: pin_cx - box_w / 2.0, y: 0.0, w: box_w, h: head });
     }
+    // the gear sits left of the pin (or of the power icon without one)
+    let gear_cx = if state.pin.is_some() { pin_cx - 26.0 * s } else { pin_cx };
+    if let Some((id, tip)) = &state.settings {
+        hits.push(Hit { id: id.clone(), tip: Some(tip.clone()), x: gear_cx - box_w / 2.0, y: 0.0, w: box_w, h: head });
+    }
     // the header bar is where the card is picked up and moved
     hits.push(Hit { id: DRAG_HANDLE.into(), tip: None, x: 0.0, y: 0.0, w: wf, h: head });
 
@@ -405,7 +412,7 @@ pub fn render_panel_hits(width: u32, state: &PanelState, fonts: &Fonts) -> (Rgba
     if !state.scene.is_empty() {
         let name = "ba-scanner";
         let nw = text_width(&fonts.regular, 10.5 * s, name);
-        let right = if state.pin.is_some() { pin_cx - 16.0 * s } else if state.close.is_some() { icon_cx - 16.0 * s } else { wf - 20.0 * s };
+        let right = if state.settings.is_some() { gear_cx - 16.0 * s } else if state.pin.is_some() { pin_cx - 16.0 * s } else if state.close.is_some() { icon_cx - 16.0 * s } else { wf - 20.0 * s };
         draw_text(&mut img, &fonts.regular, 10.5 * s, right - nw, (head - 10.5 * s * 1.2) / 2.0, NAVY_SOFT, 1.0, name);
     }
     if state.close.is_some() {
@@ -413,6 +420,9 @@ pub fn render_panel_hits(width: u32, state: &PanelState, fonts: &Fonts) -> (Rgba
     }
     if let Some(pinned) = state.pin {
         pin_icon(&mut img, pin_cx, head / 2.0, 6.5 * s, s, pinned);
+    }
+    if state.settings.is_some() {
+        gear_icon(&mut img, gear_cx, head / 2.0, 6.5 * s, s);
     }
 
     let mut y = head + 10.0 * s;
@@ -589,6 +599,22 @@ fn power_icon(img: &mut RgbaImage, cx: f32, cy: f32, r: f32, s: f32) {
     let gap = 2.4 * s;
     fill_rrect(img, cx - gap, cy - r - 1.0, 2.0 * gap, r - 0.2 * s, 0.0, |_, _| (NAVY, 1.0));
     fill_rrect(img, cx - t / 2.0, cy - r - 0.6 * s, t, r + 0.4 * s, t / 2.0, |_, _| (WHITE, 1.0));
+}
+
+/// A gear in white (a ring with eight teeth and a hub hole), centred at (cx, cy).
+fn gear_icon(img: &mut RgbaImage, cx: f32, cy: f32, r: f32, s: f32) {
+    let tooth = (2.2 * s).max(1.6);
+    for k in 0..4 {
+        let a = k as f32 * std::f32::consts::FRAC_PI_4;
+        // a tooth is a short bar through the centre at four angles, so each angle gives two teeth
+        let (dx, dy) = (a.cos(), a.sin());
+        for side in [-1.0f32, 1.0] {
+            let (tx, ty) = (cx + side * dx * r * 1.05, cy + side * dy * r * 1.05);
+            fill_rrect(img, tx - tooth / 2.0, ty - tooth / 2.0, tooth, tooth, tooth * 0.3, |_, _| (WHITE, 1.0));
+        }
+    }
+    fill_rrect(img, cx - r * 0.82, cy - r * 0.82, r * 1.64, r * 1.64, r * 0.82, |_, _| (WHITE, 1.0));
+    fill_rrect(img, cx - r * 0.38, cy - r * 0.38, r * 0.76, r * 0.76, r * 0.38, |_, _| (NAVY, 1.0));
 }
 
 /// A push pin in white, centred at (cx, cy): solid when the card is pinned open, with a hollow

@@ -30,9 +30,10 @@ const BUTTON_PLACE: &str = "place:";
 const BUTTON_SCAN: &str = "scan:start";
 const BUTTON_SCAN_DEEP: &str = "scan:deep";
 const BUTTON_PROGRESS_SCAN: &str = "scan:progress";
-/// Both scan sections carry an upload button; it sends the last student scan and progress scan together.
-const BUTTON_UPLOAD_STUDENTS: &str = "upload:students";
-const BUTTON_UPLOAD_PROGRESS: &str = "upload:progress";
+/// Sends the last student scan and progress scan together.
+const BUTTON_UPLOAD: &str = "upload";
+/// The gear in the card's header: the display options replace the data section until it is pressed again.
+const BUTTON_SETTINGS: &str = "settings";
 const BUTTON_CODE_PASTE: &str = "code:paste";
 const BUTTON_CODE_CHANGE: &str = "code:change";
 const BUTTON_LINK_OPEN: &str = "upload:open";
@@ -102,6 +103,8 @@ pub struct Assistant<'a, S: Surface> {
     upload_note: Vec<String>,
     /// An upload is under way (the main loop is waiting for the server).
     uploading: bool,
+    /// The display options are shown instead of the data section.
+    settings_open: bool,
     /// The member code pasted on the card, until an upload has used it (then only its hash is kept, in the account file).
     member_code: Option<String>,
     /// An account is already saved: no code is asked for.
@@ -155,6 +158,7 @@ impl<'a, S: Surface> Assistant<'a, S> {
             scanning: false,
             upload_note: Vec::new(),
             uploading: false,
+            settings_open: false,
             member_code: None,
             account_saved: false,
             upload_link: None,
@@ -236,6 +240,12 @@ impl<'a, S: Surface> Assistant<'a, S> {
         self.forget();
     }
 
+    /// The player's page from an earlier upload (it is shown until the next upload says otherwise).
+    pub fn set_page_link(&mut self, url: Option<String>) {
+        self.upload_link = url;
+        self.present();
+    }
+
     /// Whether an account is saved from an earlier upload.
     pub fn set_account_saved(&mut self, saved: bool) {
         self.account_saved = saved;
@@ -298,6 +308,10 @@ impl<'a, S: Surface> Assistant<'a, S> {
     fn send_main(&self, mut card: PanelState) {
         // closing the add-on is the icon in the header of every main card
         card.close = Some((BUTTON_QUIT.into(), "애드온 종료".into()));
+        // the display options are one press away on every card but the battle's (which keeps out of the way)
+        if card.scene != Scene::Battle.label() {
+            card.settings = Some((BUTTON_SETTINGS.into(), if self.settings_open { "표시 설정 닫기".into() } else { "표시 설정".into() }));
+        }
         if changed(&mut self.sent.borrow_mut().main, &card) {
             self.surface.main_card(card);
         }
@@ -349,6 +363,10 @@ impl<'a, S: Surface> Assistant<'a, S> {
             self.settings.set_presentation(p);
             return true;
         }
+        if event == BUTTON_SETTINGS {
+            self.settings_open = !self.settings_open;
+            return true;
+        }
         if event == BUTTON_STUDENT_SECTION {
             self.settings.student_open = !self.settings.student_open;
             return true;
@@ -373,7 +391,7 @@ impl<'a, S: Surface> Assistant<'a, S> {
             }
             return false;
         }
-        if event == BUTTON_UPLOAD_STUDENTS || event == BUTTON_UPLOAD_PROGRESS {
+        if event == BUTTON_UPLOAD {
             if self.uploading || self.scanning {
                 return false;
             }
@@ -420,40 +438,46 @@ impl<'a, S: Surface> Assistant<'a, S> {
         false
     }
 
-    /// The controls: the student list and its scan, the display switches, closing.
+    /// The card's body: one folding section for collecting and uploading the data, or, behind the header's gear,
+    /// the display options.
     fn control_rows(&self) -> Vec<Row> {
         let on_off = |on: bool| if on { "켜짐" } else { "꺼짐" }.to_string();
-        let open = self.settings.student_open;
-        let mut rows = vec![Row::Section { id: BUTTON_STUDENT_SECTION.into(), title: "학생 정보".into(), open, summary: if open { String::new() } else { self.library.age_text(self.now) } }];
-        if open {
-            rows.push(Row::Hint { label: "갱신".into(), value: self.library.age_text(self.now), tip: self.library.exact_text() });
-            rows.push(Row::Button { id: BUTTON_SCAN_DEEP.into(), label: "스캔 · 상세 포함".into(), value: on_off(self.settings.scan_deep), on: self.settings.scan_deep });
-            rows.push(Row::Button { id: BUTTON_SCAN.into(), label: "학생 정보 스캔".into(), value: "시작".into(), on: false });
-            rows.push(Row::Button { id: BUTTON_UPLOAD_STUDENTS.into(), label: "스캔 결과 업로드".into(), value: "전송".into(), on: false });
+        if self.settings_open {
+            let mut rows = vec![Row::Heading("표시 설정".into())];
+            rows.push(Row::Button { id: BUTTON_INGAME.into(), label: "인게임 표시".into(), value: on_off(self.settings.ingame_visible), on: self.settings.ingame_visible });
+            for w in &self.widgets {
+                let p = self.settings.placement(w.id());
+                rows.push(Row::Button { id: format!("{BUTTON_PLACE}{}", w.id().key()), label: w.title().into(), value: p.label(w.kind()).into(), on: p != Placement::Off });
+            }
+            return rows;
         }
-        rows.push(Row::Heading("진행 상태".into()));
+        let open = self.settings.student_open;
+        let mut rows = vec![Row::Section { id: BUTTON_STUDENT_SECTION.into(), title: "데이터 수집 · 업로드".into(), open, summary: if open { String::new() } else { self.library.age_text(self.now) } }];
+        if !open {
+            return rows;
+        }
+        rows.push(Row::Heading("1  학생 정보".into()));
+        rows.push(Row::Hint { label: "갱신".into(), value: self.library.age_text(self.now), tip: self.library.exact_text() });
+        rows.push(Row::Button { id: BUTTON_SCAN_DEEP.into(), label: "스캔 · 상세 포함".into(), value: on_off(self.settings.scan_deep), on: self.settings.scan_deep });
+        rows.push(Row::Button { id: BUTTON_SCAN.into(), label: "학생 정보 스캔".into(), value: "시작".into(), on: false });
+        rows.push(Row::Heading("2  진행 상태".into()));
         rows.push(Row::Button { id: BUTTON_PROGRESS_SCAN.into(), label: "진행 상태 스캔".into(), value: "시작".into(), on: false });
-        rows.push(Row::Button { id: BUTTON_UPLOAD_PROGRESS.into(), label: "스캔 결과 업로드".into(), value: "전송".into(), on: false });
-        rows.push(Row::Heading("업로드".into()));
+        rows.push(Row::Heading("3  업로드".into()));
         if self.account_saved {
             rows.push(Row::Button { id: BUTTON_CODE_CHANGE.into(), label: "계정".into(), value: "저장됨 · 바꾸기".into(), on: false });
         } else {
             rows.push(Row::Info { label: "회원코드".into(), value: self.member_code.clone().unwrap_or_else(|| "붙여넣기 필요".into()) });
             rows.push(Row::Button { id: BUTTON_CODE_PASTE.into(), label: "회원코드 붙여넣기".into(), value: "클립보드".into(), on: false });
         }
+        rows.push(Row::Button { id: BUTTON_UPLOAD.into(), label: "스캔 결과 업로드".into(), value: "전송".into(), on: false });
         if let Some((first, rest)) = self.upload_note.split_first() {
             rows.push(Row::Info { label: "결과".into(), value: first.clone() });
             rows.extend(rest.iter().map(|l| Row::Note(l.clone())));
         }
         if self.upload_link.is_some() {
+            rows.push(Row::Heading("4  내 페이지".into()));
             rows.push(Row::Button { id: BUTTON_LINK_OPEN.into(), label: "내 페이지".into(), value: "열기".into(), on: false });
             rows.push(Row::Button { id: BUTTON_LINK_COPY.into(), label: "주소".into(), value: "복사".into(), on: false });
-        }
-        rows.push(Row::Heading("표시".into()));
-        rows.push(Row::Button { id: BUTTON_INGAME.into(), label: "인게임 표시".into(), value: on_off(self.settings.ingame_visible), on: self.settings.ingame_visible });
-        for w in &self.widgets {
-            let p = self.settings.placement(w.id());
-            rows.push(Row::Button { id: format!("{BUTTON_PLACE}{}", w.id().key()), label: w.title().into(), value: p.label(w.kind()).into(), on: p != Placement::Off });
         }
         rows
     }
@@ -695,10 +719,21 @@ mod tests {
         let main = shown.main.as_ref().unwrap();
         let text = rows_of(main);
         assert_eq!(main.scene, "게임 대기 중", "no game found yet");
-        for needed in ["대기 중", "스캔 기록 없음", "scan:start", "scan:deep", "ingame", "place:formation", "section:student"] {
+        for needed in ["대기 중", "스캔 기록 없음", "scan:start", "scan:deep", "scan:progress", "upload", "section:student"] {
             assert!(text.contains(needed), "{needed} in {text}");
         }
+        assert!(!text.contains("place:formation"), "the display options are behind the header's gear: {text}");
+        assert_eq!(main.settings.as_ref().map(|s| s.0.as_str()), Some("settings"));
         drop(shown);
+        click(&r, "settings");
+        a.poll();
+        {
+            let shown = r.fake.0.borrow();
+            let text = rows_of(shown.main.as_ref().unwrap());
+            assert!(text.contains("ingame") && text.contains("place:formation") && !text.contains("scan:start"), "{text}");
+        }
+        click(&r, "settings");
+        a.poll();
         a.set_game_present(true);
         let shown = r.fake.0.borrow();
         let main = shown.main.as_ref().unwrap();
@@ -734,7 +769,10 @@ mod tests {
             assert!(text.contains(needed), "{needed} in {text}");
         }
         assert!(!text.contains("Verdict"), "{text}");
-        assert!(text.contains("place:raid_info"), "the card can be moved or turned off");
+        drop(shown);
+        click(&r, "settings");
+        a.poll();
+        assert!(rows_of(r.fake.0.borrow().main.as_ref().unwrap()).contains("place:raid_info"), "the card can be moved or turned off in the settings");
     }
 
     #[test]
@@ -954,7 +992,7 @@ mod tests {
         a.poll();
         assert_eq!(a.take_commands(), vec![Command::StartProgressScan]);
         // without an account or a code the upload button asks for the code; with one it asks for the upload, once
-        click(&r, "upload:progress");
+        click(&r, "upload");
         a.poll();
         assert!(a.take_commands().is_empty());
         assert!(rows_of(r.fake.0.borrow().main.as_ref().unwrap()).contains("회원코드를 먼저"));
@@ -963,12 +1001,12 @@ mod tests {
         assert_eq!(a.take_commands(), vec![Command::PasteMemberCode]);
         a.set_member_code("  AB12CD34EF56G \n");
         assert_eq!(a.member_code(), Some("AB12CD34EF56G"));
-        click(&r, "upload:progress");
-        click(&r, "upload:progress");
+        click(&r, "upload");
+        click(&r, "upload");
         a.poll();
         assert_eq!(a.take_commands(), vec![Command::Upload]);
         a.begin_upload();
-        click(&r, "upload:progress");
+        click(&r, "upload");
         a.poll();
         assert!(a.take_commands().is_empty(), "no second upload while one is under way");
         a.upload_finished("updated (106 students)\nyour page: https://example.test/#/u/x", Some("https://example.test/#/u/x".into()));
@@ -1104,7 +1142,7 @@ mod tests {
             let main = shown.main.as_ref().unwrap();
             let text = rows_of(main);
             assert!(!text.contains("scan:start") && !text.contains("scan:deep"), "folded: no scan controls, {text}");
-            assert!(text.contains("section:student") && text.contains("ingame"), "the section header and the display switches stay: {text}");
+            assert!(text.contains("section:student") && !text.contains("ingame"), "only the section header stays: {text}");
             let summary = main.rows.iter().find_map(|row| match row {
                 Row::Section { summary, open: false, .. } => Some(summary.clone()),
                 _ => None,

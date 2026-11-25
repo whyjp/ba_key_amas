@@ -44,6 +44,7 @@ fn card_json(c: &PanelState) -> Value {
         "rows": c.rows.iter().map(row_text).collect::<Vec<_>>(),
         "close": c.close.is_some(),
         "pin": c.pin,
+        "settings": c.settings.is_some(),
     })
 }
 
@@ -194,6 +195,7 @@ mod tests {
             rows: vec![Row::Info { label: "방어".into(), value: "중장갑".into() }, Row::Chips { label: "적 방어".into(), chips: vec![Chip { text: "중장갑".into(), tone: Tone::HeavyArmor }] }],
             close: Some(("quit".into(), "x".into())),
             pin: Some(true),
+            settings: None,
         }
     }
 

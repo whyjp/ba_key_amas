@@ -160,6 +160,8 @@ struct BlendFunction {
 extern "system" {
     fn SetProcessDPIAware() -> i32;
     fn RegisterClassExW(c: *const WndClassExW) -> u16;
+    fn LoadCursorW(inst: isize, name: usize) -> isize;
+    fn SetCursor(cursor: isize) -> isize;
     fn CreateWindowExW(ex: u32, class: *const u16, title: *const u16, style: u32, x: i32, y: i32, w: i32, h: i32, parent: isize, menu: isize, inst: isize, param: *const c_void) -> isize;
     fn DefWindowProcW(h: isize, m: u32, w: usize, l: isize) -> isize;
     fn ShowWindow(h: isize, cmd: i32) -> i32;
@@ -215,8 +217,16 @@ fn wide(s: &str) -> Vec<u16> {
 /// Left clicks on the overlay's windows: (window, x, y) in the window's own pixels.
 static CLICKS: Mutex<Vec<(isize, i32, i32)>> = Mutex::new(Vec::new());
 const WM_LBUTTONDOWN: u32 = 0x0201;
+const WM_SETCURSOR: u32 = 0x0020;
+/// The standard arrow (`IDC_ARROW`). A window class without a cursor leaves whatever cursor was last set, which for a
+/// process that just started is the "working in background" arrow with the busy circle.
+const IDC_ARROW: usize = 32512;
 
 unsafe extern "system" fn wnd_proc(h: isize, m: u32, w: usize, l: isize) -> isize {
+    if m == WM_SETCURSOR {
+        SetCursor(LoadCursorW(0, IDC_ARROW));
+        return 1;
+    }
     if m == WM_LBUTTONDOWN {
         if let Ok(mut c) = CLICKS.lock() {
             c.push((h, (l & 0xFFFF) as i16 as i32, ((l >> 16) & 0xFFFF) as i16 as i32));
@@ -493,7 +503,7 @@ fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, wake: Arc<Wake
             cb_wnd_extra: 0,
             instance: inst,
             icon: 0,
-            cursor: 0,
+            cursor: LoadCursorW(0, IDC_ARROW),
             background: 0,
             menu_name: std::ptr::null(),
             class_name: class.as_ptr(),

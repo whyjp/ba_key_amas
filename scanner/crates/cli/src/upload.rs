@@ -45,11 +45,41 @@ pub fn saved_account_id(path: &Path) -> Option<String> {
     v["account_id"].as_str().filter(|s| account_key::is_account_id(s)).map(str::to_string)
 }
 
+fn read_store(path: &Path) -> serde_json::Map<String, Value> {
+    std::fs::read_to_string(path).ok().and_then(|s| serde_json::from_str::<Value>(&s).ok()).and_then(|v| v.as_object().cloned()).unwrap_or_default()
+}
+
+/// Sets one entry of the account file, keeping the others.
+fn write_store_entry(path: &Path, key: &str, value: &str) -> Result<()> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let mut map = read_store(path);
+    map.insert(key.to_string(), json!(value));
+    std::fs::write(path, serde_json::to_string_pretty(&Value::Object(map))?).with_context(|| format!("writing {}", path.display()))
+}
+
+/// Saves the account id. The keys of the older format are dropped; the saved page stays (it belongs to the same account
+/// unless the account changed, which `forget_account` clears).
 pub fn save_account_id(path: &Path, id: &str) -> Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    std::fs::write(path, serde_json::to_string_pretty(&json!({ "account_id": id }))?).with_context(|| format!("writing {}", path.display()))
+    let mut map = serde_json::Map::new();
+    map.insert("account_id".into(), json!(id));
+    if let Some(page) = read_store(path).remove("page_url") {
+        map.insert("page_url".into(), page);
+    }
+    std::fs::write(path, serde_json::to_string_pretty(&Value::Object(map))?).with_context(|| format!("writing {}", path.display()))
+}
+
+/// The player's page from the last upload, kept so the card can offer it again after a restart.
+pub fn save_page_url(path: &Path, url: &str) -> Result<()> {
+    write_store_entry(path, "page_url", url)
+}
+
+pub fn saved_page_url(path: &Path) -> Option<String> {
+    read_store(path).get("page_url")?.as_str().map(str::to_string)
 }
 
 /// `--forget-account`: the next upload asks for a member code again.
