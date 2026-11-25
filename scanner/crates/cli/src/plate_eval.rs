@@ -5,6 +5,7 @@
 use crate::progress_scan::{detect_plate, read_plate};
 use anyhow::{Context, Result};
 use baocr_core::ocr_api::Ocr;
+use baocr_ocr::trocr::TrOcr;
 use std::path::Path;
 use std::time::Instant;
 
@@ -35,6 +36,22 @@ fn score(name: &str, rows: &[Row], reads: &[String], ms: f64) -> String {
     out
 }
 
+/// The plate as the game would show it from further away or blurred: shrunk by `factor` and enlarged again (the research's
+/// stress conditions, 0.7 and 0.5).
+fn blurred(img: &image::RgbImage, factor: f32) -> image::RgbImage {
+    let (w, h) = img.dimensions();
+    let small = image::imageops::resize(img, ((w as f32 * factor).round() as u32).max(1), ((h as f32 * factor).round() as u32).max(1), image::imageops::FilterType::Triangle);
+    image::imageops::resize(&small, w, h, image::imageops::FilterType::Triangle)
+}
+
+/// The names TrOCR is scored against: every name of the add-on's dictionary.
+fn names() -> Vec<String> {
+    let mut v = baocr_names::all_names();
+    v.sort();
+    v.dedup();
+    v
+}
+
 pub fn run(ocr: &dyn Ocr, dir: &Path) -> Result<String> {
     let rows = load(dir)?;
     let images: Vec<image::RgbImage> =
@@ -51,5 +68,40 @@ pub fn run(ocr: &dyn Ocr, dir: &Path) -> Result<String> {
         let reads: Vec<String> = images.iter().map(|img| read(ocr, img)).collect();
         report.push_str(&score(name, &rows, &reads, t.elapsed().as_secs_f64() * 1000.0));
     }
+    // BAOCR_TROCR=<folder with encoder.onnx and decoder.onnx>: the same plates read by TrOCR against the dictionary, and both
+    // engines on blurred copies (what the add-on would make of the name after the dictionary has had its say)
+    if let Some(dir) = std::env::var_os("BAOCR_TROCR") {
+        let trocr = TrOcr::new(Path::new(&dir))?;
+        let all = names();
+        let _ = trocr.choose(&images[0], &all)?;
+        for (label, factor) in [("clean", 1.0f32), ("blur 0.7", 0.7), ("blur 0.5", 0.5), ("blur 0.4", 0.4)] {
+            let imgs: Vec<image::RgbImage> = if factor >= 1.0 { images.clone() } else { images.iter().map(|i| blurred(i, factor)).collect() };
+            let t = Instant::now();
+            let pp: Vec<String> = imgs.iter().map(|img| baocr_names::best_name(&[read_plate(ocr, img).as_str()])).collect();
+            let pp_ms = t.elapsed().as_secs_f64() * 1000.0;
+            let t = Instant::now();
+            let tr: Vec<String> = imgs
+                .iter()
+                .map(|img| {
+                    let s = trocr.choose(img, &all).unwrap_or_default();
+                    s.iter().enumerate().max_by(|a, b| a.1.total_cmp(b.1)).map(|(i, _)| all[i].clone()).unwrap_or_default()
+                })
+                .collect();
+            let tr_ms = t.elapsed().as_secs_f64() * 1000.0;
+            let pp_ok = rows.iter().zip(&pp).filter(|(r, t)| r.label == **t).count();
+            let tr_ok = rows.iter().zip(&tr).filter(|(r, t)| r.label == **t).count();
+            let both = rows.iter().zip(pp.iter().zip(&tr)).filter(|(r, (a, b))| r.label == **a || r.label == **b).count();
+            report.push_str(&format!("{label}: PP-OCR + dictionary {pp_ok}/{n} ({:.0} ms per plate), TrOCR over the dictionary {tr_ok}/{n} ({:.0} ms per plate), either right {both}/{n}\n", pp_ms / n_f(&rows), tr_ms / n_f(&rows), n = rows.len()));
+            if factor >= 1.0 || factor == 0.5 {
+                for (r, (a, b)) in rows.iter().zip(pp.iter().zip(&tr)).filter(|(r, (a, b))| r.label != **a || r.label != **b) {
+                    report.push_str(&format!("    {} label {:?}: PP {:?}{} TrOCR {:?}{}\n", r.file, r.label, a, if *a == r.label { " ok" } else { " WRONG" }, b, if *b == r.label { " ok" } else { " WRONG" }));
+                }
+            }
+        }
+    }
     Ok(report)
+}
+
+fn n_f(rows: &[Row]) -> f64 {
+    rows.len() as f64
 }

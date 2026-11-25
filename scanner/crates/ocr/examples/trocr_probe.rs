@@ -15,8 +15,8 @@ fn main() -> anyhow::Result<()> {
     names.sort();
     let trocr = TrOcr::new(&models)?;
     let all: std::collections::HashMap<String, Vec<Vec<i64>>> = serde_json::from_str(include_str!("../data/trocr_surfaces.json"))?;
-    let forms: Vec<(usize, Vec<i64>)> = names.iter().enumerate().flat_map(|(k, n)| all[n].iter().map(move |f| (k, f.clone()))).collect();
-    let seqs: Vec<&[i64]> = forms.iter().map(|(_, f)| f.as_slice()).collect();
+    // CANDIDATES=n scores only n names per label (the label and n-1 others): what a shortlist from another reader would cost
+    let shortlist: Option<usize> = std::env::var("CANDIDATES").ok().and_then(|v| v.parse().ok());
     let (mut same_input, mut right, mut total) = (0, 0, 0);
     let (mut t_prep, mut t_enc, mut t_score) = (0.0, 0.0, 0.0);
     for (i, plate) in plates.iter().enumerate().take(count) {
@@ -32,6 +32,17 @@ fn main() -> anyhow::Result<()> {
             let t1 = Instant::now();
             let cross = trocr.encode(pixel_values(&square))?;
             t_enc += t1.elapsed().as_secs_f64();
+            let keep: Vec<usize> = match shortlist {
+                Some(n) => {
+                    let label_at = names.iter().position(|x| x == label).unwrap();
+                    let mut v: Vec<usize> = (0..names.len()).filter(|&k| k != label_at).step_by((names.len() / n.max(1)).max(1)).take(n.saturating_sub(1)).collect();
+                    v.push(label_at);
+                    v
+                }
+                None => (0..names.len()).collect(),
+            };
+            let forms: Vec<(usize, Vec<i64>)> = keep.iter().flat_map(|&k| all[&names[k]].iter().map(move |f| (k, f.clone()))).collect();
+            let seqs: Vec<&[i64]> = forms.iter().map(|(_, f)| f.as_slice()).collect();
             let t2 = Instant::now();
             // score through `choose`'s own path: encode again would double the time, so score the names here
             let scores = {
