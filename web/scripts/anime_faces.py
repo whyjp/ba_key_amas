@@ -1,5 +1,5 @@
 """Anime face detector for the crop audit: deepghs/anime_face_detection (YOLOv8 trained on anime and game art, ONNX, 44 MB,
-downloaded once to scripts/.cache and not committed). The YuNet detector crop-art.py uses is trained on photographs and
+committed as scripts/models/anime_face_v1.4_s.onnx; downloaded from the URL below when it is missing). The YuNet detector crop-art.py uses is trained on photographs and
 finds the face on fewer than one memorial lobby picture in six; this one finds it on all 270.
 """
 import pathlib
@@ -10,7 +10,7 @@ import numpy as np
 import onnxruntime as ort
 
 MODEL_URL = "https://huggingface.co/deepghs/anime_face_detection/resolve/main/face_detect_v1.4_s/model.onnx"
-MODEL = pathlib.Path(__file__).resolve().parent / ".cache" / "anime_face_v1.4_s.onnx"
+MODEL = pathlib.Path(__file__).resolve().parent / "models" / "anime_face_v1.4_s.onnx"
 
 
 def load():

@@ -1,4 +1,4 @@
-"""High resolution memorial lobby art for the full-illustration cards (public/card-lobby/<id>.webp, 760x1280).
+"""High resolution memorial lobby art for the full-illustration cards (public/card-lobby/<id>.webp and <id>-1, <id>-2: up to three cuts of each, 760x1280).
 
 Source: the memorial lobby images (`File:Memorial_Lobby_<Name>.jpg`) of the Blue Archive wiki (bluearchive.wiki),
 listed through its MediaWiki API and hosted on static.wikitide.net, 1.5 to 2.5 thousand pixels wide. Each image is
@@ -122,53 +122,61 @@ def locate_by_thumbnail(big_gray, thumb_path: pathlib.Path):
     return best
 
 
-ART_H = 691  # the card draws the picture over its top 54 percent (380x345.6 at the card's own size), the text below it
-ART_RATIO = OUT_W / ART_H
-FADE = 0.2   # the last fifth of the picture fades into the extension, as the card's own mask did
+# The memorial card draws the cut over the whole tall card; the stats and their dark gradient cover its lower half (from
+# about 42 percent down), so the face has to sit in the upper part. Each student gets VARIANTS cuts with the face kept whole:
+# the whole picture at its widest, and two closer ones with the face placed differently. The card picks one at random.
+FACE_MAX_Y = 0.42   # the face's centre, as a fraction of the cut's height, stays above this
+FACE_MARGIN = 0.08  # and the face keeps this much of the cut's size clear of its edges
+VARIANTS = ((1.0, None, None), (1.0, 0.34, None), (0.8, 0.5, 0.27))  # zoom (1 = as wide as the picture allows), face x, face y
+MAX_FACE_SHARE = 0.7  # a variant is skipped when the face would fill more than this of its width
 
 
-def window(img: Image.Image, face, spot, shift: float, ratio: float):
-    """The window of the picture to show, as wide as the picture allows: full height, `ratio` wide (or the whole width
-    when the picture is narrower, then as tall as that gives). Centre: the matched thumbnail's centre, else the detected
-    face, else the middle. The window is nudged until the whole face sits inside it with a margin, whatever centred it.
-    `shift` moves it sideways afterwards, as a fraction of its width (positive = right): the hand-made correction for
-    a picture whose face still sits at an edge (`lobby_shift` in face-overrides.json).
+def window(img: Image.Image, face, spot, shift: float, zoom: float = 1.0, at=(None, None)):
+    """A portrait window of the picture. `zoom` 1 is the full height (or the whole width when the picture is narrower);
+    smaller is closer. Centre: with `at` (where the face should sit in the window, as fractions) the detected face, else
+    the matched thumbnail's centre (SchaleDB's own crop is framed on the character), else the face, else the middle.
+    The window is then nudged until the whole face sits inside with a margin and its centre is above FACE_MAX_Y.
+    `shift` moves it sideways afterwards (positive = right), as a fraction of its width: the hand-made correction for a
+    picture whose face still sits at an edge (`lobby_shift` in face-overrides.json).
     Returns (left, top, width, height)."""
     w, h = img.size
-    cw = min(w, round(h * ratio))
-    ch = round(cw / ratio)
-    cx = spot[0] if spot else (face[0] if face else w * 0.5)
-    cy = spot[1] if spot else (face[1] if face else h * 0.5)
-    left, top = round(cx - cw / 2), round(cy - ch / 2)
+    cw0 = min(w, round(h * RATIO))
+    cw, ch = round(cw0 * zoom), round(cw0 * zoom / RATIO)
+    tx, ty = at
+    if face and tx is not None:
+        left = round(face[0] - tx * cw)
+        top = round(face[1] - ty * ch) if ty is not None else round((spot[1] if spot else face[1]) - ch / 2)
+    else:
+        cx = spot[0] if spot else (face[0] if face else w * 0.5)
+        cy = spot[1] if spot else (face[1] if face else h * 0.5)
+        left, top = round(cx - cw / 2), round(cy - ch / 2)
     if face:
         half = face[2] / 2
-        margin = 0.08
-        left = min(left, round(face[0] - half - margin * cw))
-        left = max(left, round(face[0] + half + margin * cw - cw))
-        top = min(top, round(face[1] - half - margin * ch))
-        top = max(top, round(face[1] + half + margin * ch - ch))
+        m = FACE_MARGIN
+        left = min(left, round(face[0] - half - m * cw))
+        left = max(left, round(face[0] + half + m * cw - cw))
+        top = min(top, round(face[1] - half - m * ch))
+        top = max(top, round(face[1] + half + m * ch - ch), round(face[1] - FACE_MAX_Y * ch))
     left = round(left + shift * cw)
-    return max(0, min(left, w - cw)), max(0, min(top, h - ch)), cw, ch
+    left, top = max(0, min(left, w - cw)), max(0, min(top, h - ch))
+    return left, top, cw, ch
 
 
-def compose(img: Image.Image, face, spot, shift: float = 0.0):
-    """The memorial card's picture: the illustration as whole as the card's picture area allows (its width, or as much of
-    it as fits that area's proportions), over an extension of itself, blurred and darkened, that fills the rest of the tall
-    card behind the text. Returns the picture and where the window lies, (left, width, picture width)."""
-    from PIL import ImageEnhance, ImageFilter
-    left, top, cw, ch = window(img, face, spot, shift, ART_RATIO)
-    art = img.crop((left, top, left + cw, top + ch)).resize((OUT_W, ART_H), Image.LANCZOS)
-    # the extension: the same picture cut to the card's own proportions around the same place, blurred
-    bl, bt, bw, bh = window(img, face, spot, shift, RATIO)
-    back = img.crop((bl, bt, bl + bw, bt + bh)).resize((OUT_W, OUT_H), Image.LANCZOS)
-    back = back.filter(ImageFilter.GaussianBlur(24))
-    back = ImageEnhance.Brightness(ImageEnhance.Color(back).enhance(1.2)).enhance(0.8)
-    mask = Image.new("L", (OUT_W, ART_H), 255)
-    fade = round(ART_H * FADE)
-    for y in range(fade):
-        mask.paste(round(255 * (1 - (y + 1) / fade)), (0, ART_H - fade + y, OUT_W, ART_H - fade + y + 1))
-    back.paste(art, (0, 0), mask)
-    return back, (left, cw, img.size[0])
+def cuts(img: Image.Image, face, spot, shift: float = 0.0, flip: bool = False):
+    """The cut variants of one picture as (picture, window): the first is the widest, the others are closer, each with the
+    face whole and in the upper part of the card."""
+    out = []
+    for k, (zoom, tx, ty) in enumerate(VARIANTS):
+        if k and face and face[2] > MAX_FACE_SHARE * min(img.size[0], round(img.size[1] * RATIO)) * zoom:
+            continue
+        if k and not face:
+            continue
+        at = (None, None) if tx is None else ((1 - tx) if flip and k == 1 else tx, ty)
+        left, top, cw, ch = window(img, face, spot, shift if k == 0 else 0.0, zoom, at)
+        if any(abs(left - o[1][0]) < cw * 0.06 and abs(top - o[1][1]) < ch * 0.06 and abs(cw - o[1][2]) < cw * 0.06 for o in out):
+            continue  # the same cut as one made already
+        out.append((img.crop((left, top, left + cw, top + ch)).resize((OUT_W, OUT_H), Image.LANCZOS), (left, top, cw, ch)))
+    return out
 
 
 def main() -> int:
@@ -192,6 +200,8 @@ def main() -> int:
     # --only 10129,20020 cuts just those again (the rest of card-lobby.json is kept)
     only = {int(x) for x in sys.argv[sys.argv.index("--only") + 1].split(",")} if "--only" in sys.argv else set()
     have, missing = [], []
+    vpath = ROOT / "public" / "card-lobby-variants.json"
+    variants = json.loads(vpath.read_text(encoding="utf-8")) if vpath.exists() else {}
     how = {"face": 0, "thumbnail": 0, "middle": 0}
     for sid in ids:
         name = english.get(str(sid), {}).get("Name", "")
@@ -238,12 +248,18 @@ def main() -> int:
         how[("face" if face else "thumbnail" if spot else "middle")] += 1
         img = Image.open(src).convert("RGB")
         shift = float(crop.OVERRIDES.get("lobby_shift", {}).get(str(sid), 0.0))
-        cropped, (left, cw, w) = compose(img, face, spot, shift)
-        cropped.save(out / f"{sid}.webp", "WEBP", quality=86)
+        made = cuts(img, face, spot, shift, flip=sid % 2 == 1)
+        for old in out.glob(f"{sid}-*.webp"):
+            old.unlink()
+        for k, (cropped, _) in enumerate(made):
+            cropped.save(out / (f"{sid}.webp" if k == 0 else f"{sid}-{k}.webp"), "WEBP", quality=84)
+        variants[str(sid)] = len(made)
+        left, top, cw, _ = made[0][1]
         if only:
-            print(f"{sid} {name}: picture {w}x{h}, window left {left} of {w - cw} possible, width {cw}, shift {shift}, centred by {'face' if face else 'thumbnail' if spot else 'middle'}")
+            print(f"{sid} {name}: picture {img.size[0]}x{img.size[1]}, {len(made)} cuts, first at {left},{top} width {cw}, shift {shift}, centred by {'face' if face else 'thumbnail' if spot else 'middle'}")
         have.append(sid)
     (ROOT / "public" / "card-lobby.json").write_text(json.dumps(have), encoding="utf-8")
+    vpath.write_text(json.dumps(variants, sort_keys=True), encoding="utf-8")
     print(f"{len(have)} high resolution lobby cards, {len(missing)} without: {', '.join(missing[:10])}. centred by {how}")
     return 0
 
