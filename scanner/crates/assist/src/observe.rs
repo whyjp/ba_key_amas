@@ -226,16 +226,6 @@ impl<'a> Observer<'a> {
     }
 
     /// The cards of the grid's thumbnail view, each told by its picture (only what is believed is named).
-    /// Whether the frame shows the 빠른 편성 grid exactly as it was last read (same cards at the same places, the tab
-    /// the same): nothing in it needs reading again but the squad, which pixels give. The caller may then skip the text
-    /// recognition of the whole frame (700 ms) and pass no text.
-    pub fn grid_unchanged(&self, img: &RgbImage) -> bool {
-        self.last == Scene::QuickFormation && quick_tab_is_striker(img).is_some() && {
-            let now = grid_snapshot(img);
-            self.grids.iter().any(|g| same_grid(&g.snapshot, &now)) || self.tail.as_ref().is_some_and(|tail| tail.holds(&now))
-        }
-    }
-
     /// Whether the last screen read was the 빠른 편성 popup.
     pub fn in_popup(&self) -> bool {
         self.last == Scene::QuickFormation
@@ -247,20 +237,28 @@ impl<'a> Observer<'a> {
         self.last == Scene::QuickFormation && quick_tab_is_striker(img) == Some(true)
     }
 
-    /// Whether a grid that is new to the reader has held still for two looks in a row. Inside the popup a click shakes the
-    /// picture for a moment, and reading that moment (700 ms) only to read the settled frame again afterwards doubled the
-    /// time a change took to show. True when the frame is not a 빠른 편성 popup that was already read (the first look at
-    /// one, a scroll or a tab are read as soon as they are still, after one more look to see that the grid is the same).
-    pub fn grid_settled(&mut self, img: &RgbImage) -> bool {
+    /// What the 빠른 편성 popup's grid looks like in this frame, worked out once (the fingerprint of every label is the
+    /// costly part): the one read lately (`Known`: the squad is all that can have changed, the text need not be read again),
+    /// a new one that has held still for two looks, with each card within a few pixels of where it was (`Settled`: a click
+    /// shakes the picture for a moment and a scroll's last pixels come slowly, and reading those moments costs 700 ms), or
+    /// one that is still moving or the first of a kind (`Moving`: look again). Outside the popup it is `Settled`.
+    pub fn grid_state(&mut self, img: &RgbImage) -> GridState {
         if self.last != Scene::QuickFormation || quick_tab_is_striker(img).is_none() {
             self.pending = None;
-            return true;
+            return GridState::Settled;
         }
         let now = grid_snapshot(img);
-        // held still: the same cards, each within a few pixels of where it was a look ago (a scroll's last pixels come slowly)
+        if self.grids.iter().any(|g| same_grid(&g.snapshot, &now)) || self.tail.as_ref().is_some_and(|tail| tail.holds(&now)) {
+            self.pending = None;
+            return GridState::Known;
+        }
         let settled = self.pending.as_deref().is_some_and(|before| near_places(before.iter().map(|g| (g.0, g.1)), now.iter().map(|g| (g.0, g.1)), SETTLED_PX));
         self.pending = if settled { None } else { Some(now) };
-        settled
+        if settled {
+            GridState::Settled
+        } else {
+            GridState::Moving
+        }
     }
 
     /// Two students are costumes of one character.
@@ -330,6 +328,14 @@ fn trace(what: &str) {
     }
 }
 
+/// See [`Observer::grid_state`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GridState {
+    Known,
+    Settled,
+    Moving,
+}
+
 /// How far a label may be from its place a look ago, in frame pixels, for the grid to count as held still.
 const SETTLED_PX: i32 = 3;
 /// How far from the places it was read at a label may be and still belong to the grid read last, and for how long after that
@@ -375,11 +381,17 @@ struct KnownGrid {
     kind: Option<&'static str>,
 }
 
-/// Whether `now` is the grid `known` was read from: every card in it is one of the known ones, at the same place and with the
+/// Whether `now` is the grid `known` was read from: every card in it is at a place of the known ones, nearly all with the
 /// same label, and most of them are there (a card can be covered for a moment, by a toast or the pointer, while the squad
 /// changes; a scroll or a tab changes every place or label at once).
 fn same_grid(known: &[(i32, i32, u64)], now: &[(i32, i32, u64)]) -> bool {
-    !now.is_empty() && now.len() * 10 >= known.len() * 6 && now.iter().all(|c| known.contains(c))
+    if now.is_empty() || now.len() * 10 < known.len() * 6 {
+        return false;
+    }
+    // A label that looks different at the place of a known one is the card under the pointer (it lights up) or one a toast covers;
+    // a few of those do not make another grid, while a scroll or a tab changes half the labels or all of them.
+    let changed = now.iter().filter(|c| !known.contains(c)).count();
+    changed <= (now.len() / 4).max(2) && now.iter().all(|c| known.contains(c) || known.iter().any(|k| (k.0, k.1) == (c.0, c.1)))
 }
 
 /// The cards of the grid as one frame shows them: place and fingerprint. A card's label is a thresholded picture, so its
@@ -622,5 +634,10 @@ mod tests {
         assert!(!same_grid(&removed, &removed[..3]), "a few cards of many is not enough");
         assert!(!same_grid(&removed, &thumbs) && !same_grid(&thumbs, &removed));
         assert!(!same_grid(&removed, &[]));
+        // a card or two that look different at their places (one lights up under the pointer) are the same grid; half the labels
+        // changed at the same places is a scroll by a row (or a tab) and is another grid
+        let lit = |n: usize| -> Vec<(i32, i32, u64)> { removed.iter().enumerate().map(|(i, g)| if i < n { (g.0, g.1, g.2 ^ 0xFFFF) } else { *g }).collect() };
+        assert!(same_grid(&removed, &lit(2)));
+        assert!(!same_grid(&removed, &lit(removed.len() / 2)));
     }
 }

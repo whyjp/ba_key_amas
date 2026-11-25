@@ -299,9 +299,9 @@ impl<'a, S: Surface> Assistant<'a, S> {
         &self.settings
     }
 
-    /// Whether the frame shows the 빠른 편성 grid as it was last read, so that its text need not be read again.
-    pub fn grid_unchanged(&self, img: &RgbImage) -> bool {
-        self.observer.grid_unchanged(img)
+    /// See [`Observer::grid_state`].
+    pub fn grid_state(&mut self, img: &RgbImage) -> crate::observe::GridState {
+        self.observer.grid_state(img)
     }
 
     /// See [`Observer::in_popup`].
@@ -312,11 +312,6 @@ impl<'a, S: Surface> Assistant<'a, S> {
     /// See [`Observer::striker_popup`].
     pub fn striker_popup(&self, img: &RgbImage) -> bool {
         self.observer.striker_popup(img)
-    }
-
-    /// See [`Observer::grid_settled`].
-    pub fn grid_settled(&mut self, img: &RgbImage) -> bool {
-        self.observer.grid_settled(img)
     }
 
     /// A new settled frame: read it and show what follows from it.

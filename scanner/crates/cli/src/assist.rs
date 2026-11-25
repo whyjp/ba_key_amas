@@ -305,7 +305,9 @@ fn run_on<S: Surface>(surface: S, ocr: Arc<dyn Ocr>, session: &HcuSession, regio
         // Where the picture is, by probes (about 25 ms each; a full capture and its key are 110 ms): the one that was read, still
         // changing, or held still but not the one that was read. Only in the last case, or when it never holds still, is it captured.
         let (mut settled_by_probe, mut scrolled) = (false, false);
-        if let (Some(prober), false) = (prober.as_ref(), gate.in_battle()) {
+        // (once the popup's grid is being captured while it moves, the probes have said what they can: the capture is the look)
+        let capturing_the_popup = assistant.in_popup() && motion.as_ref().is_some_and(|m| m.down);
+        if let (Some(prober), false, false) = (prober.as_ref(), gate.in_battle(), capturing_the_popup) {
             if let Ok(now) = prof.time("probe", || look_at_game(prober)) {
                 let step = prev_probe.as_ref().map_or(f32::MAX, |p| probe_distance(p, &now));
                 let same_as_read = handled.is_some() && handled_probe.as_ref().is_some_and(|h| probe_distance(h, &now) < PROBE_STILL);
@@ -392,11 +394,12 @@ fn run_on<S: Surface>(surface: S, ocr: Arc<dyn Ocr>, session: &HcuSession, regio
         if new_view && (still >= 1 || popup_frame) {
             // The grid of 빠른 편성 is as it was read (a student was put in the squad or taken out): its text is known, the
             // 700 ms of recognising the whole frame again are skipped and the squad is read from pixels.
-            let known = assistant.grid_unchanged(&img);
+            let grid = assistant.grid_state(&img);
+            let known = grid == baocr_assist::observe::GridState::Known;
             trace(if known { "grid known" } else { "grid new" });
             // a grid that is new inside the popup is read once it has held still for two looks (a click shakes the picture)
             // (after a scroll, which the probes watched move and stop, the grid is settled: a click's shake is the small step)
-            let go = if known { still >= 1 } else { (still >= 1 && settled_by_probe && scrolled) || assistant.grid_settled(&img) };
+            let go = if known { still >= 1 } else { (still >= 1 && settled_by_probe && scrolled) || grid == baocr_assist::observe::GridState::Settled };
             if !go {
                 wait(&mut assistant, SETTLING_PAUSE);
                 continue;
