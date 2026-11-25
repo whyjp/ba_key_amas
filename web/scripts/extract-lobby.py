@@ -122,9 +122,12 @@ def locate_by_thumbnail(big_gray, thumb_path: pathlib.Path):
     return best
 
 
-def portrait_crop(img: Image.Image, face, spot) -> Image.Image:
+def portrait_crop(img: Image.Image, face, spot, shift: float = 0.0):
     """A full-height portrait window. Centre: the detected face, else the matched thumbnail's centre, else the
-    middle. When a face box is known the window is nudged until the whole face sits inside with a margin."""
+    middle. When a face box is known the window is nudged until the whole face sits inside with a margin.
+    `shift` moves the window sideways afterwards, as a fraction of its width (positive = right): the hand-made correction
+    for a picture whose face still sits at an edge (`lobby_shift` in face-overrides.json). Returns the picture and where
+    the window lies, (left, width, picture width)."""
     w, h = img.size
     cw = min(w, round(h * RATIO))
     ch = round(cw / RATIO)
@@ -135,9 +138,10 @@ def portrait_crop(img: Image.Image, face, spot) -> Image.Image:
         margin = cw * 0.08
         left = min(left, round(cx - half - margin))      # keep the face's left edge inside
         left = max(left, round(cx + half + margin - cw))  # and its right edge
+    left = round(left + shift * cw)
     left = max(0, min(left, w - cw))
     top = max(0, min(round(h - ch) // 2, h - ch))
-    return img.crop((left, top, left + cw, top + ch)).resize((OUT_W, OUT_H), Image.LANCZOS)
+    return img.crop((left, top, left + cw, top + ch)).resize((OUT_W, OUT_H), Image.LANCZOS), (left, cw, w)
 
 
 def main() -> int:
@@ -154,6 +158,8 @@ def main() -> int:
     # ids that already have a high resolution cut; --force makes them all again
     prev = ROOT / "public" / "card-lobby.json"
     done_before = set(json.loads(prev.read_text(encoding="utf-8"))) if prev.exists() else set()
+    # --only 10129,20020 cuts just those again (the rest of card-lobby.json is kept)
+    only = {int(x) for x in sys.argv[sys.argv.index("--only") + 1].split(",")} if "--only" in sys.argv else set()
     have, missing = [], []
     how = {"face": 0, "thumbnail": 0, "middle": 0}
     for sid in ids:
@@ -162,7 +168,11 @@ def main() -> int:
         if not f:
             missing.append(name)
             continue
-        if (out / f"{sid}.webp").exists() and "--force" not in sys.argv and (out / f"{sid}.webp").stat().st_size > 5000 and sid in done_before:
+        if only and sid not in only:
+            if sid in done_before:
+                have.append(sid)
+            continue
+        if not only and (out / f"{sid}.webp").exists() and "--force" not in sys.argv and (out / f"{sid}.webp").stat().st_size > 5000 and sid in done_before:
             have.append(sid)
             continue
         ext = f["url"].rsplit(".", 1)[-1].lower()
@@ -191,7 +201,11 @@ def main() -> int:
                     spot = (cx, cy)
         how[("face" if face else "thumbnail" if spot else "middle")] += 1
         img = Image.open(src).convert("RGB")
-        portrait_crop(img, face, spot).save(out / f"{sid}.webp", "WEBP", quality=86)
+        shift = float(crop.OVERRIDES.get("lobby_shift", {}).get(str(sid), 0.0))
+        cropped, (left, cw, w) = portrait_crop(img, face, spot, shift)
+        cropped.save(out / f"{sid}.webp", "WEBP", quality=86)
+        if only:
+            print(f"{sid} {name}: picture {w}x{h}, window left {left} of {w - cw} possible, width {cw}, shift {shift}, centred by {'face' if face else 'thumbnail' if spot else 'middle'}")
         have.append(sid)
     (ROOT / "public" / "card-lobby.json").write_text(json.dumps(have), encoding="utf-8")
     print(f"{len(have)} high resolution lobby cards, {len(missing)} without: {', '.join(missing[:10])}. centred by {how}")
