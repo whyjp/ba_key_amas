@@ -25,6 +25,33 @@ pub fn slot_centre(slot: usize, layout: Layout) -> (f32, f32) {
     ((SLOT_RIGHT_EDGES[slot] - 44) as f32, (716 - rise) as f32)
 }
 
+/// Whether the slot holds no student: the game then draws a flat grey plate with the word EMPTY. Its middle is grey (little
+/// colour) and nearly even (a portrait always has the contrast of a face and hair), which the correlation cannot tell:
+/// a flat patch matches some template as well as a face does, so without this the empty slot was given a student.
+pub fn slot_is_empty(img: &RgbImage, cx: f32, cy: f32) -> bool {
+    const HALF: i64 = 22;
+    let (x0, y0) = (cx.round() as i64 - HALF, cy.round() as i64 - HALF);
+    if x0 < 0 || y0 < 0 || x0 + 2 * HALF > img.width() as i64 || y0 + 2 * HALF > img.height() as i64 {
+        return false;
+    }
+    let (mut spread, mut sum, mut sum2, mut n) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
+    for y in y0..y0 + 2 * HALF {
+        for x in x0..x0 + 2 * HALF {
+            let p = img.get_pixel(x as u32, y as u32).0;
+            let (hi, lo) = (p.iter().copied().max().unwrap_or(0) as f64, p.iter().copied().min().unwrap_or(0) as f64);
+            let lum = (p[0] as f64 + p[1] as f64 + p[2] as f64) / 3.0;
+            spread += hi - lo;
+            sum += lum;
+            sum2 += lum * lum;
+            n += 1.0;
+        }
+    }
+    let mean = sum / n;
+    let std = (sum2 / n - mean * mean).max(0.0).sqrt();
+    // measured: the empty plate is 8 / 12 (colour spread / brightness spread), a portrait at least 12.6 / 23.6
+    spread / n < 14.0 && std < 18.0
+}
+
 /// Side of a template, in pixels.
 pub const SIDE: u32 = 24;
 const LEN: usize = (SIDE * SIDE * 3) as usize;

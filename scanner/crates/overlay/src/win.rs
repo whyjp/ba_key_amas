@@ -11,7 +11,7 @@ use crate::panel::{ingame_origin, ingame_panel_width, inside_card_width, panel_w
 use crate::placement::{available, contains, dropped, effective_anchor, resolve, slot, snap, strip, Frame, Unfold};
 use crate::tab::{pick, render_snap_hint, render_tab, tab_label, tab_size, Press};
 use crate::render::{load_fonts, Fonts, Ltrb};
-use crate::marks::{render_marks, Mark};
+use crate::marks::{render_marks_clipped, Mark};
 use crate::wake::Wake;
 use crate::{Card, Shown, ViewInfo, ViewShape};
 use std::ffi::c_void;
@@ -218,6 +218,9 @@ fn wide(s: &str) -> Vec<u16> {
 static CLICKS: Mutex<Vec<(isize, i32, i32)>> = Mutex::new(Vec::new());
 const WM_LBUTTONDOWN: u32 = 0x0201;
 const WM_SETCURSOR: u32 = 0x0020;
+/// How often the overlay thread looks at the mouse, the game window and the clicks that arrived (a click waits for the
+/// next look: 25 ms on average at 50 ms, 45 ms at 90 ms; a look costs about 0.14 ms).
+const TICK_MS: u64 = 50;
 /// The standard arrow (`IDC_ARROW`). A window class without a cursor leaves whatever cursor was last set, which for a
 /// process that just started is the "working in background" arrow with the busy circle.
 const IDC_ARROW: usize = 32512;
@@ -309,6 +312,21 @@ fn primary_work() -> Ltrb {
 }
 
 /// A premultiplied-BGRA DIB the banner is rendered into.
+/// `img` as the premultiplied BGRA the layered window takes. Most of an overlay layer is transparent or opaque, which
+/// need no multiplication and no division (the three divisions per pixel were most of the time a layer took to hand over).
+fn premultiplied_bgra(dst: &mut [u8], img: &image::RgbaImage) {
+    for (d, p) in dst.chunks_exact_mut(4).zip(img.pixels()) {
+        match p[3] {
+            0 => d.copy_from_slice(&[0, 0, 0, 0]),
+            255 => d.copy_from_slice(&[p[2], p[1], p[0], 255]),
+            a => {
+                let a = a as u32;
+                d.copy_from_slice(&[(p[2] as u32 * a / 255) as u8, (p[1] as u32 * a / 255) as u8, (p[0] as u32 * a / 255) as u8, a as u8]);
+            }
+        }
+    }
+}
+
 struct Canvas {
     dc: isize,
     bitmap: isize,
@@ -340,15 +358,7 @@ impl Canvas {
 
     unsafe fn blit(&mut self, img: &image::RgbaImage) {
         let n = (self.w * self.h) as usize;
-        let dst = std::slice::from_raw_parts_mut(self.bits, n * 4);
-        for (i, p) in img.pixels().take(n).enumerate() {
-            let a = p[3] as u32;
-            // premultiplied BGRA
-            dst[i * 4] = (p[2] as u32 * a / 255) as u8;
-            dst[i * 4 + 1] = (p[1] as u32 * a / 255) as u8;
-            dst[i * 4 + 2] = (p[0] as u32 * a / 255) as u8;
-            dst[i * 4 + 3] = a as u8;
-        }
+        premultiplied_bgra(std::slice::from_raw_parts_mut(self.bits, n * 4), img);
     }
 }
 
@@ -538,7 +548,7 @@ fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, wake: Arc<Wake
         let (mut card_gen, mut ingame_gen, mut marks_gen, mut dock_now, mut locked) = (0u64, 0u64, 0u64, Dock::default(), false);
         let mut card_memo: Memo<(u64, u32, u8), (image::RgbaImage, Vec<Hit>)> = Memo::new();
         let mut ingame_memo: Memo<(u64, u32), image::RgbaImage> = Memo::new();
-        let mut marks_memo: Memo<(u64, i32, i32), image::RgbaImage> = Memo::new();
+        let mut marks_memo: Memo<(u64, i32, i32), (image::RgbaImage, (i32, i32))> = Memo::new();
         let mut tip_memo: Memo<(String, i32), image::RgbaImage> = Memo::new();
         let mut tab_memo: Memo<(i32, i32, bool, bool, u32, String), image::RgbaImage> = Memo::new();
         let mut hint_memo: Memo<(i32, i32, u32), image::RgbaImage> = Memo::new();
@@ -790,8 +800,10 @@ fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, wake: Arc<Wake
                 // the icons over the portraits: the layer covers the game's client area
                 match marks_track.current() {
                     Some(m) if !m.is_empty() => {
-                        let (img, render_gen) = marks_memo.get((marks_gen, cw, ch), || prof::time(prof::Part::RenderMarks, || render_marks(cw as u32, ch as u32, m, &fonts)));
-                        marks.show(screen_dc, img, (client.0, client.1), hash_of(&(render_gen, client.0, client.1)));
+                        // only the part of the client area the icons touch is drawn and handed to the window
+                        let (drawn, render_gen) = marks_memo.get((marks_gen, cw, ch), || prof::time(prof::Part::RenderMarks, || render_marks_clipped(cw as u32, ch as u32, m, &fonts)));
+                        let (img, (dx, dy)) = (&drawn.0, drawn.1);
+                        marks.show(screen_dc, img, (client.0 + dx, client.1 + dy), hash_of(&(render_gen, client.0, client.1)));
                     }
                     _ => marks.hide(),
                 }
@@ -802,8 +814,7 @@ fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, wake: Arc<Wake
             tick = tick.wrapping_add(1);
             prof::add(prof::Part::Busy, tick_start.elapsed());
             // a drag needs the card to follow the cursor smoothly
-            let tab_mode = game_present && user_pres == Presentation::Bookmark;
-            wake.wait(Duration::from_millis(if drag.is_some() || fold.sliding() { 16 } else if tab_mode { 40 } else { 90 }));
+            wake.wait(Duration::from_millis(if drag.is_some() || fold.sliding() { 16 } else { TICK_MS }));
         }
         drop(card);
         drop(ingame);
@@ -817,6 +828,26 @@ impl Drop for Layer {
     fn drop(&mut self) {
         unsafe {
             DestroyWindow(self.hwnd);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_layer_bytes_are_the_premultiplied_bgra_the_division_gave() {
+        let mut img = image::RgbaImage::new(16, 16);
+        for (i, p) in img.pixels_mut().enumerate() {
+            *p = image::Rgba([(i * 7) as u8, (i * 13) as u8, (i * 29) as u8, [0, 255, 128, 1, 254, 77][i % 6]]);
+        }
+        let mut fast = vec![9u8; 16 * 16 * 4];
+        premultiplied_bgra(&mut fast, &img);
+        for (i, p) in img.pixels().enumerate() {
+            let a = p[3] as u32;
+            let want = [(p[2] as u32 * a / 255) as u8, (p[1] as u32 * a / 255) as u8, (p[0] as u32 * a / 255) as u8, a as u8];
+            assert_eq!(&fast[i * 4..i * 4 + 4], &want, "pixel {i}");
         }
     }
 }
