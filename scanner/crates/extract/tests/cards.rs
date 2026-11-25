@@ -114,3 +114,37 @@ fn the_cards_read_from_the_text_of_the_grid_part_alone_are_the_same() {
         assert_eq!(a, b, "{name}");
     }
 }
+
+/// Cards already in the cache are not read again, and the text of the band that holds the others is all the rest need: the cards
+/// come out the same as from the whole frame on every recorded 빠른 편성 frame, for any choice of what is cached.
+#[test]
+fn cards_read_with_part_of_them_cached_and_only_the_rest_recognised_are_the_same() {
+    use baocr_extract::{read_card_names_cached, unread_label_band, LabelCache};
+    let Some(ocr) = engine() else { return };
+    for name in ["quick-formation.png", "quick-formation-scrolled-a.png", "quick-formation-scrolled-b.png", "quick-formation-live-a.png", "quick-formation-empty-slot.png", "w169-quick-formation.png"] {
+        let img = frame(name);
+        let whole = baocr_core::ocr_api::Ocr::boxes(&ocr, &img).unwrap();
+        let mut full_cache = LabelCache::new();
+        let full = read_card_names_cached(&ocr, &img, &whole, &mut full_cache);
+        // every card known: no band, nothing to recognise, the same cards
+        assert!(unread_label_band(&img, &full_cache).is_none(), "{name}");
+        assert_eq!(read_card_names_cached(&ocr, &img, &[], &mut full_cache.clone()), full, "{name}: all cached");
+        // some cached: the first third, the last third, every other one
+        let keys: Vec<u64> = full_cache.keys().copied().collect();
+        for keep in [|i: usize| i % 3 == 0, |i: usize| i % 2 == 0, |i: usize| i < 4, |i: usize| i >= 7] {
+            let mut cache: LabelCache = full_cache.iter().filter(|(k, _)| keys.iter().position(|x| x == *k).is_some_and(keep)).map(|(k, v)| (*k, v.clone())).collect();
+            let Some((x, y, w, h)) = unread_label_band(&img, &cache) else { continue };
+            let part = image::imageops::crop_imm(&img, x, y, w, h).to_image();
+            let mut boxes = baocr_core::ocr_api::Ocr::boxes(&ocr, &part).unwrap();
+            for b in &mut boxes {
+                b.x0 += x as f32;
+                b.x1 += x as f32;
+                b.y0 += y as f32;
+                b.y1 += y as f32;
+            }
+            let got = read_card_names_cached(&ocr, &img, &boxes, &mut cache);
+            assert_eq!(got, full, "{name}: part cached, band {x},{y} {w}x{h}");
+        }
+        eprintln!("{name}: {} cards, the same with part of them cached", full.len());
+    }
+}

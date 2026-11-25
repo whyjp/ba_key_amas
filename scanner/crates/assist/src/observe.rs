@@ -8,7 +8,7 @@ use baocr_core::ocr_api::{Ocr, TextBox};
 use baocr_extract::raid::{RaidRef, RaidTracker};
 use baocr_extract::scene::{classify_in, squad_names_in, Layout, MissionRef, MissionTracker, Scene};
 use crate::portrait;
-use baocr_extract::{read_card_names, CardName};
+use baocr_extract::{read_card_names_cached, unread_label_band, CardName, LabelCache};
 use baocr_pixels::{quick_card_labels, quick_card_selected, quick_label_ink, quick_tab_is_striker, quick_thumb_cards};
 use baocr_wikidb::{StudentBrief, Wiki};
 use image::RgbImage;
@@ -106,6 +106,11 @@ pub struct Observer<'a> {
     /// or two at a time, and each of those frames is a new grid to the fingerprints. The grid is read once the labels have
     /// nearly stopped; for a moment afterwards a frame whose labels are within a few pixels of those is that grid.
     tail: Option<Tail>,
+    /// Names read from labels, by the ink of the label: a card that is still on screen after a scroll is not read again.
+    label_cache: LabelCache,
+    /// The four striker slots as they looked when last told, and whom: a slot that looks the same is not told again (telling a
+    /// slot, 75 probes against 270 templates, takes 20 ms).
+    slot_memory: std::cell::RefCell<[Option<(Vec<u8>, Option<i64>)>; 4]>,
     /// Whether each student is a striker (true) or a special, and each one's name: what the portraits are matched among.
     strikers: std::collections::HashMap<i64, bool>,
     names: std::collections::HashMap<i64, String>,
@@ -113,7 +118,7 @@ pub struct Observer<'a> {
 
 impl<'a> Observer<'a> {
     pub fn new(ocr: &'a dyn Ocr, students: &'a [StudentBrief]) -> Observer<'a> {
-        Observer { ocr, students, tracker: MissionTracker::default(), raid_tracker: RaidTracker::default(), squad: Vec::new(), last: Scene::Unknown, cards: CardMemory::default(), grids: Vec::new(), pending: None, tail: None, strikers: students.iter().map(|s| (s.id, s.squad_type == "Main")).collect(), names: students.iter().map(|s| (s.id, s.name.clone())).collect() }
+        Observer { ocr, students, tracker: MissionTracker::default(), raid_tracker: RaidTracker::default(), squad: Vec::new(), last: Scene::Unknown, cards: CardMemory::default(), grids: Vec::new(), pending: None, tail: None, label_cache: LabelCache::new(), slot_memory: Default::default(), strikers: students.iter().map(|s| (s.id, s.squad_type == "Main")).collect(), names: students.iter().map(|s| (s.id, s.name.clone())).collect() }
     }
 
     /// Forget the mission and the squad (the game was closed: what was known is not true any more).
@@ -125,6 +130,8 @@ impl<'a> Observer<'a> {
         self.cards = CardMemory::default();
         self.grids.clear();
         self.tail = None;
+        self.label_cache.clear();
+        *self.slot_memory.borrow_mut() = Default::default();
     }
 
     /// `boxes`: the frame's free-text OCR. `fallback`: the screen to assume when the text
@@ -181,7 +188,7 @@ impl<'a> Observer<'a> {
                     self.cards.kind = obs.grid_kind;
                 } else {
                     // with the names hidden (the grid's thumbnail view) the cards are told by their pictures
-                    let fresh = if quick_card_labels(img).is_empty() { self.thumb_cards(img, obs.grid_kind) } else { read_card_names(self.ocr, img, boxes) };
+                    let fresh = if quick_card_labels(img).is_empty() { self.thumb_cards(img, obs.grid_kind) } else { read_card_names_cached(self.ocr, img, boxes, &mut self.label_cache) };
                     trace("  cards read");
                     obs.cards = self.cards.steady(fresh, obs.grid_kind);
                     self.tail = Some(Tail { at: std::time::Instant::now(), places: snapshot.iter().map(|g| (g.0, g.1)).collect(), cards: obs.cards.clone(), kind: obs.grid_kind });
@@ -226,6 +233,11 @@ impl<'a> Observer<'a> {
     }
 
     /// The cards of the grid's thumbnail view, each told by its picture (only what is believed is named).
+    /// The part of the frame (x, y, width, height) whose text the labels not read yet need, or None when every label is known.
+    pub fn unread_band(&self, img: &RgbImage) -> Option<(u32, u32, u32, u32)> {
+        unread_label_band(img, &self.label_cache)
+    }
+
     /// Whether the last screen read was the 빠른 편성 popup.
     pub fn in_popup(&self) -> bool {
         self.last == Scene::QuickFormation
@@ -300,9 +312,18 @@ impl<'a> Observer<'a> {
                 let (cx, cy) = portrait::slot_centre(k, layout);
                 if portrait::slot_is_empty(img, cx, cy) {
                     empty[k] = true;
+                    self.slot_memory.borrow_mut()[k] = None;
                     continue;
                 }
+                let sample = portrait::patch_sample(img, cx, cy);
+                if let Some((was, who)) = self.slot_memory.borrow()[k].as_ref() {
+                    if portrait::sample_distance(was, &sample) < SAME_SLOT {
+                        *slot = *who;
+                        continue;
+                    }
+                }
                 *slot = book.identify(&portrait::probe(img, cx, cy), &|id| self.strikers.get(&id) == Some(&true), &same).filter(|m| m.trusted_with(&|a, b| self.kin(a, b))).map(|m| m.id);
+                self.slot_memory.borrow_mut()[k] = Some((sample, *slot));
             }
         }
         let seen: Vec<i64> = slots.iter().flatten().copied().collect();
@@ -336,8 +357,11 @@ pub enum GridState {
     Moving,
 }
 
+/// How far (mean difference of the coarse copies) a slot's picture may be from when it was last told and still be that student.
+const SAME_SLOT: f32 = 3.0;
+
 /// How far a label may be from its place a look ago, in frame pixels, for the grid to count as held still.
-const SETTLED_PX: i32 = 3;
+const SETTLED_PX: i32 = 6;
 /// How far from the places it was read at a label may be and still belong to the grid read last, and for how long after that
 /// read that is believed (the tail of a scroll).
 const TAIL_PX: i32 = 6;

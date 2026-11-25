@@ -304,6 +304,11 @@ impl<'a, S: Surface> Assistant<'a, S> {
         self.observer.grid_state(img)
     }
 
+    /// See [`Observer::unread_band`].
+    pub fn unread_band(&self, img: &RgbImage) -> Option<(u32, u32, u32, u32)> {
+        self.observer.unread_band(img)
+    }
+
     /// See [`Observer::in_popup`].
     pub fn in_popup(&self) -> bool {
         self.observer.in_popup()

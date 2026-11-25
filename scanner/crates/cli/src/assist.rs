@@ -83,9 +83,8 @@ fn trace(what: &str) {
     }
 }
 
-/// The text boxes of the 빠른 편성 grid's part of the frame, in the frame's own coordinates.
-fn grid_part_boxes(ocr: &dyn Ocr, img: &image::RgbImage) -> Vec<baocr_core::ocr_api::TextBox> {
-    let (x, y, w, h) = baocr_pixels::quick_grid_crop(img);
+/// The text boxes of a part of the frame (x, y, width, height), in the frame's own coordinates.
+fn band_boxes(ocr: &dyn Ocr, img: &image::RgbImage, (x, y, w, h): (u32, u32, u32, u32)) -> Vec<baocr_core::ocr_api::TextBox> {
     let part = image::imageops::crop_imm(img, x, y, w, h).to_image();
     let mut boxes = ocr.boxes(&part).unwrap_or_default();
     for b in &mut boxes {
@@ -409,7 +408,11 @@ fn run_on<S: Surface>(surface: S, ocr: Arc<dyn Ocr>, session: &HcuSession, regio
             let boxes = if known {
                 Vec::new()
             } else if assistant.striker_popup(&img) {
-                prof.time("ocr", || grid_part_boxes(&*ocr, &img))
+                // only the labels not read before need their text: the band that holds them (none: the cards are all known)
+                match assistant.unread_band(&img) {
+                    Some(band) => prof.time("ocr", || band_boxes(&*ocr, &img, band)),
+                    None => Vec::new(),
+                }
             } else {
                 prof.time("ocr", || ocr.boxes(&img).unwrap_or_default())
             };

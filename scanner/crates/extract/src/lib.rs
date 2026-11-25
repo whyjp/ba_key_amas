@@ -8,7 +8,7 @@
 use anyhow::Result;
 mod deep;
 mod cards;
-pub use cards::{read_card_names, CardName};
+pub use cards::{read_card_names, read_card_names_cached, unread_label_band, CardName, LabelCache};
 pub mod raid;
 pub mod scene;
 pub use deep::{apply_cell, match_label};

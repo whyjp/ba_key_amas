@@ -52,6 +52,28 @@ pub fn slot_is_empty(img: &RgbImage, cx: f32, cy: f32) -> bool {
     spread / n < 14.0 && std < 18.0
 }
 
+/// A coarse copy of the picture around (`cx`, `cy`): every fourth pixel of the middle 44x44 (11x11 colour values). Two looks at one
+/// slot of one screen differ by a pixel level or two; another student, or an empty slot, by tens.
+pub fn patch_sample(img: &RgbImage, cx: f32, cy: f32) -> Vec<u8> {
+    let (x0, y0) = (cx.round() as i64 - 22, cy.round() as i64 - 22);
+    let mut out = Vec::with_capacity(11 * 11 * 3);
+    for gy in 0..11 {
+        for gx in 0..11 {
+            let (px, py) = ((x0 + gx * 4).clamp(0, img.width() as i64 - 1), (y0 + gy * 4).clamp(0, img.height() as i64 - 1));
+            out.extend_from_slice(&img.get_pixel(px as u32, py as u32).0);
+        }
+    }
+    out
+}
+
+/// Mean difference of two samples from [`patch_sample`] (0 to 255).
+pub fn sample_distance(a: &[u8], b: &[u8]) -> f32 {
+    if a.len() != b.len() || a.is_empty() {
+        return f32::MAX;
+    }
+    a.iter().zip(b).map(|(x, y)| (*x as i32 - *y as i32).unsigned_abs() as u64).sum::<u64>() as f32 / a.len() as f32
+}
+
 /// Side of a template, in pixels.
 pub const SIDE: u32 = 24;
 const LEN: usize = (SIDE * SIDE * 3) as usize;

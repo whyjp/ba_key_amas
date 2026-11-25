@@ -133,3 +133,23 @@ fn an_empty_slot_is_told_from_the_filled_ones() {
     assert_eq!(read("quick-formation", Layout::Ratio43), [false; 6]);
     assert_eq!(read("w169-quick-formation", Layout::Ratio169), [false; 6]);
 }
+
+/// A slot's coarse copy is nearly the same in two recordings of one screen and far from another student's or the empty plate.
+#[test]
+fn a_slots_coarse_copy_tells_the_same_student_from_another() {
+    use baocr_assist::portrait::{patch_sample, sample_distance, slot_centre};
+    let samples = |stem: &str| -> Vec<Vec<u8>> {
+        let img = image::open(fixture(&format!("{stem}.png"))).unwrap().to_rgb8();
+        (0..4).map(|k| { let (cx, cy) = slot_centre(k, baocr_extract::scene::Layout::Ratio43); patch_sample(&img, cx, cy) }).collect()
+    };
+    let (removed, readded) = (samples("quick-formation-empty-slot"), samples("quick-formation-readded"));
+    for k in 0..3 {
+        assert!(sample_distance(&removed[k], &readded[k]) < 3.0, "slot {k} is the same student: {}", sample_distance(&removed[k], &readded[k]));
+    }
+    assert!(sample_distance(&removed[3], &readded[3]) > 10.0, "the emptied slot is not the student");
+    for (i, a) in readded.iter().enumerate() {
+        for (j, b) in readded.iter().enumerate() {
+            assert!(i == j || sample_distance(a, b) > 10.0, "slots {i} and {j} hold different students");
+        }
+    }
+}

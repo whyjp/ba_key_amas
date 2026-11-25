@@ -19,6 +19,7 @@ use baocr_names::{edit_distance, to_jamo};
 use baocr_ocr::ink_to_line;
 use baocr_pixels::{self as px, CardLabel};
 use image::{GrayImage, RgbImage};
+use std::collections::HashMap;
 
 /// A student card in the grid.
 #[derive(Debug, Clone, PartialEq)]
@@ -173,15 +174,56 @@ fn ink_width(ink: &GrayImage) -> f32 {
     }
 }
 
+/// What a label's ink (the bytes of its thresholded picture, which a given label has in every frame it is whole in) was read as:
+/// a card that stays on screen through a scroll is not read again. Only names that were decided are kept.
+pub type LabelCache = HashMap<u64, String>;
+
+fn ink_print(ink: &GrayImage) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    ink.as_raw().hash(&mut h);
+    h.finish()
+}
+
+/// The part of the frame (x, y, width, height) that holds the labels that are not in `cache`, the only part whose text the
+/// readers of those labels need; None when every label is known (nothing needs reading).
+pub fn unread_label_band(img: &RgbImage, cache: &LabelCache) -> Option<(u32, u32, u32, u32)> {
+    let unknown: Vec<CardLabel> = px::quick_card_labels(img)
+        .into_iter()
+        .filter(|l| {
+            let ink = px::quick_label_ink(img, l);
+            ink.pixels().filter(|p| p[0] < 128).count() >= MIN_LABEL_INK && !cache.contains_key(&ink_print(&ink))
+        })
+        .collect();
+    if unknown.is_empty() {
+        return None;
+    }
+    let (x0, x1) = (unknown.iter().map(|l| l.cx).min()? - 56, unknown.iter().map(|l| l.cx).max()? + 56);
+    let (y0, y1) = (unknown.iter().map(|l| l.y0).min()? - 10, unknown.iter().map(|l| l.y1).max()? + 10);
+    let (x0, y0) = (x0.max(0), y0.max(0));
+    let (x1, y1) = (x1.min(img.width() as i32), y1.min(img.height() as i32));
+    (x1 > x0 && y1 > y0).then(|| (x0 as u32, y0 as u32, (x1 - x0) as u32, (y1 - y0) as u32))
+}
+
 /// The cards whose name label is whole in the grid, with the name read on each.
 /// `free` is the frame's free-text OCR (the caller has it already for the screen).
 pub fn read_card_names(ocr: &dyn Ocr, img: &RgbImage, free: &[TextBox]) -> Vec<CardName> {
+    read_card_names_cached(ocr, img, free, &mut LabelCache::new())
+}
+
+/// [`read_card_names`] that does not read a label again whose ink is in `cache`, and adds the ones it reads. `free` then only
+/// needs to cover the labels that are not cached (see [`unread_label_band`]).
+pub fn read_card_names_cached(ocr: &dyn Ocr, img: &RgbImage, free: &[TextBox], cache: &mut LabelCache) -> Vec<CardName> {
     px::quick_card_labels(img)
         .into_iter()
         .filter_map(|l| {
             let ink = px::quick_label_ink(img, &l);
             if ink.pixels().filter(|p| p[0] < 128).count() < MIN_LABEL_INK {
                 return None;
+            }
+            let print = ink_print(&ink);
+            if let Some(name) = cache.get(&print) {
+                return Some(CardName { text: name.clone(), x: l.cx as f32, y0: l.y0 as f32, bare: false });
             }
             let (_, scores) = ocr.choose(&ink_to_line(&ink), &UNIQUE_NAMES).ok()?;
             let side = free_text(free, &l);
@@ -193,7 +235,9 @@ pub fn read_card_names(ocr: &dyn Ocr, img: &RgbImage, free: &[TextBox]) -> Vec<C
                 let show = |i: usize| format!("{}{}:{:.1}", UNIQUE_NAMES[i], if allowed[i] { "" } else { "(x)" }, scores[i]);
                 eprintln!("card x={} y={} width={} fit={} free={} top={:?}", l.cx, l.y0, evidence.width, allowed.iter().filter(|a| **a).count(), side.iter().collect::<String>(), top.iter().take(4).map(|&i| show(i)).collect::<Vec<_>>());
             }
-            decide(&evidence).map(|i| CardName { text: UNIQUE_NAMES[i].clone(), x: l.cx as f32, y0: l.y0 as f32, bare: false })
+            let name = decide(&evidence).map(|i| UNIQUE_NAMES[i].clone())?;
+            cache.insert(print, name.clone());
+            Some(CardName { text: name, x: l.cx as f32, y0: l.y0 as f32, bare: false })
         })
         .collect()
 }
