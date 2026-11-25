@@ -116,7 +116,8 @@ impl HcuSession {
     pub fn native() -> Self {
         let mut runner = crate::native::NativeRunner::new(crate::native::WinDesktop::new())
             .with_target(GAME_TITLE)
-            .with_settle(crate::native::Settle::from_env());
+            .with_settle(crate::native::Settle::from_env())
+            .with_click_settle(crate::native::Settle::click_from_env());
         if let Some(sink) = crate::audit::FileSink::default_sink() {
             runner = runner.with_audit(Box::new(sink));
         }
