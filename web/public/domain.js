@@ -10,8 +10,7 @@ export function loadMeta() {
     fetch("/halos.json").then((r) => (r.ok ? r.json() : [])).catch(() => []),
     fetch("/card-lobby.json").then((r) => (r.ok ? r.json() : [])).catch(() => []),
     fetch("/faces.json").then((r) => (r.ok ? r.json() : {})).catch(() => ({})),
-    fetch("/card-lobby-focus.json").then((r) => (r.ok ? r.json() : {})).catch(() => ({})),
-  ]).then(([meta, halos, lobby, faces, lobbyFocus]) => ({ ...meta, halos: new Set(halos), hiresLobby: new Set(lobby), faces, lobbyFocus }));
+  ]).then(([meta, halos, lobby, faces]) => ({ ...meta, halos: new Set(halos), hiresLobby: new Set(lobby), faces }));
   return metaPromise;
 }
 
