@@ -14,7 +14,7 @@
 
 `cd web && npm run assets`는 SchaleDB, bluearchive.wikiru.jp, bluearchive.wiki에서 전부 다시 내려받는다. 이 PC에서 처음부터 끝까지 1199초(약 20분)였고 내려받은 원본 캐시는 455 MB였다. 다시 쓰는 파일은 위 정책의 목록 전체다. 다시 만든 결과를 커밋하면 바뀐 파일 크기만큼 git 역사가 영구히 커진다. 카드 자르기 스크립트를 고친 경우처럼 꼭 필요할 때만 하고, 가능하면 바뀐 폴더만 한 번에 커밋한다.
 
-변경이 PR에서 이미지를 5 MB 넘게 추가하거나 다시 쓰면 `scripts/release-check.ps1 -BaseRef`가 실패한다. 의도한 변경이면 PR에 `large-assets` 라벨을 붙인다.
+변경이 PR에서 이미지를 5 MB 넘게 추가하거나 다시 쓰면 `scripts/release-check.ps1 -BaseRef`가 실패한다. 의도한 변경이면 PR에 `large-assets` 라벨을 붙인다. main에 바로 푸시할 때는 커밋 메시지에 `[large-assets]`를 넣는다.
 
 ## 삭제 요청을 받았을 때
 

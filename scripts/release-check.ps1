@@ -87,7 +87,7 @@ else {
 }
 
 # 6. image size budget: a change may add or rewrite at most -ImageBudgetMB of images unless the PR is labelled
-#    large-assets (CI sets ALLOW_LARGE_ASSETS=1) or ALLOW_LARGE_ASSETS=1 is set. Every re-commit stays in history for good.
+#    large-assets (CI sets ALLOW_LARGE_ASSETS=1; on a push to main, put [large-assets] in the commit message) or ALLOW_LARGE_ASSETS=1 is set. Every re-commit stays in history for good.
 if ($BaseRef) {
     git -C $root rev-parse --verify --quiet "$BaseRef^{commit}" *> $null
     if ($LASTEXITCODE -ne 0) { Write-Host "WARN: base ref '$BaseRef' not found, image budget not checked" -ForegroundColor Yellow }
@@ -98,10 +98,12 @@ if ($BaseRef) {
         $bytes = 0L
         if ($n) { $blobs | git -C $root cat-file --batch-check='%(objectsize)' | ForEach-Object { $bytes += [long]$_ } }
         $mb = [math]::Round($bytes / 1MB, 2)
-        if ($bytes -gt $ImageBudgetMB * 1MB -and $env:ALLOW_LARGE_ASSETS -ne "1") { Fail "this change adds or rewrites $n image files, $mb MB, over the $ImageBudgetMB MB budget (label the PR large-assets if it is intended)" }
+        if ($bytes -gt $ImageBudgetMB * 1MB -and $env:ALLOW_LARGE_ASSETS -ne "1") { Fail "this change adds or rewrites $n image files, $mb MB, over the $ImageBudgetMB MB budget (label the PR large-assets, or put [large-assets] in the commit message of a push, if it is intended)" }
         else { Write-Host "images changed vs ${BaseRef}: $n files, $mb MB (budget $ImageBudgetMB MB)" }
     }
 }
 
 if ($problems.Count) { $problems | ForEach-Object { Write-Host "FAIL: $_" -ForegroundColor Red }; exit 1 }
 "OK: url=$($contract.addon_download_url) version=$ver min=$($contract.min_addon_version) tag=$(if ($Tag) { $Tag } else { '-' }) protocol=$($up.Groups[1].Value) migrations=$($files.Count) students=$($ids.Count)"
+# a failed `git rev-parse` above (an all-zero base on a tag push) leaves its exit code behind; the checks have passed
+exit 0

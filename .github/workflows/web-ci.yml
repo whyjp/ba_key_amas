@@ -58,6 +58,6 @@ jobs:
       - name: Release contract
         shell: pwsh
         env:
-          ALLOW_LARGE_ASSETS: ${{ contains(github.event.pull_request.labels.*.name, 'large-assets') && '1' || '0' }}
+          ALLOW_LARGE_ASSETS: ${{ (contains(github.event.pull_request.labels.*.name, 'large-assets') || contains(github.event.head_commit.message, '[large-assets]')) && '1' || '0' }}
           BASE_REF: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event.before }}
         run: ./scripts/release-check.ps1 -BaseRef $env:BASE_REF

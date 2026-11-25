@@ -79,7 +79,7 @@ wrangler가 올릴 정적 에셋은 `wrangler deploy --dry-run`에서 1445개로
 3. 그 Release가 `releases/latest`로 열리는지 눈으로 확인한다.
 4. 그다음에 서버의 최소 요구를 올린다. 해당하는 것만 고친다. `web/src/version.ts`의 `MIN_PROTOCOL`, `MIN_ROSTER_SCHEMA`, `MIN_PROGRESS_SCHEMA`, 그리고 `release-contract.json`의 `min_addon_version`. 이 변경을 `main`에 합치면 Cloudflare가 배포한다.
 
-`release-contract.json`의 `min_addon_version`은 서버가 요구하는 가장 낮은 애드온 버전이다. 서버 코드에는 애드온 버전의 최소값이 따로 없고 업로드 규약 번호만 있어서, 이 값을 계약 파일에 두었다. `scripts/release-check.ps1`은 다음에서 실패한다. 태그가 이보다 낮거나 `scanner/Cargo.toml`과 다를 때, 업로드 규약 번호가 서버 범위 밖일 때, `ADDON_URL`이 이 저장소의 releases 주소와 다를 때, 마이그레이션 번호에 빈 곳이 있을 때, 학생 한 명이라도 카드 이미지가 없을 때, 이미지를 5 MB 넘게 바꿀 때(`large-assets` 라벨이 없으면). `web-ci`와 `release.yml`이 모두 돌린다.
+`release-contract.json`의 `min_addon_version`은 서버가 요구하는 가장 낮은 애드온 버전이다. 서버 코드에는 애드온 버전의 최소값이 따로 없고 업로드 규약 번호만 있어서, 이 값을 계약 파일에 두었다. `scripts/release-check.ps1`은 다음에서 실패한다. 태그가 이보다 낮거나 `scanner/Cargo.toml`과 다를 때, 업로드 규약 번호가 서버 범위 밖일 때, `ADDON_URL`이 이 저장소의 releases 주소와 다를 때, 마이그레이션 번호에 빈 곳이 있을 때, 학생 한 명이라도 카드 이미지가 없을 때, 이미지를 5 MB 넘게 바꿀 때(`large-assets` 라벨이나 푸시 커밋 메시지의 `[large-assets]`가 없으면). `web-ci`와 `release.yml`이 모두 돌린다.
 
 순서가 뒤집히면, 즉 서버를 먼저 올리면 이전 애드온은 모두 426을 받는다. 응답은 `releases/latest` 링크를 안내하지만 그 링크에는 아직 새 애드온이 없다. 사용자는 업데이트할 방법이 없는 채로 업로드가 막힌다. 되돌리는 방법은 (d)의 롤백이다. 또 서버가 새 형식을 받으려면 마이그레이션이 먼저 필요하므로, 마이그레이션은 이전 코드도 견디는 추가형(새 열이나 표)으로 쓴다. 롤백은 코드만 되돌리고 DB는 되돌리지 않기 때문이다.
 
