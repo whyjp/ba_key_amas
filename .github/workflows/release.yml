@@ -99,17 +99,22 @@ jobs:
         run: |
           if ($env:BAOCR_ADDON_SIGNING_KEY) { throw "the signing key must not be in this step's environment" }
           $exe = "$env:RUNNER_TEMP/pkg/ba-key-AMAS.exe"
-          $v = (& $exe --version | Out-String).Trim()
-          if ($LASTEXITCODE -ne 0) { throw "--version exited $LASTEXITCODE" }
+          # the exe has no console of its own (windowless), so PowerShell does not wait for it or read its output
+          # through a pipe: run it with its output redirected to a file and wait.
+          function Invoke-Exe($argument) {
+            $out = Join-Path $env:RUNNER_TEMP "smoke-out.txt"
+            $p = Start-Process -FilePath $exe -ArgumentList $argument -RedirectStandardOutput $out -Wait -PassThru -NoNewWindow
+            if ($p.ExitCode -ne 0) { throw "$argument exited $($p.ExitCode)" }
+            (Get-Content $out -Raw)
+          }
+          $v = (Invoke-Exe "--version").Trim()
           $v
           $want = "ba-key-AMAS " + $env:TAG.TrimStart("v")
           if ($v -ne $want) { throw "version output '$v', expected '$want'" }
-          $info = & $exe --build-info
-          if ($LASTEXITCODE -ne 0) { throw "--build-info exited $LASTEXITCODE" }
+          $info = Invoke-Exe "--build-info"
           $info
-          if (($info -join "`n") -notmatch "(?m)^signed build: yes$") { throw "the shipped exe carries no signing key" }
-          & $exe --help | Select-Object -First 5
-          if ($LASTEXITCODE -ne 0) { throw "--help exited $LASTEXITCODE" }
+          if ($info -notmatch "signed build: yes") { throw "the shipped exe carries no signing key" }
+          (Invoke-Exe "--help") -split "`n" | Select-Object -First 5
           Get-Content "$env:GITHUB_WORKSPACE/dist/SHA256SUMS"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
