@@ -146,7 +146,49 @@ fn rrect_cov(px: f32, py: f32, x: f32, y: f32, w: f32, h: f32, r: f32) -> f32 {
 
 /// The outline of a rounded rect, `stroke` px thick, drawn inward from its edge.
 #[allow(clippy::too_many_arguments)]
+/// Blends the ring of a rounded rectangle, `stroke` wide, inside its edge. Only the pixels near the edge are visited:
+/// a frame around a portrait is a thin ring, and visiting its whole box (four rings per frame, up to 24 frames) was most
+/// of the time a full grid of marks took to draw.
 pub(crate) fn stroke_rrect(img: &mut RgbaImage, x: f32, y: f32, w: f32, h: f32, r: f32, stroke: f32, rgb: [u8; 3], alpha: f32) {
+    let (x0, y0) = ((x.floor() as i32 - 1).max(0), (y.floor() as i32 - 1).max(0));
+    let (x1, y1) = (((x + w).ceil() as i32 + 1).min(img.width() as i32), ((y + h).ceil() as i32 + 1).min(img.height() as i32));
+    // the ring is within `stroke + 0.5` inside the edge and 0.5 outside it; along a corner it can be `r` further in
+    let (side, corner) = (stroke.ceil() as i32 + 3, (stroke + r).ceil() as i32 + 3);
+    // limits of the box the clamp above did not cut: rows near the real top and bottom edges
+    let (top, bottom) = (y.floor() as i32 - 1, (y + h).ceil() as i32 + 1);
+    let ring = |img: &mut RgbaImage, py: i32, from: i32, to: i32| {
+        for px in from.max(x0)..to.min(x1) {
+            let d = rrect_dist(px as f32 + 0.5, py as f32 + 0.5, x, y, w, h, r);
+            let cov = (0.5 - d).clamp(0.0, 1.0) * (0.5 + d + stroke).clamp(0.0, 1.0);
+            if cov > 0.0 {
+                over(img.get_pixel_mut(px as u32, py as u32), rgb, alpha * cov);
+            }
+        }
+    };
+    for py in y0..y1 {
+        let (from_top, from_bottom) = (py - top, bottom - 1 - py);
+        let reach = if from_top < side || from_bottom < side {
+            None // along the top or bottom edge: the whole width
+        } else if from_top < corner || from_bottom < corner {
+            Some(corner)
+        } else {
+            Some(side)
+        };
+        match reach {
+            None => ring(img, py, x0, x1),
+            Some(n) => {
+                let left_end = (x0 + n).min(x1);
+                let right_start = (x1 - n).max(left_end);
+                ring(img, py, x0, left_end);
+                ring(img, py, right_start, x1);
+            }
+        }
+    }
+}
+
+/// The same ring visiting every pixel of the box: what the faster one must give exactly.
+#[cfg(test)]
+pub(crate) fn stroke_rrect_all(img: &mut RgbaImage, x: f32, y: f32, w: f32, h: f32, r: f32, stroke: f32, rgb: [u8; 3], alpha: f32) {
     let (x0, y0) = ((x.floor() as i32 - 1).max(0), (y.floor() as i32 - 1).max(0));
     let (x1, y1) = (((x + w).ceil() as i32 + 1).min(img.width() as i32), ((y + h).ceil() as i32 + 1).min(img.height() as i32));
     for py in y0..y1 {
@@ -203,5 +245,25 @@ pub(crate) fn draw_text(img: &mut RgbaImage, font: &FontVec, px: f32, x: f32, y:
             });
         }
         caret += scaled.h_advance(id);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_ring_that_visits_only_the_edge_draws_the_same_pixels_as_the_one_that_visits_every_pixel() {
+        // sizes of the frames the add-on draws (a portrait frame, a slot, a very small one) at several scales and radii
+        let cases = [(30.5, 20.25, 110.0, 98.0, 7.0, 3.5), (12.0, 8.0, 160.0, 130.0, 9.0, 5.0), (4.0, 4.0, 20.0, 14.0, 7.0, 2.0), (0.0, 0.0, 300.0, 40.0, 20.0, 8.0), (10.3, 10.7, 60.0, 60.0, 30.0, 6.0)];
+        for (x, y, w, h, r, stroke) in cases {
+            for (alpha, rgb) in [(1.0, [255, 255, 255]), (0.26, [40, 230, 150])] {
+                let blank = RgbaImage::from_pixel(340, 200, image::Rgba([0, 0, 0, 0]));
+                let (mut fast, mut all) = (blank.clone(), blank);
+                stroke_rrect(&mut fast, x, y, w, h, r, stroke, rgb, alpha);
+                stroke_rrect_all(&mut all, x, y, w, h, r, stroke, rgb, alpha);
+                assert!(fast == all, "ring differs for {:?}", (x, y, w, h, r, stroke));
+            }
+        }
     }
 }
