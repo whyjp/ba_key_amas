@@ -123,21 +123,22 @@ def locate_by_thumbnail(big_gray, thumb_path: pathlib.Path):
 
 
 def portrait_crop(img: Image.Image, face, spot, shift: float = 0.0):
-    """A full-height portrait window. Centre: the detected face, else the matched thumbnail's centre, else the
-    middle. When a face box is known the window is nudged until the whole face sits inside with a margin.
+    """A full-height portrait window. Centre: the matched thumbnail's centre, else the detected face, else the
+    middle. When a face box is known (the anime face detector finds it on every picture) the window is nudged until the
+    whole face sits inside with a margin, whatever centred it.
     `shift` moves the window sideways afterwards, as a fraction of its width (positive = right): the hand-made correction
     for a picture whose face still sits at an edge (`lobby_shift` in face-overrides.json). Returns the picture and where
     the window lies, (left, width, picture width)."""
     w, h = img.size
     cw = min(w, round(h * RATIO))
     ch = round(cw / RATIO)
-    cx = face[0] if face else (spot[0] if spot else w * 0.5)
+    cx = spot[0] if spot else (face[0] if face else w * 0.5)
     left = round(cx - cw / 2)
     if face:
         half = face[2] / 2
         margin = cw * 0.08
-        left = min(left, round(cx - half - margin))      # keep the face's left edge inside
-        left = max(left, round(cx + half + margin - cw))  # and its right edge
+        left = min(left, round(face[0] - half - margin))      # keep the face's left edge inside
+        left = max(left, round(face[0] + half + margin - cw))  # and its right edge
     left = round(left + shift * cw)
     left = max(0, min(left, w - cw))
     top = max(0, min(round(h - ch) // 2, h - ch))
@@ -148,6 +149,10 @@ def main() -> int:
     sys.stdout.reconfigure(encoding="utf-8")
     crop = load_crop_art()
     det = crop.detector()
+    spec = importlib.util.spec_from_file_location("anime_faces", ROOT / "scripts" / "anime_faces.py")
+    anime_mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(anime_mod)
+    anime = anime_mod.load()
     catalog = json.loads((ROOT / "src" / "catalog.json").read_text(encoding="utf-8"))
     ids = sorted({e["id"] for e in catalog.values()})
     english = json.loads(get("https://schaledb.com/data/en/students.min.json"))
@@ -187,6 +192,7 @@ def main() -> int:
         h, w = bgr.shape[:2]
         by_hand = crop.OVERRIDES.get("lobby", {}).get(str(sid))
         face, spot = None, None
+        faces = anime.detect(bgr)
         if by_hand:
             spot = (by_hand[0] * w, by_hand[1] * h)
         else:
@@ -199,6 +205,10 @@ def main() -> int:
                 face = crop.largest_face(det, bgr)
                 if face is None and score >= 0.6 and cx is not None:
                     spot = (cx, cy)
+        # the face that keeps inside the window: the one nearest the chosen centre (a scene can hold two characters), else the biggest
+        if faces:
+            pick = min(faces, key=lambda f: abs(f[0] + f[2] / 2 - spot[0]) + abs(f[1] + f[3] / 2 - spot[1])) if spot else faces[0]
+            face = (pick[0] + pick[2] / 2, pick[1] + pick[3] / 2, max(pick[2], pick[3]))
         how[("face" if face else "thumbnail" if spot else "middle")] += 1
         img = Image.open(src).convert("RGB")
         shift = float(crop.OVERRIDES.get("lobby_shift", {}).get(str(sid), 0.0))

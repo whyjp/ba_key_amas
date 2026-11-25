@@ -70,7 +70,7 @@ function fallbackBackground(name, list) {
 }
 
 /** The cut artwork first, then the uncut one, then the small portrait; a card never ends up without a picture. */
-function artFor(s, tier, art) {
+function artFor(s, tier, art, meta) {
   const id = encodeURIComponent(s.student_id);
   const chain = (tier.art === "lobby" ? [`/card-lobby/${id}.webp`, `/lobby/${id}.webp`] : [`/card/${id}.webp`, `/standing/${id}.webp`]).concat(`/portraits/${id}.webp`);
   const img = el("img", "pc-art-img " + tier.art);
@@ -78,6 +78,9 @@ function artFor(s, tier, art) {
   img.addEventListener("load", () => art.style.setProperty("--art", `url("${img.src}")`));
   let i = 0;
   img.addEventListener("error", () => { if (++i < chain.length) img.src = chain[i]; else img.replaceWith(el("div", "pc-art-none", "일러스트 없음")); });
+  // a full card shows the top part of the lobby cut; where the face lies below that part the picture is moved up to it
+  const focus = tier.full ? meta?.lobbyFocus?.[String(s.student_id)] : undefined;
+  if (focus !== undefined) img.style.objectPosition = `center ${focus}%`;
   img.src = chain[0];
   img.alt = "";
   return img;
@@ -257,7 +260,7 @@ function buildCard(s, meta, ctx, rank, animate) {
   const art = el("div", "pc-art");
   // a high resolution portrait cut fills the whole card; the small thumbnail falls back to picture plus blurred extension
   if (tier.full && meta.hiresLobby?.has(s.student_id)) art.classList.add("hires");
-  if (s.student_id) art.append(artFor(s, tier, art));
+  if (s.student_id) art.append(artFor(s, tier, art, meta));
   else art.append(el("div", "pc-art-none", "일러스트 없음"));
   if (!tier.full) {
     // mid-grade cards: a background picked at upload time under the cut-out portrait

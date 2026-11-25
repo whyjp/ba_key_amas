@@ -3,7 +3,7 @@
     python -I scripts/audit-crops.py [--sheets DIR]
 
 For every picture in public/card-lobby (memorial lobby art, tall) and public/card (standing art, 6:5) the face is found
-with the YuNet detector (the model crop-art.py downloads) and these are reported:
+with the anime face detector (anime_faces.py: a YOLOv8 anime face detector, downloaded once) and these are reported:
 
   cut     the face box leaves the picture or comes within 1.5 percent of its edge
   tight   the face is taller than TIGHT_SHARE of the picture (zoomed in too far for a card)
@@ -38,7 +38,8 @@ def audit(folder, det, mod):
     for path in sorted((ROOT / "public" / folder).glob("*.webp")):
         bgr = cv2.imdecode(np.fromfile(str(path), dtype=np.uint8), cv2.IMREAD_COLOR)
         h, w = bgr.shape[:2]
-        face = mod.largest_face(det, bgr, min_score=0.3)
+        found = det.detect(bgr, conf=0.3)
+        face = (found[0][0] + found[0][2] / 2, found[0][1] + found[0][3] / 2, max(found[0][2], found[0][3])) if found else None
         row = {"id": path.stem, "size": [w, h], "flags": []}
         if face is None:
             row["flags"].append("none")
@@ -79,13 +80,18 @@ def main():
     ap.add_argument("--sheets")
     a = ap.parse_args()
     mod = load_cropper()
-    det = mod.detector()
+    spec = importlib.util.spec_from_file_location("anime_faces", ROOT / "scripts" / "anime_faces.py")
+    faces = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(faces)
+    det = faces.load()
     report = {}
     for folder in ("card-lobby", "card"):
         rows = audit(folder, det, mod)
         report[folder] = rows
         counts = {k: sum(k in r["flags"] for r in rows) for k in ("cut", "tight", "none")}
         print(f"{folder}: {len(rows)} pictures, {counts}")
+        for k in ("cut", "tight", "none"):
+            print(f"  {k}: {' '.join(r['id'] for r in rows if k in r['flags'])}")
         if a.sheets:
             sheets(folder, rows, pathlib.Path(a.sheets))
     (pathlib.Path(a.sheets) / "report.json").write_text(json.dumps(report, ensure_ascii=False), encoding="utf-8") if a.sheets else None
