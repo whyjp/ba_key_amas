@@ -160,7 +160,6 @@ function cell(c, rank, n, ctx, st) {
     if (big && c.h >= 70) label.append(el("span", "", num(ch.total)));
   }
   t.append(label);
-  if (rank < 10 && Math.min(c.w, c.h) >= 38) t.append(el("em", "hm-rank", String(rank + 1)));
   if (split) t.classList.add("split");
 
   const go = direct ? first : act.show;
