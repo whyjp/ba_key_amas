@@ -16,13 +16,35 @@ export function loadMeta() {
 }
 
 /** A student's halo (the ring over the head, which is what identifies the student), or null when there is none. */
-export function halo(meta, id, cls = "halo") {
+const haloUrl = (id) => "/halos/" + encodeURIComponent(id) + ".png";
+
+/** `eager`: the card's intro, which cannot wait for the browser to decide the image is near the viewport. */
+export function halo(meta, id, cls = "halo", eager = false) {
   if (!id || !meta.halos?.has(id)) return null;
   const img = el("img", cls);
-  img.src = "/halos/" + encodeURIComponent(id) + ".png";
+  img.src = haloUrl(id);
   img.alt = "";
-  img.loading = "lazy";
+  img.loading = eager ? "eager" : "lazy";
+  img.decoding = "async";
   return img;
+}
+
+const warm = new Set();
+const held = [];
+/** Fetches halos ahead of the cards that will show them, a few at a time while the page is idle, so a card's intro finds its halo in the cache. */
+export function preloadHalos(meta, ids, batch = 4) {
+  const todo = [...new Set(ids)].filter((id) => id && meta.halos?.has(id) && !warm.has(id));
+  const later = globalThis.requestIdleCallback ?? ((f) => setTimeout(f, 200));
+  const next = () => {
+    for (const id of todo.splice(0, batch)) {
+      warm.add(id);
+      const img = new Image();
+      img.src = haloUrl(id);
+      held.push(img);
+    }
+    if (todo.length) later(next);
+  };
+  later(next);
 }
 
 export const ROLE = { STRIKER: "스트라이커", SPECIAL: "스페셜" };

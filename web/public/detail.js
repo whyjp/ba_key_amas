@@ -505,6 +505,16 @@ function outfitPicker(list, current, onPick) {
 }
 
 const INTRO_MS = 1100;
+/** The longest the intro waits for its halo before it plays anyway. */
+const HALO_WAIT_MS = 900;
+
+/** Resolves when the halo can be seen: decoded, or given up on (a failed image is replaced by the plain halo). */
+function haloReady(box) {
+  const img = box.querySelector("img.pi-halo");
+  if (!img || (img.complete && img.naturalWidth)) return Promise.resolve();
+  img.addEventListener("error", () => img.replaceWith(genericHalo()), { once: true });
+  return Promise.race([img.decode().catch(() => {}), new Promise((done) => setTimeout(done, HALO_WAIT_MS))]);
+}
 
 /** The halo spins up over the dark scrim and throws sparkles, then shrinks away as the card turns into view. */
 function genericHalo() {
@@ -528,7 +538,7 @@ function genericHalo() {
 /** The student's halo, else the halo of another outfit of the same character, else a plain one. */
 function introHalo(students, meta) {
   for (const x of students) {
-    const h = halo(meta, x.student_id, "pi-halo");
+    const h = halo(meta, x.student_id, "pi-halo", true);
     if (h) return h;
   }
   return genericHalo();
@@ -554,7 +564,7 @@ export function openDetail(s, meta, ctx) {
   const tier = tierFor(rank, ctx.totalCharacters);
   const outfits = ctx.siblings ? ctx.siblings(s.name) : [s];
 
-  const scrim = el("div", "scrim");
+  const scrim = el("div", "scrim wait");
   const stage = el("div", "pc-stage");
   const close = el("button", "ghost pc-close", "닫기");
   close.type = "button";
@@ -573,11 +583,16 @@ export function openDetail(s, meta, ctx) {
   const picker = outfits.length > 1 ? outfitPicker(outfits, s, (o) => show(o, false)) : null;
 
   show(s, true);
-  scrim.append(intro(s, meta, tier, [s, ...outfits.filter((o) => o !== s)]), stage);
+  const introBox = intro(s, meta, tier, [s, ...outfits.filter((o) => o !== s)]);
+  scrim.append(introBox, stage);
   if (picker) scrim.append(picker);
   scrim.append(close);
   document.body.append(scrim);
-  setTimeout(() => scrim.querySelector(".pc-intro")?.remove(), INTRO_MS + 700);
+  // the halo spin and the card's entrance start together once the halo can be seen (at once when it is already cached)
+  haloReady(introBox).then(() => {
+    scrim.classList.remove("wait");
+    setTimeout(() => introBox.remove(), INTRO_MS + 700);
+  });
 
   const shut = () => {
     document.removeEventListener("keydown", onKey);

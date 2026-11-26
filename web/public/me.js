@@ -1,6 +1,6 @@
 import { openDetail } from "./detail.js";
 import { heatmapView } from "./heatmap.js";
-import { armorColor, attackColor, bondBadge, halo, icon, loadMeta, name, pinBadge, pinHeader, ROLE, schoolLogo, stars } from "./domain.js";
+import { armorColor, attackColor, bondBadge, halo, icon, loadMeta, name, pinBadge, preloadHalos, pinHeader, ROLE, schoolLogo, stars } from "./domain.js";
 import { card, el, empty, mount, num, outfitStack, portrait } from "./ui.js";
 
 const NOT_SCANNED = "아직 스캔한 기록이 없습니다.";
@@ -392,6 +392,8 @@ async function board(root, d) {
   const ctx = context(d);
   ctx.totalCharacters = meta.character_count;
   ctx.open = (s) => openDetail(s, meta, ctx);
+  // the best characters' halos first: a card's intro should find its halo already fetched
+  preloadHalos(meta, d.analysis.characters.slice(0, 40).flatMap((c) => c.outfits.map((o) => o.id)));
   const side = el("nav", "side");
   side.setAttribute("aria-label", "정보 보기 탭");
   const body = el("div", "tabbody");

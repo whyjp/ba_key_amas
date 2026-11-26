@@ -194,6 +194,7 @@
   60% { opacity: 1; transform: perspective(700px) rotateY(-180deg) scale(1); }
   100% { opacity: 0; transform: perspective(700px) rotateY(0deg) scale(.35); }
 }
+.scrim.wait .pc-intro, .scrim.wait .pc-intro *, .scrim.wait .pcard { animation-play-state: paused; }
 .pi-spark { position: absolute; left: -4px; top: -4px; width: 8px; height: 8px; background: #fff; border-radius: 50%; box-shadow: 0 0 4px 1px rgba(255, 240, 180, .55); opacity: 0; transform: rotate(var(--a)) translateX(0) scale(var(--s)); animation: spark var(--t) ease-out .35s both; }
 @keyframes spark { 0% { opacity: 0; transform: rotate(var(--a)) translateX(0) scale(var(--s)); } 20% { opacity: 1; } 100% { opacity: 0; transform: rotate(var(--a)) translateX(var(--d)) scale(0); } }
 .pi-sar .pi-halo { filter: drop-shadow(0 0 10px rgba(255, 210, 120, .45)); }
