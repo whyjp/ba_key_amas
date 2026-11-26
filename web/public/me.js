@@ -396,10 +396,17 @@ async function board(root, d) {
   side.setAttribute("aria-label", "정보 보기 탭");
   const body = el("div", "tabbody");
   const show = (id) => {
-    for (const b of side.querySelectorAll("button.tab")) b.setAttribute("aria-selected", String(b.dataset.tab === id));
+    for (const b of side.querySelectorAll("button.tab")) {
+      const on = b.dataset.tab === id;
+      b.setAttribute("aria-selected", String(on));
+      b.tabIndex = on ? 0 : -1;
+      if (on) b.scrollIntoView?.({ block: "nearest", inline: "center" });
+    }
     body.replaceChildren(TABS.find((t) => t[0] === id)[2](d, ctx, meta));
   };
   const tabs = el("div", "tabs");
+  tabs.setAttribute("role", "tablist");
+  tabs.setAttribute("aria-label", "정보 보기 탭");
   for (const [id, label] of TABS) {
     const b = el("button", "tab", label);
     b.dataset.tab = id;
@@ -407,6 +414,23 @@ async function board(root, d) {
     b.addEventListener("click", () => show(id));
     tabs.append(b);
   }
+  // arrow keys move between the tabs (one tab stop for the row); on a phone the row scrolls sideways, and the fades say more is there
+  tabs.addEventListener("keydown", (e) => {
+    const all = [...tabs.querySelectorAll("button.tab")];
+    const at = all.indexOf(document.activeElement);
+    const to = { ArrowRight: at + 1, ArrowDown: at + 1, ArrowLeft: at - 1, ArrowUp: at - 1, Home: 0, End: all.length - 1 }[e.key];
+    if (at < 0 || to === undefined) return;
+    e.preventDefault();
+    const next = all[(to + all.length) % all.length];
+    next.focus();
+    show(next.dataset.tab);
+  });
+  const hints = () => {
+    tabs.classList.toggle("more-left", tabs.scrollLeft > 4);
+    tabs.classList.toggle("more-right", tabs.scrollLeft + tabs.clientWidth < tabs.scrollWidth - 4);
+  };
+  tabs.addEventListener("scroll", hints, { passive: true });
+  new ResizeObserver(hints).observe(tabs);
   side.append(tabs, teacherPanel(d));
   const layout = el("div", "layout fit");
   layout.append(side, body);

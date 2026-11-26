@@ -516,3 +516,37 @@ th svg { vertical-align: middle; }
 .hm:active { outline: 3px solid var(--cyan); outline-offset: -3px; }
 .hm-select { min-height: 40px; padding: 4px 10px; border: 2px solid var(--navy); border-radius: 20px; background: var(--white); color: var(--navy); font: inherit; font-weight: 700; max-width: 100%; }
 .hm-select:focus-visible { outline: 3px solid var(--cyan); outline-offset: 1px; }
+
+/* ---- phones: the page scrolls like any page (the one-screen layout with inner scrolls is for a window) ---- */
+@media (max-width: 760px) {
+  html, body { height: auto; }
+  body { display: block; overflow: visible; min-height: 100dvh; }
+  main, main.fit { display: block; overflow: visible; padding: 12px 12px 8px; }
+  .legal { padding: 8px 12px 12px; }
+  /* .layout aligns its items to the start for the two-column window layout; in a column that would size each to its content */
+  .layout.fit { display: flex; flex-direction: column; align-items: stretch; gap: 10px; }
+  .layout.fit > *, .tabbody > *, .main-view > * { min-width: 0; max-width: 100%; }
+  .layout.fit .side { display: contents; }
+  .layout.fit .teacher { order: 1; flex-direction: row; align-items: center; flex-wrap: wrap; gap: 4px 10px; }
+  .layout.fit .teacher a.button { width: auto; margin-left: auto; padding: 6px 12px; min-height: 36px; }
+  .layout.fit .tabs { order: 2; position: sticky; top: 0; z-index: 5; width: 100%; max-width: 100%; min-width: 0; align-self: stretch; flex: none; flex-direction: row; flex-wrap: nowrap; gap: 6px; overflow-x: auto; overflow-y: hidden; padding: 6px 2px; background: #e3effa; scrollbar-width: none; overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; }
+  .layout.fit .tabs::-webkit-scrollbar { display: none; }
+  .layout.fit .tabs .tab { flex: none; min-height: 44px; padding: 6px 14px; white-space: nowrap; }
+  .layout.fit .tabs.more-right { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent); }
+  .layout.fit .tabs.more-left { -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to left, #000 calc(100% - 32px), transparent); }
+  .layout.fit .tabs.more-left.more-right { -webkit-mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent); }
+  .layout.fit .tabbody { order: 3; height: auto; overflow: visible; display: block; }
+  .tabbody > .card { overflow: visible; }
+  .main-view, .main-view.scrollable, .scroll, .col.scroll, .listwrap.scroll { height: auto; overflow: visible; }
+  .listwrap, .listwrap.scroll { overflow-x: auto; }
+  .hm-frame { min-height: 0; }
+  button, a.button { min-height: 40px; }
+}
+@media (max-width: 480px) {
+  .cap { padding: 8px 12px; gap: 8px; }
+  nav.top { margin-left: 0; }
+  .sumbar { gap: 8px 16px; padding: 8px 12px; }
+  .favs .fav { min-width: 0; flex: 1 1 150px; }
+}
+/* the tiles' own z-index stays inside the map, so they cannot rise over the tab row or the dialogs */
+.hm-frame { isolation: isolate; }
