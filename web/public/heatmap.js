@@ -3,8 +3,9 @@
 // only the name; the tail too small to pick is folded into one "others" tile. The same data can be read as a
 // list, which is the easier view on a phone and with a screen reader.
 //
-// Touch has no hover, so on a phone a tap opens a sheet (score, owners, outfits as big buttons) instead of the
-// tooltip; a mouse still opens the card directly. Keyboard: one tab stop for the whole map, arrows move between tiles.
+// A tile of an owned student opens its card at once, on a phone too (the card plays its halo and entrance, and has its own
+// outfit bar for switching). The sheet with the numbers is only for a tile that has no card to open (the community map,
+// the folded "others" tile). Keyboard: one tab stop for the whole map, arrows move between tiles.
 import { openDetail } from "./detail.js";
 import { FOLD_AREA, FOLD_AREA_TOUCH, foldTail, heatLevel, outfitRoom, PIECE_MIN, placeFace, resizeMatters, squarify, wantedHeight } from "./heatmap-math.js";
 import { el, num, portrait } from "./ui.js";
@@ -129,9 +130,8 @@ function cell(c, rank, n, ctx, st) {
   const split = shown.length > 1;
   const act = activation(ch, rank, sheet, opens, meta, t);
   const first = ch.outfits.map(opens).find(Boolean);
-  const phone = coarse();
-  // phone: a sheet with big buttons; mouse: the card directly when the teacher owns the outfit, else the sheet
-  const direct = !phone && first && !split;
+  // the card directly whenever the teacher owns an outfit of the character, else the sheet of numbers
+  const direct = Boolean(first);
   if (showArt) {
     const art = el("div", "hm-art");
     const slotW = (c.w - 2) / Math.max(shown.length, 1);
@@ -144,7 +144,7 @@ function cell(c, rank, n, ctx, st) {
       p.style.backgroundPosition = pos;
       seg.append(p);
       const open = opens(o);
-      if (split && open && !phone) {
+      if (split && open) {
         seg.classList.add("pick");
         seg.title = `${o.name}\n카드 열기`;
         seg.addEventListener("click", (e) => { e.stopPropagation(); open(); });
@@ -215,7 +215,7 @@ function row(ch, rank, n, max, opens, sheet) {
     b.type = "button";
     b.setAttribute("aria-label", describe(ch, rank));
     b.append(...body);
-    b.addEventListener("click", () => (first && !coarse() ? first() : activation(ch, rank, sheet, opens, null, b).show()));
+    b.addEventListener("click", () => (first ? first() : activation(ch, rank, sheet, opens, null, b).show()));
     li.append(b);
   } else li.append(...body);
   return li;
@@ -357,7 +357,7 @@ function mountBoard(host, chars, byName, meta, ctx, fit, filters) {
 /** One teacher's characters. `top` (summary and favourites) sits above the map. */
 export function heatmapView(d, ctx, meta, top) {
   const root = el("div", "main-view");
-  const note = el("p", "hint", "넓을수록 점수가 높은 학생입니다. 의상이 다른 같은 학생은 한 칸에 모았고, 너무 작은 칸은 \"그 외\"로 묶었습니다. 칸을 누르면 카드가 열립니다. 휴대폰에서는 먼저 점수와 의상을 보여 줍니다. 목록으로 바꾸면 순위대로 읽을 수 있습니다.");
+  const note = el("p", "hint", "넓을수록 점수가 높은 학생입니다. 의상이 다른 같은 학생은 한 칸에 모았고, 너무 작은 칸은 \"그 외\"로 묶었습니다. 칸을 누르면 바로 카드가 열리고, 카드 아래에서 같은 학생의 다른 의상으로 바꿀 수 있습니다. 목록으로 바꾸면 순위대로 읽을 수 있습니다.");
   if (top) root.append(top);
   root.append(note);
   root.classList.add("scrollable");
