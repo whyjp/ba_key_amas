@@ -25,6 +25,15 @@ export function indexByName(catalog: Catalog): Map<string, Entry[]> {
   return out;
 }
 
+/** School and attack type of a character, read from the first of its outfits the catalog knows. Both are null for a student it does not know. */
+export function traitsOf(catalog: Catalog, byName: Map<string, Entry[]>, outfits: { name: string; id: number | null }[]): { school: string | null; attack: string | null } {
+  for (const o of outfits) {
+    const e = entryFor(catalog, byName, o.name, o.id);
+    if (e) return { school: e.school, attack: e.attack };
+  }
+  return { school: null, attack: null };
+}
+
 /** The entry for a scanned student: the mode its id names, when the id belongs to a student of that name, else the first of the name. */
 export function entryFor(catalog: Catalog, byName: Map<string, Entry[]>, name: string, id: number | null): Entry | null {
   const byId = id === null ? undefined : catalog[String(id)];

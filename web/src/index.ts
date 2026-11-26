@@ -1,6 +1,6 @@
 import backgrounds from "./backgrounds.json";
 import catalog from "./catalog.json";
-import { entryFor, indexByName, type Catalog } from "./catalog.ts";
+import { entryFor, indexByName, traitsOf, type Catalog } from "./catalog.ts";
 import { accountHash, foldNickname, normalizeNickname, parseAccountId, parsePublicId, publicId } from "./keys.ts";
 import { BadJson, json, parseJsonBytes, readBody, sameOriginJson, TooLarge, verifyAddonSignature, type SigningEnv } from "./security.ts";
 import { aggregate, analyze, SCORE_VERSION, summarize, type Analysis, type CharSummary, type OwnedStudent } from "./score.ts";
@@ -157,7 +157,7 @@ async function profile(env: Env, user: UserRow): Promise<Response> {
       score: analysis.score,
       stats: analysis.stats,
       top: analysis.top.map((c) => ({ base: c.base, total: c.total, outfits: c.outfits })),
-      characters: analysis.characters.map((c) => ({ base: c.base, total: c.total, outfits: c.outfits })),
+      characters: analysis.characters.map((c) => ({ base: c.base, total: c.total, outfits: c.outfits, ...traitsOf(CATALOG, BY_NAME, c.outfits) })),
     },
   });
 }
@@ -196,7 +196,7 @@ async function communityStudents(env: Env): Promise<Response> {
     }
     lists.push(JSON.parse(chars) as CharSummary[]);
   }
-  return json(200, { teachers: users.results.length, characters: aggregate(lists) }, { "cache-control": "public, max-age=60" });
+  return json(200, { teachers: users.results.length, characters: aggregate(lists).map((c) => ({ ...c, ...traitsOf(CATALOG, BY_NAME, c.outfits) })) }, { "cache-control": "public, max-age=60" });
 }
 
 /** Users the leaderboard last scored with an older rule. */

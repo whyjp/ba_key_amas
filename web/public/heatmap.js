@@ -231,7 +231,7 @@ function mountBoard(host, chars, byName, meta, ctx, fit, filters) {
     const s = byName.get(o.name);
     return s ? () => openDetail(s, meta, ctx) : undefined;
   };
-  const state = { view: readView(), filter: "all" };
+  const state = { view: readView(), filter: "all", school: "", attack: "" };
   const bar = el("div", "hm-bar");
   const views = el("div", "seg");
   const viewBtns = [["map", "지도"], ["list", "목록"]].map(([id, label]) => {
@@ -255,6 +255,17 @@ function mountBoard(host, chars, byName, meta, ctx, fit, filters) {
     }
     bar.append(chips);
   }
+  // school and attack type: a select each (native, so a phone shows its own picker); shown only when the server sent the traits
+  const pickers = [["school", "학교", "모든 학교", meta.schools], ["attack", "공격 유형", "모든 공격 유형", meta.attack]];
+  for (const [key, label, all, names] of pickers) {
+    const keys = [...new Set(chars.map((c) => c[key]).filter(Boolean))].sort((a, b) => (names?.[a] ?? a).localeCompare(names?.[b] ?? b, "ko"));
+    if (!keys.length) continue;
+    const sel = el("select", "hm-select");
+    sel.setAttribute("aria-label", label);
+    sel.append(new Option(all, ""), ...keys.map((k) => new Option(names?.[k] ?? k, k)));
+    sel.addEventListener("change", () => { state[key] = sel.value; announce(); state.redraw(); });
+    bar.append(sel);
+  }
   const legend = el("div", "hm-legend");
   legend.setAttribute("aria-hidden", "true");
   legend.append(el("span", "", "낮음"));
@@ -266,7 +277,9 @@ function mountBoard(host, chars, byName, meta, ctx, fit, filters) {
   host.append(bar, legend, live, body);
 
   let stop = null;
-  const predicate = () => FILTERS.find((f) => f[0] === state.filter)?.[2] ?? (() => true);
+  const flag = () => FILTERS.find((f) => f[0] === state.filter)?.[2] ?? (() => true);
+  const active = () => state.filter !== "all" || state.school !== "" || state.attack !== "";
+  const predicate = () => { const f = flag(); return (c) => f(c) && (!state.school || c.school === state.school) && (!state.attack || c.attack === state.attack); };
   const mapView = () => {
     const frame = el("div", fit ? "hm-frame" : "hm-frame community-frame");
     frame.setAttribute("role", "group");
@@ -291,7 +304,7 @@ function mountBoard(host, chars, byName, meta, ctx, fit, filters) {
       const tiles = squarify(laid, 0, 0, width, height);
       const keep = document.activeElement?.closest?.(".hm")?.dataset.rank;
       const pass = predicate();
-      const cx = { meta, sheet, opens, dim: state.filter === "all" ? null : pass };
+      const cx = { meta, sheet, opens, dim: active() ? pass : null };
       const nodes = tiles.map((c, i) => cell(c, i, chars.length, cx, state));
       frame.replaceChildren(...nodes);
       (nodes.find((n) => n.dataset.rank === keep) ?? nodes[0])?.setAttribute("tabindex", "0");
@@ -316,16 +329,14 @@ function mountBoard(host, chars, byName, meta, ctx, fit, filters) {
     const ol = el("ol", "hm-list");
     chars.forEach((ch, i) => {
       const li = row(ch, i, chars.length, max, opens, sheet);
-      if (state.filter !== "all" && !pass(ch)) li.classList.add("dim");
+      if (active() && !pass(ch)) li.classList.add("dim");
       ol.append(li);
     });
     body.replaceChildren(ol);
     state.redraw = () => listView();
   };
   const announce = () => {
-    if (!filters) return;
-    const n = chars.filter(predicate()).length;
-    live.textContent = state.filter === "all" ? "" : `${n}명이 조건에 맞습니다.`;
+    live.textContent = active() ? `${chars.filter(predicate()).length}명이 조건에 맞습니다.` : "";
   };
   const show = () => {
     stop?.();

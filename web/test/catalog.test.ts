@@ -29,3 +29,11 @@ test("a student with two modes is one student: one row, the scanned mode picks t
   ] } });
   assert.deepEqual(up.students.map((s) => [s.name, s.student_id]), [["호시노(무장)", 10098]]);
 });
+
+test("a character's school and attack come from the first outfit the catalog knows", async () => {
+  const { traitsOf } = await import("../src/catalog.ts");
+  const c: Catalog = { "1": { ...e(1, "호시노", "Tanker"), school: "Abydos", attack: "Mystic" } };
+  const by = indexByName(c);
+  assert.deepEqual(traitsOf(c, by, [{ name: "없는의상", id: null }, { name: "호시노", id: 1 }]), { school: "Abydos", attack: "Mystic" });
+  assert.deepEqual(traitsOf(c, by, [{ name: "없는학생", id: null }]), { school: null, attack: null });
+});

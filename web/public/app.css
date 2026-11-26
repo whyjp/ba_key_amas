@@ -514,3 +514,5 @@ th svg { vertical-align: middle; }
 @media (min-width: 700px) { .hm-sheet { left: auto; right: 16px; bottom: 16px; width: 380px; border-bottom: 2px solid var(--navy); border-radius: 16px; } }
 .hm, .hm-row-btn, .hm-sheet button { -webkit-tap-highlight-color: transparent; }
 .hm:active { outline: 3px solid var(--cyan); outline-offset: -3px; }
+.hm-select { min-height: 40px; padding: 4px 10px; border: 2px solid var(--navy); border-radius: 20px; background: var(--white); color: var(--navy); font: inherit; font-weight: 700; max-width: 100%; }
+.hm-select:focus-visible { outline: 3px solid var(--cyan); outline-offset: 1px; }
