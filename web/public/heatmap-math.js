@@ -79,10 +79,8 @@ export function wantedHeight(n, width) {
 }
 
 
-/** A cell below this area (px squared) is too small to pick with a finger or to name, so the tail is folded into one cell. */
-export const FOLD_AREA = 1500;
-/** A finger needs about 48 px a side, so on a touch screen the tail folds from a larger cell. */
-export const FOLD_AREA_TOUCH = 2400;
+/** A cell below this area (px squared, about 45 px a side) is too small to pick or to name, so the tail is folded into one cell. One value for every device. */
+export const FOLD_AREA = 2000;
 
 /**
  * Items sorted by value descending, laid out in `area`: those whose cell would be smaller than `minArea` are the tail.

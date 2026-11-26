@@ -7,10 +7,9 @@
 // outfit bar for switching). The sheet with the numbers is only for a tile that has no card to open (the community map,
 // the folded "others" tile). Keyboard: one tab stop for the whole map, arrows move between tiles.
 import { openDetail } from "./detail.js";
-import { FOLD_AREA, FOLD_AREA_TOUCH, foldTail, heatLevel, outfitRoom, PIECE_MIN, placeFace, resizeMatters, squarify, wantedHeight } from "./heatmap-math.js";
+import { foldTail, heatLevel, outfitRoom, PIECE_MIN, placeFace, resizeMatters, squarify, wantedHeight } from "./heatmap-math.js";
 import { el, num, portrait } from "./ui.js";
 
-const coarse = () => matchMedia("(hover: none), (pointer: coarse)").matches;
 const reducedMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 const VIEW_KEY = "hm-view";
@@ -299,7 +298,7 @@ function mountBoard(host, chars, byName, meta, ctx, fit, filters) {
       if (height < 10) return;
       prev = { w: width, h: height };
       const items = chars.map((character) => ({ value: character.total * outfitRoom(character), character }));
-      const { kept, tail } = foldTail(items, width * height, coarse() ? FOLD_AREA_TOUCH : FOLD_AREA);
+      const { kept, tail } = foldTail(items, width * height);
       const laid = tail.length ? [...kept, { value: tail.reduce((s, i) => s + i.value, 0), folded: tail.map((i) => i.character), firstRank: kept.length }] : kept;
       const tiles = squarify(laid, 0, 0, width, height);
       const keep = document.activeElement?.closest?.(".hm")?.dataset.rank;
