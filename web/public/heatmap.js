@@ -1,86 +1,137 @@
 // Heatmap of the teacher's characters: the area of a tile is the character's score, so a standout student
 // takes more room. Outfits of one character share a tile. Big tiles show portraits and the name, small ones
-// only the name, the smallest nothing but a tooltip. Layout is a squarified treemap, drawn with absolutely
-// positioned tiles and redone when the frame is resized.
+// only the name; the tail too small to pick is folded into one "others" tile. The same data can be read as a
+// list, which is the easier view on a phone and with a screen reader.
+//
+// Touch has no hover, so on a phone a tap opens a sheet (score, owners, outfits as big buttons) instead of the
+// tooltip; a mouse still opens the card directly. Keyboard: one tab stop for the whole map, arrows move between tiles.
 import { openDetail } from "./detail.js";
-import { el, num } from "./ui.js";
+import { FOLD_AREA, FOLD_AREA_TOUCH, foldTail, heatLevel, outfitRoom, PIECE_MIN, placeFace, resizeMatters, squarify, wantedHeight } from "./heatmap-math.js";
+import { el, num, portrait } from "./ui.js";
 
-/** Squarified treemap (Bruls, Huizing, van Wijk): items sorted by value descending, laid in rows along the shorter side. */
-export function squarify(items, x, y, w, h) {
-  const total = items.reduce((n, i) => n + i.value, 0);
-  const scale = total > 0 ? (w * h) / total : 0;
-  const rest = items.map((i) => ({ item: i, area: i.value * scale }));
-  const out = [];
-  const worst = (row, side) => {
-    const sum = row.reduce((n, r) => n + r.area, 0);
-    const max = Math.max(...row.map((r) => r.area));
-    const min = Math.min(...row.map((r) => r.area));
-    return Math.max((side * side * max) / (sum * sum), (sum * sum) / (side * side * min));
+const coarse = () => matchMedia("(hover: none), (pointer: coarse)").matches;
+const reducedMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+const VIEW_KEY = "hm-view";
+const readView = () => { try { return localStorage.getItem(VIEW_KEY) === "list" ? "list" : "map"; } catch { return "map"; } };
+const saveView = (v) => { try { localStorage.setItem(VIEW_KEY, v); } catch { /* private window: the choice just is not kept */ } };
+
+const FILTERS = [
+  ["all", "전체", () => true],
+  ["pinned", "고정", (c) => c.pinned],
+  ["memorial", "기억 로비", (c) => c.memorial],
+  ["bond30", "인연 30+", (c) => c.bond >= 30],
+];
+
+const describe = (ch, rank) => `${rank + 1}위 ${ch.base}, ${num(ch.total)}점${ch.owners ? `, ${ch.owners}명 보유` : ""}`;
+
+/** The tap sheet: one per board, at the bottom of the window. Escape or its button closes it and focus goes back. */
+function makeSheet() {
+  let node = null;
+  let back = null;
+  const close = () => {
+    node?.remove();
+    node = null;
+    back?.focus?.({ preventScroll: true });
+    back = null;
   };
-  while (rest.length) {
-    const side = Math.min(w, h);
-    const row = [rest.shift()];
-    while (rest.length && worst([...row, rest[0]], side) <= worst(row, side)) row.push(rest.shift());
-    const sum = row.reduce((n, r) => n + r.area, 0);
-    if (w >= h) {
-      const rw = sum / h;
-      let cy = y;
-      for (const r of row) { const rh = r.area / rw; out.push({ item: r.item, x, y: cy, w: rw, h: rh }); cy += rh; }
-      x += rw;
-      w -= rw;
-    } else {
-      const rh = sum / w;
-      let cx = x;
-      for (const r of row) { const rw = r.area / rh; out.push({ item: r.item, x: cx, y, w: rw, h: rh }); cx += rw; }
-      y += rh;
-      h -= rh;
-    }
-  }
-  return out;
+  addEventListener("hashchange", () => { back = null; close(); });
+  return {
+    close,
+    /** `entries`: [{ label, note?, open? }]; a row with `open` is a button. */
+    show(title, facts, entries, from) {
+      node?.remove();
+      back = from ?? null;
+      node = el("div", "hm-sheet");
+      node.setAttribute("role", "dialog");
+      node.setAttribute("aria-label", title);
+      const head = el("div", "hm-sheet-head");
+      const h = el("h3", "", title);
+      h.tabIndex = -1;
+      const x = el("button", "ghost hm-sheet-close", "닫기");
+      x.type = "button";
+      x.addEventListener("click", close);
+      head.append(h, x);
+      node.append(head);
+      if (facts) node.append(el("p", "hm-sheet-facts", facts));
+      const list = el("ul", "hm-sheet-list");
+      for (const e of entries) {
+        const li = el("li");
+        if (e.open) {
+          const b = el("button", "hm-sheet-row", e.label);
+          b.type = "button";
+          b.addEventListener("click", () => { close(); e.open(); });
+          li.append(b);
+        } else li.append(el("span", "hm-sheet-row plain", e.label));
+        if (e.note) li.append(el("small", "", e.note));
+        list.append(li);
+      }
+      node.append(list);
+      node.addEventListener("keydown", (ev) => { if (ev.key === "Escape") { ev.stopPropagation(); close(); } });
+      document.body.append(node);
+      h.focus({ preventScroll: true });
+    },
+  };
 }
 
-// The portraits are 200 x 226 pixels. The face is at (fx, fy) as fractions of them, from meta.faces.
-const PORTRAIT_W = 200;
-const PORTRAIT_H = 226;
-const FACE_DEFAULT = [0.51, 0.48];
-/** Where the face sits in a cell: horizontally in the middle, vertically in the upper third (a face in the exact
- *  middle looks low once the body is cropped off). */
-const FACE_AT = [0.5, 0.36];
-
-/**
- * Size and offset of the portrait inside a w x h cell so the face lands on FACE_AT as far as the picture allows.
- * The picture is scaled to cover the cell and then enlarged a little: a tall cell crops the sides, so only
- * enlarging gives it room to move the face up; a small cell gains by showing the face larger.
- */
-export function placeFace(w, h, face) {
-  const [fx, fy] = face ?? FACE_DEFAULT;
-  const cover = Math.max(w / PORTRAIT_W, h / PORTRAIT_H);
-  const tall = h / w > 1.1;
-  const zoom = tall ? 1.24 : Math.min(w, h) < 70 ? 1.2 : 1.08;
-  const s = cover * zoom;
-  const iw = PORTRAIT_W * s;
-  const ih = PORTRAIT_H * s;
-  const left = Math.min(0, Math.max(w - iw, w * FACE_AT[0] - fx * iw));
-  const top = Math.min(0, Math.max(h - ih, h * FACE_AT[1] - fy * ih));
-  return { size: `${iw.toFixed(1)}px ${ih.toFixed(1)}px`, pos: `${left.toFixed(1)}px ${top.toFixed(1)}px` };
+/** What a tap or Enter on a tile does. `opens(o)` returns a function that opens the card of an outfit, when the teacher owns it. */
+function activation(ch, rank, sheet, opens, meta, from) {
+  const facts = `${num(ch.total)}점${ch.owners ? ` · ${ch.owners}명 보유` : ""} · ${rank + 1}위`;
+  const entries = ch.outfits.map((o) => ({ label: o.name, note: opens(o) ? "카드 열기" : undefined, open: opens(o) }));
+  return { facts, entries, show: () => sheet.show(ch.base, facts, entries, from) };
 }
 
-function cell(c, rank, byName, meta, ctx) {
-  const ch = c.item.character;
-  const a = c.w * c.h;
+function foldedCharacters(list, sheet, opens, from, firstRank) {
+  const entries = list.map((ch, i) => {
+    const first = ch.outfits.find((o) => opens(o));
+    return { label: `${firstRank + i + 1}위 ${ch.base}`, note: `${num(ch.total)}점${ch.owners ? ` · ${ch.owners}명` : ""}`, open: first ? opens(first) : undefined };
+  });
+  sheet.show(`그 외 ${list.length}명`, "칸이 너무 작아 한 칸으로 모았습니다.", entries, from);
+}
+
+function cell(c, rank, n, ctx, st) {
+  const { meta, sheet, opens, dim } = ctx;
   const t = el("div", "hm");
   t.style.left = c.x + "px";
   t.style.top = c.y + "px";
   t.style.width = Math.max(c.w - 2, 0) + "px";
   t.style.height = Math.max(c.h - 2, 0) + "px";
+  t.style.setProperty("--i", String(Math.min(rank, 40)));
+  t.dataset.rank = String(rank);
+  t.setAttribute("role", "button");
+  t.tabIndex = -1;
+  const a = c.w * c.h;
+
+  if (c.item.folded) {
+    const list = c.item.folded;
+    t.classList.add("hm-fold");
+    t.dataset.heat = "0";
+    t.setAttribute("aria-label", `그 외 ${list.length}명 묶음`);
+    t.title = `그 외 ${list.length}명`;
+    t.append(el("div", "hm-label"));
+    t.firstChild.append(el("b", "", `+${list.length}`), el("span", "", "그 외"));
+    const go = () => foldedCharacters(list, sheet, opens, t, c.item.firstRank);
+    t.addEventListener("click", go);
+    t.activate = go;
+    return t;
+  }
+
+  const ch = c.item.character;
+  t.dataset.heat = String(heatLevel(rank, n));
+  t.setAttribute("aria-label", describe(ch, rank));
   t.title = `${ch.outfits.map((o) => o.name).join(" · ")}\n${num(ch.total)}점${ch.owners ? ` · ${ch.owners}명 보유` : ""}`;
   if (rank < 3) t.classList.add("top" + (rank + 1));
+  if (dim && !dim(ch)) t.classList.add("dim");
+
   // a portrait wherever there is room for a face; only a sliver gets none
   const showArt = Math.min(c.w, c.h) >= 16 && a >= 400;
-  const owned = (o) => byName.get(o.name);
   const shown = showArt ? ch.outfits.filter((o) => o.id).slice(0, Math.max(1, Math.min(3, Math.floor((c.w - 2) / PIECE_MIN)))) : [];
-  // a character whose outfits share the cell is split into left / middle / right pieces; each piece is its own button
   const split = shown.length > 1;
+  const act = activation(ch, rank, sheet, opens, meta, t);
+  const first = ch.outfits.map(opens).find(Boolean);
+  const phone = coarse();
+  // phone: a sheet with big buttons; mouse: the card directly when the teacher owns the outfit, else the sheet
+  const direct = !phone && first && !split;
   if (showArt) {
     const art = el("div", "hm-art");
     const slotW = (c.w - 2) / Math.max(shown.length, 1);
@@ -92,16 +143,11 @@ function cell(c, rank, byName, meta, ctx) {
       p.style.backgroundSize = size;
       p.style.backgroundPosition = pos;
       seg.append(p);
-      if (split && owned(o)) {
+      const open = opens(o);
+      if (split && open && !phone) {
         seg.classList.add("pick");
-        seg.tabIndex = 0;
-        seg.setAttribute("role", "button");
-        seg.setAttribute("aria-label", o.name);
-        seg.title = `${o.name}
-카드 열기`;
-        const open = (e) => { e.stopPropagation(); openDetail(owned(o), meta, ctx); };
-        seg.addEventListener("click", open);
-        seg.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(e); } });
+        seg.title = `${o.name}\n카드 열기`;
+        seg.addEventListener("click", (e) => { e.stopPropagation(); open(); });
       }
       art.append(seg);
     }
@@ -115,79 +161,205 @@ function cell(c, rank, byName, meta, ctx) {
     if (big && c.h >= 70) label.append(el("span", "", num(ch.total)));
   }
   t.append(label);
+  if (rank < 10 && Math.min(c.w, c.h) >= 38) t.append(el("em", "hm-rank", String(rank + 1)));
   if (split) t.classList.add("split");
-  const first = byName.get(ch.outfits[0]?.name);
-  if (first && !split) {
-    t.tabIndex = 0;
-    t.setAttribute("role", "button");
-    const open = () => openDetail(first, meta, ctx);
-    t.addEventListener("click", open);
-    t.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } });
-  } else if (first) {
-    // a click on the name strip or a gap opens the first outfit
-    t.addEventListener("click", () => openDetail(first, meta, ctx));
-  }
+
+  const go = direct ? first : act.show;
+  t.addEventListener("click", go);
+  t.activate = go;
   return t;
 }
 
-/** The narrowest a piece of a split cell may be, so a face still fits in it. */
-const PIECE_MIN = 50;
-/** Layout bonus per extra outfit: a character with outfits takes more room than its score alone gives, so its pieces stay
- *  big enough to pick. It changes only the size of the cell, never the score shown. */
-const OUTFIT_ROOM = 0.45;
-const outfitRoom = (ch) => 1 + OUTFIT_ROOM * (Math.min(ch.outfits.filter((o) => o.id).length, 3) - 1);
+/** Arrow keys move between tiles (one tab stop for the whole map instead of one per tile). */
+function roving(frame) {
+  const tiles = () => [...frame.querySelectorAll(".hm")];
+  frame.addEventListener("focusin", (e) => {
+    const t = e.target.closest?.(".hm");
+    if (!t) return;
+    for (const o of tiles()) o.tabIndex = o === t ? 0 : -1;
+  });
+  frame.addEventListener("keydown", (e) => {
+    const t = e.target.closest?.(".hm");
+    if (!t || e.target !== t) return;
+    const all = tiles();
+    const i = all.indexOf(t);
+    const go = { ArrowRight: i + 1, ArrowDown: i + 1, ArrowLeft: i - 1, ArrowUp: i - 1, Home: 0, End: all.length - 1 }[e.key];
+    if (go !== undefined) {
+      e.preventDefault();
+      all[Math.max(0, Math.min(all.length - 1, go))]?.focus();
+    } else if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      t.activate?.();
+    }
+  });
+}
 
-/** Area (px squared) the map aims to give each character. Below about 60 x 60 a face is hard to read, so a narrow window
- *  gets a taller map (and scrolls) instead of a crowd of slivers. */
-const CELL_AREA = 3800;
-const MAX_HEIGHT = 1600;
-
-/** The height a map of `n` tiles needs at this width. */
-export function wantedHeight(n, width) {
-  return Math.min(MAX_HEIGHT, Math.ceil((n * CELL_AREA) / Math.max(width, 1)));
+/** One row of the list view. */
+function row(ch, rank, n, max, opens, sheet) {
+  const first = ch.outfits.map(opens).find(Boolean);
+  const body = [
+    el("span", "hm-row-rank", String(rank + 1)),
+    portrait(ch.outfits.find((o) => o.id)?.id, "pt sm"),
+  ];
+  const name = el("span", "hm-row-name");
+  name.append(el("b", "", ch.base), el("small", "", ch.outfits.length > 1 ? `의상 ${ch.outfits.length}` : ""));
+  const score = el("span", "hm-row-score");
+  const bar = el("i");
+  bar.style.width = Math.max(2, (ch.total / max) * 100) + "%";
+  score.append(el("b", "", `${num(ch.total)}점`), el("small", "", ch.owners ? `${ch.owners}명 보유` : ""), bar);
+  body.push(name, score);
+  const li = el("li", "hm-row");
+  li.dataset.heat = String(heatLevel(rank, n));
+  if (first || ch.owners !== undefined) {
+    const b = el("button", "hm-row-btn");
+    b.type = "button";
+    b.setAttribute("aria-label", describe(ch, rank));
+    b.append(...body);
+    b.addEventListener("click", () => (first && !coarse() ? first() : activation(ch, rank, sheet, opens, null, b).show()));
+    li.append(b);
+  } else li.append(...body);
+  return li;
 }
 
 /**
- * Draws the treemap into `frame` and redraws when the frame or the window changes size. `fit` frames fill the room
- * their page gives them (the profile), and only get a minimum height; the others (the leaderboard page) are sized
- * here: the window's height, or what the tiles need, whichever is larger.
+ * Draws the board into `host`: a toolbar (map or list, filters), then either the treemap or the list. `fit` frames fill
+ * the room their page gives them (the profile), the others are sized to the window or what the tiles need.
  */
-function mountTreemap(frame, chars, byName, meta, ctx, fit) {
-  const draw = () => {
-    if (!frame.isConnected) return;
-    const width = frame.getBoundingClientRect().width;
-    if (width < 10) return;
-    const need = wantedHeight(chars.length, width);
-    if (fit) frame.style.minHeight = need + "px";
-    else frame.style.height = Math.max(380, innerHeight - 330, need) + "px";
-    const { height } = frame.getBoundingClientRect();
-    if (height < 10) return;
-    const tiles = squarify(chars.map((character) => ({ value: character.total * outfitRoom(character), character })), 0, 0, width, height);
-    frame.replaceChildren(...tiles.map((c, i) => cell(c, i, byName, meta, ctx)));
+function mountBoard(host, chars, byName, meta, ctx, fit, filters) {
+  const sheet = makeSheet();
+  const opens = (o) => {
+    const s = byName.get(o.name);
+    return s ? () => openDetail(s, meta, ctx) : undefined;
   };
-  new ResizeObserver(draw).observe(frame);
-  addEventListener("resize", draw);
+  const state = { view: readView(), filter: "all" };
+  const bar = el("div", "hm-bar");
+  const views = el("div", "seg");
+  const viewBtns = [["map", "지도"], ["list", "목록"]].map(([id, label]) => {
+    const b = el("button", "", label);
+    b.type = "button";
+    b.dataset.view = id;
+    b.setAttribute("aria-pressed", "false");
+    views.append(b);
+    return b;
+  });
+  bar.append(views);
+  const chips = el("div", "hm-chips");
+  const chipBtns = [];
+  if (filters) {
+    for (const [id, label] of FILTERS) {
+      const b = el("button", "chip-btn", label);
+      b.type = "button";
+      b.dataset.filter = id;
+      chipBtns.push(b);
+      chips.append(b);
+    }
+    bar.append(chips);
+  }
+  const legend = el("div", "hm-legend");
+  legend.setAttribute("aria-hidden", "true");
+  legend.append(el("span", "", "낮음"));
+  for (let i = 0; i < 5; i++) { const k = el("i"); k.dataset.heat = String(i); legend.append(k); }
+  legend.append(el("span", "", "높음"));
+  const live = el("p", "sr-only");
+  live.setAttribute("role", "status");
+  const body = el("div", "hm-body");
+  host.append(bar, legend, live, body);
+
+  let stop = null;
+  const predicate = () => FILTERS.find((f) => f[0] === state.filter)?.[2] ?? (() => true);
+  const mapView = () => {
+    const frame = el("div", fit ? "hm-frame" : "hm-frame community-frame");
+    frame.setAttribute("role", "group");
+    frame.setAttribute("aria-label", "학생 히트맵. 방향키로 칸을 옮기고 Enter로 엽니다.");
+    body.replaceChildren(frame);
+    roving(frame);
+    let prev = null;
+    let first = true;
+    const draw = () => {
+      if (!frame.isConnected) return;
+      const width = frame.getBoundingClientRect().width;
+      if (width < 10) return;
+      const need = wantedHeight(chars.length, width);
+      if (fit) frame.style.minHeight = need + "px";
+      else frame.style.height = Math.max(380, innerHeight - 330, need) + "px";
+      const { height } = frame.getBoundingClientRect();
+      if (height < 10) return;
+      prev = { w: width, h: height };
+      const items = chars.map((character) => ({ value: character.total * outfitRoom(character), character }));
+      const { kept, tail } = foldTail(items, width * height, coarse() ? FOLD_AREA_TOUCH : FOLD_AREA);
+      const laid = tail.length ? [...kept, { value: tail.reduce((s, i) => s + i.value, 0), folded: tail.map((i) => i.character), firstRank: kept.length }] : kept;
+      const tiles = squarify(laid, 0, 0, width, height);
+      const keep = document.activeElement?.closest?.(".hm")?.dataset.rank;
+      const pass = predicate();
+      const cx = { meta, sheet, opens, dim: state.filter === "all" ? null : pass };
+      const nodes = tiles.map((c, i) => cell(c, i, chars.length, cx, state));
+      frame.replaceChildren(...nodes);
+      (nodes.find((n) => n.dataset.rank === keep) ?? nodes[0])?.setAttribute("tabindex", "0");
+      if (keep !== undefined) nodes.find((n) => n.dataset.rank === keep)?.focus({ preventScroll: true });
+      if (first && !reducedMotion()) {
+        frame.classList.add("hm-enter");
+        setTimeout(() => frame.classList.remove("hm-enter"), 1600);
+      }
+      first = false;
+    };
+    const ro = new ResizeObserver(() => {
+      const r = frame.getBoundingClientRect();
+      if (resizeMatters(prev, r.width, r.height)) requestAnimationFrame(draw);
+    });
+    ro.observe(frame);
+    stop = () => ro.disconnect();
+    state.redraw = () => { prev = null; draw(); };
+  };
+  const listView = () => {
+    const max = Math.max(...chars.map((c) => c.total), 1);
+    const pass = predicate();
+    const ol = el("ol", "hm-list");
+    chars.forEach((ch, i) => {
+      const li = row(ch, i, chars.length, max, opens, sheet);
+      if (state.filter !== "all" && !pass(ch)) li.classList.add("dim");
+      ol.append(li);
+    });
+    body.replaceChildren(ol);
+    state.redraw = () => listView();
+  };
+  const announce = () => {
+    if (!filters) return;
+    const n = chars.filter(predicate()).length;
+    live.textContent = state.filter === "all" ? "" : `${n}명이 조건에 맞습니다.`;
+  };
+  const show = () => {
+    stop?.();
+    stop = null;
+    sheet.close();
+    for (const b of viewBtns) b.setAttribute("aria-pressed", String(b.dataset.view === state.view));
+    for (const b of chipBtns) b.setAttribute("aria-pressed", String(b.dataset.filter === state.filter));
+    legend.hidden = state.view === "list";
+    if (state.view === "list") listView();
+    else mapView();
+    announce();
+  };
+  for (const b of viewBtns) b.addEventListener("click", () => { state.view = b.dataset.view; saveView(state.view); show(); });
+  for (const b of chipBtns) b.addEventListener("click", () => { state.filter = state.filter === b.dataset.filter ? "all" : b.dataset.filter; for (const k of chipBtns) k.setAttribute("aria-pressed", String(k.dataset.filter === state.filter)); announce(); state.redraw(); });
+  show();
 }
 
 /** One teacher's characters. `top` (summary and favourites) sits above the map. */
 export function heatmapView(d, ctx, meta, top) {
   const root = el("div", "main-view");
-  const note = el("p", "hint", "넓을수록 점수가 높은 학생입니다. 의상이 다른 같은 학생은 한 칸에 모았습니다. 한 칸에 의상이 여럿이면 칸이 조각으로 나뉘고 의상이 많을수록 칸이 조금 더 넓어지며, 마음에 드는 조각을 눌러 그 의상의 카드를 엽니다.");
-  const frame = el("div", "hm-frame");
+  const note = el("p", "hint", "넓을수록 점수가 높은 학생입니다. 의상이 다른 같은 학생은 한 칸에 모았고, 너무 작은 칸은 \"그 외\"로 묶었습니다. 칸을 누르면 카드가 열립니다. 휴대폰에서는 먼저 점수와 의상을 보여 줍니다. 목록으로 바꾸면 순위대로 읽을 수 있습니다.");
   if (top) root.append(top);
-  root.append(note, frame);
+  root.append(note);
   root.classList.add("scrollable");
-  mountTreemap(frame, [...d.analysis.characters].filter((c) => c.total > 0).sort((a, b) => b.total - a.total), ctx.byName, meta, ctx, true);
+  const chars = [...d.analysis.characters].filter((c) => c.total > 0).sort((a, b) => b.total - a.total);
+  mountBoard(root, chars, ctx.byName, meta, ctx, true, true);
   return root;
 }
 
 /** Every public teacher's characters added up. A tile is a character, its area the sum of what it is worth to the
- *  teachers who own it. Nothing here belongs to one student, so there is nothing to open. */
+ *  teachers who own it. Nothing here belongs to one student, so a tile shows its numbers and opens no card. */
 export function communityHeatmap(characters, meta, teachers) {
   const root = el("div", "community");
-  root.append(el("p", "hint", `공개한 선생님 ${teachers}명이 가진 학생을 캐릭터별로 더한 지도입니다. 넓을수록 많은 선생님이 아끼는 학생입니다. 칸에 마우스를 올리면 보유 인원이 보입니다.`));
-  const frame = el("div", "hm-frame community-frame");
-  root.append(frame);
-  mountTreemap(frame, characters.filter((c) => c.total > 0), new Map(), meta, { duty: new Set(), unread: new Map(), byName: new Map() }, false);
+  root.append(el("p", "hint", `공개한 선생님 ${teachers}명이 가진 학생을 캐릭터별로 더한 지도입니다. 넓을수록 많은 선생님이 아끼는 학생입니다. 칸을 누르거나 목록으로 바꾸면 보유 인원이 보입니다.`));
+  mountBoard(root, characters.filter((c) => c.total > 0), new Map(), meta, { duty: new Set(), unread: new Map(), byName: new Map() }, false, false);
   return root;
 }

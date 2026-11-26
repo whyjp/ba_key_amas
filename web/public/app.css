@@ -329,7 +329,6 @@ a.nick:hover { background: var(--sky); }
 .hm-frame { position: relative; flex: 1; min-height: 0; border-radius: 10px; overflow: hidden; background: #cfe0f3; border: 2px solid var(--navy); }
 .hm { position: absolute; margin: 1px; overflow: hidden; border-radius: 4px; background: linear-gradient(135deg, #3a5f9a, #24427a); color: var(--white); cursor: pointer; transition: filter .12s, transform .12s; outline-offset: -3px; }
 /* hover and focus highlight only the border; the picture is never brightened */
-.hm:hover, .hm:focus-visible { z-index: 2; outline: 2px solid var(--cyan); outline-offset: -2px; box-shadow: inset 0 0 0 4px rgba(255, 255, 255, .55); }
 .hm-art { position: absolute; inset: 0; display: flex; }
 .hm-art i { flex: 1; background-size: cover; background-position: center top; }
 .hm-art::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(20, 36, 70, 0) 45%, rgba(20, 36, 70, .88)); }
@@ -432,16 +431,86 @@ th svg { vertical-align: middle; }
 .hm-art i::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(180deg, rgba(20, 36, 70, 0) 55%, rgba(20, 36, 70, .85)); }
 .hm-art i + i { box-shadow: inset 2px 0 0 rgba(255, 255, 255, .8); }
 .hm.split { overflow: visible; }
-.hm.split:hover, .hm.split:focus-within { z-index: 6; outline: 0; box-shadow: none; }
 .hm-art i.pick { cursor: pointer; outline: none; }
-.hm-art i.pick:hover, .hm-art i.pick:focus-visible { z-index: 3; transform: translateY(-5px) scale(1.14); box-shadow: 0 12px 20px rgba(8, 20, 48, .55), 0 0 0 3px var(--cyan); }
-.hm.split .hm-art:hover i.pick:not(:hover) { filter: saturate(.75) brightness(.88); }
 .hm.split .hm-label { z-index: 7; }
-.hm:not(.split):hover, .hm:not(.split):focus-visible { z-index: 6; transform: translateY(-4px) scale(1.07); box-shadow: 0 12px 20px rgba(8, 20, 48, .55), 0 0 0 3px var(--cyan); outline: 0; }
-.tiles .tile:hover, .tiles .tile:focus-visible { z-index: 3; transform: translateY(-5px) scale(1.07); box-shadow: 0 12px 20px rgba(8, 20, 48, .45), 0 0 0 3px var(--cyan); transition: transform .16s cubic-bezier(.2, .9, .3, 1.2), box-shadow .16s; }
 .face.clickable { transition: transform .16s cubic-bezier(.2, .9, .3, 1.2), filter .16s; }
-.face.clickable:hover, .face.clickable:focus-visible { position: relative; z-index: 3; transform: translateY(-4px) scale(1.07); filter: drop-shadow(0 8px 8px rgba(8, 20, 48, .45)); }
-.face.clickable:hover .face-img, .face.clickable:focus-visible .face-img { box-shadow: 0 0 0 2px var(--cyan); }
 .momo.clickable { transition: transform .16s cubic-bezier(.2, .9, .3, 1.2), box-shadow .16s; position: relative; }
-.momo.clickable:hover { z-index: 3; transform: translateY(-2px) scale(1.015); box-shadow: 0 8px 16px rgba(226, 82, 127, .3); }
 .hm-art::after, .hm-label { pointer-events: none; }
+
+/* Hover effects only where there is a hover: on a phone a tap leaves :hover stuck and a lifted tile would stay lifted over its neighbours. */
+@media (hover: hover) and (pointer: fine) {
+  .hm:hover { z-index: 2; outline: 2px solid var(--cyan); outline-offset: -2px; box-shadow: inset 0 0 0 4px rgba(255, 255, 255, .55); }
+  .hm.split:hover { z-index: 6; outline: 0; box-shadow: none; }
+  .hm-art i.pick:hover { z-index: 3; transform: translateY(-5px) scale(1.14); box-shadow: 0 12px 20px rgba(8, 20, 48, .55), 0 0 0 3px var(--cyan); }
+  .hm.split .hm-art:hover i.pick:not(:hover) { filter: saturate(.75) brightness(.88); }
+  .hm:not(.split):hover { z-index: 6; transform: translateY(-4px) scale(1.07); box-shadow: 0 12px 20px rgba(8, 20, 48, .55), 0 0 0 3px var(--cyan); outline: 0; }
+  .tiles .tile:hover { z-index: 3; transform: translateY(-5px) scale(1.07); box-shadow: 0 12px 20px rgba(8, 20, 48, .45), 0 0 0 3px var(--cyan); transition: transform .16s cubic-bezier(.2, .9, .3, 1.2), box-shadow .16s; }
+  .face.clickable:hover { position: relative; z-index: 3; transform: translateY(-4px) scale(1.07); filter: drop-shadow(0 8px 8px rgba(8, 20, 48, .45)); }
+  .face.clickable:hover .face-img { box-shadow: 0 0 0 2px var(--cyan); }
+  .momo.clickable:hover { z-index: 3; transform: translateY(-2px) scale(1.015); box-shadow: 0 8px 16px rgba(226, 82, 127, .3); }
+}
+/* Keyboard focus is always drawn, by a ring that does not depend on moving or enlarging the tile. */
+.hm:focus-visible { z-index: 8; outline: 3px solid var(--cyan); outline-offset: -3px; box-shadow: inset 0 0 0 6px rgba(255, 255, 255, .85); transform: none; }
+.tiles .tile:focus-visible, .face.clickable:focus-visible { z-index: 3; outline: 3px solid var(--cyan); outline-offset: 2px; }
+
+/* heatmap: rank badge, score colour, folded tile, filters, list, tap sheet */
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+.hm-body { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.hm-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 8px; }
+.hm-bar .seg button { min-height: 40px; min-width: 56px; }
+.seg button[aria-pressed=true] { background: var(--navy); color: var(--white); }
+.hm-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip-btn { min-height: 40px; padding: 4px 12px; border-radius: 20px; background: var(--white); color: var(--navy); }
+.chip-btn:hover { background: var(--sky); }
+.chip-btn[aria-pressed=true] { background: var(--navy); color: var(--white); }
+.hm-legend { display: flex; align-items: center; gap: 4px; margin-bottom: 8px; font-size: 12px; color: var(--soft); }
+.hm-legend[hidden] { display: none; }
+.hm-legend i { width: 22px; height: 8px; border-radius: 4px; background: var(--heat); }
+:where(.hm, .hm-legend i, .hm-row) { --heat: #5b7fb5; }
+[data-heat="1"] { --heat: #3fb0c8; }
+[data-heat="2"] { --heat: #6cc98a; }
+[data-heat="3"] { --heat: #f0c040; }
+[data-heat="4"] { --heat: #f2833a; }
+.hm::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 4px; background: var(--heat); z-index: 3; pointer-events: none; }
+.hm-rank { position: absolute; left: 4px; top: 8px; z-index: 4; min-width: 18px; height: 18px; padding: 0 4px; display: grid; place-items: center; border-radius: 9px; background: var(--navy); color: var(--white); font-size: 11px; font-weight: 700; line-height: 1; font-style: normal; border: 1px solid rgba(255, 255, 255, .8); pointer-events: none; }
+.hm.top1 .hm-rank { background: var(--yellow); color: var(--navy); }
+.hm.dim { opacity: .3; filter: grayscale(.6); }
+.hm-fold { background: repeating-linear-gradient(45deg, #31507f, #31507f 8px, #2a4670 8px, #2a4670 16px); }
+.hm-fold .hm-label { top: 0; align-items: center; justify-content: center; text-align: center; }
+.hm-fold .hm-label b { font-size: 16px; }
+.hm-label b.tiny { font-size: 11px; }
+.hm-label span { font-size: 12px; text-shadow: 0 1px 2px rgba(0, 0, 0, .8); }
+.hm-enter .hm { animation: hm-in .4s both; animation-delay: calc(var(--i) * 16ms); }
+@keyframes hm-in { from { opacity: 0; transform: scale(.92); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .hm, .hm-art i, .tiles .tile, .face.clickable, .momo.clickable { transition: none; }
+  .hm-enter .hm { animation: none; }
+}
+
+.hm-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.hm-row { position: relative; border: 2px solid var(--line); border-left: 6px solid var(--heat); border-radius: 10px; background: var(--white); overflow: hidden; }
+.hm-row.dim { opacity: .4; }
+.hm-row > *, .hm-row-btn { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 56px; padding: 6px 10px; }
+.hm-row-btn { border: 0; border-radius: 0; background: transparent; color: var(--ink); text-align: left; font-weight: 400; }
+.hm-row-btn:hover { background: var(--sky); }
+.hm-row-rank { flex: none; min-width: 28px; font-weight: 700; color: var(--navy); }
+.hm-row .pt { width: 40px; height: 40px; border-radius: 8px; object-fit: cover; flex: none; }
+.hm-row-name { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; }
+.hm-row-name b, .hm-row-score b { color: var(--navy); }
+.hm-row-name small, .hm-row-score small { color: var(--soft); font-size: 12px; }
+.hm-row-score { flex: none; width: 34%; max-width: 160px; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.hm-row-score i { display: block; height: 4px; align-self: stretch; border-radius: 2px; background: var(--heat); }
+
+.hm-sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 50; max-height: 70vh; overflow: auto; padding: 14px 16px calc(14px + env(safe-area-inset-bottom)); background: var(--white); border: 2px solid var(--navy); border-bottom: 0; border-radius: 16px 16px 0 0; box-shadow: 0 -8px 24px rgba(8, 20, 48, .35); }
+.hm-sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.hm-sheet-head h3 { margin: 0; font-size: 18px; color: var(--navy); }
+.hm-sheet-close { min-height: 44px; min-width: 64px; }
+.hm-sheet-facts { margin: 4px 0 8px; color: var(--soft); }
+.hm-sheet-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.hm-sheet-list li { display: flex; flex-direction: column; }
+.hm-sheet-row { display: block; width: 100%; min-height: 48px; padding: 10px 12px; text-align: left; border-radius: 10px; }
+.hm-sheet-row.plain { border: 2px solid var(--line); color: var(--ink); font-weight: 700; }
+.hm-sheet-list small { color: var(--soft); font-size: 12px; padding: 0 4px; }
+@media (min-width: 700px) { .hm-sheet { left: auto; right: 16px; bottom: 16px; width: 380px; border-bottom: 2px solid var(--navy); border-radius: 16px; } }
+.hm, .hm-row-btn, .hm-sheet button { -webkit-tap-highlight-color: transparent; }
+.hm:active { outline: 3px solid var(--cyan); outline-offset: -3px; }
