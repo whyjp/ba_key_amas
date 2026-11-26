@@ -27,6 +27,8 @@ Get-ChildItem $rel -Filter *.dll | Copy-Item -Destination $Out -Force
 Copy-Item "$root\models\*" "$Out\models" -Recurse -Force
 Copy-Item "$root\wikidb\wiki.db" "$Out\wikidb" -Force
 foreach ($f in "README.md", "THIRD_PARTY_NOTICES.md") { if (Test-Path "$root\$f") { Copy-Item "$root\$f" $Out -Force } }
+# TrOCR stays in the repository only (models-optional/trocr, docs/trocr-evaluation.md)
+if (Get-ChildItem $Out -Recurse -File | Where-Object { $_.Name -match "trocr|^(encoder|decoder)\.onnx$" }) { throw "TrOCR files must not be packaged" }
 "{0:N1} MB in {1}" -f ((Get-ChildItem $Out -Recurse -File | Measure-Object Length -Sum).Sum / 1MB), $Out
 
 if ($Zip) {

@@ -23,12 +23,12 @@ TrOCR은 사전 전체(280개 이름)를 후보로 점수를 매겨(토큰당 �
 - **모두에게 켜기에는 비용이 크다.** 장당 0.8초(106명이면 약 85초)와 모델 109 MB(fp16w)가 든다. 압축한 릴리스 크기가 48 MB에서 크게 늘어난다.
 - **적용 가치가 있는 형태는 "사전 보정이 비거나 모호할 때만 TrOCR".** 원본에서는 이름판의 1~2%만 해당해서 시간 비용이 거의 없고, 흐린 환경에서는 실패하는 판독을 TrOCR이 되살린다(0.5에서 PP-OCR이 틀린 57장 중 56장). 후보를 PP-OCR의 근접 이름 8~24개로 줄이면 장당 130~170 ms다.
 - **라이브 빠른 편성 이름 읽기에는 쓰지 않는다.** 카드 12장에 약 1.5초가 들고, 썸네일 보기는 초상화로 이미 읽는다.
-- **결정이 필요한 것.** 모델을 릴리스에 넣을지, 선택 다운로드로 둘지. 선택 다운로드면 해당하는 사용자만 받는다.
+- **결정.** 모델은 기본 배포하지 않는다. 저장소의 `models-optional/trocr/`에만 두고 아직 켜지 않는다. 패키징 스크립트는 TrOCR 파일이 섞이면 실패한다.
 
 ## 2026-11-26: 켜기 전용 기능으로 합침
 
 TrOCR 코드는 cargo 기능 `trocr`(`baocr-ocr`, `baocr` 모두) 뒤에 있고 기본은 꺼져 있다. 기본 빌드(애드온 zip)에는 `trocr.rs`와 `--eval-plates`의 TrOCR 비교가 들어가지 않는다.
-켜서 검수하는 방법: `cargo build --release -p baocr --bin ba-key-AMAS --features trocr`, 그리고 `BAOCR_TROCR=<encoder.onnx와 decoder.onnx 폴더(fp16w)> ba-key-AMAS --eval-plates scanner/fixtures/plates`. 기능 없이 빌드한 exe에서 `BAOCR_TROCR`를 주면 "TrOCR이 없는 빌드"라고 알려 준다.
+켜서 검수하는 방법: `cargo build --release -p baocr --bin ba-key-AMAS --features trocr`, 그리고 `BAOCR_TROCR=models-optional/trocr ba-key-AMAS --eval-plates scanner/fixtures/plates`. 기능 없이 빌드한 exe에서 `BAOCR_TROCR`를 주면 "TrOCR이 없는 빌드"라고 알려 준다.
 
 아야네 이름판(`089.png`, 아네로 읽히던 판)의 검수 결과(160장, 같은 이름판 한 번의 실행).
 
@@ -42,4 +42,4 @@ TrOCR 코드는 cargo 기능 `trocr`(`baocr-ocr`, `baocr` 모두) 뒤에 있고 
 
 - 아야네 판(`089`)과 아야네(수영복) 판(`105`)을 TrOCR은 원본과 흐림 0.5에서 모두 맞힌다. 폭 후처리도 원본 해상도에서는 `089`를 맞힌다. 원본에서 둘은 같은 결과이고, TrOCR의 몫은 흐린 환경이다.
 - 흐림 0.5와 0.4에서 PP-OCR 경로가 크게 무너지는 것은 폭 후처리와 무관하다. 그 판들은 글자 상자 자체를 못 찾거나 알아볼 수 없게 읽는다.
-- 결론은 이전과 같다. 기본 경로는 폭 후처리(추가 시간 거의 없음)로 두고, TrOCR은 흐린 환경용 선택 기능으로 남긴다. 모델(fp16w 109 MB)을 릴리스에 넣을지는 정하지 않았다.
+- 결론은 이전과 같다. 기본 경로는 폭 후처리(추가 시간 거의 없음)로 두고, TrOCR은 흐린 환경용 선택 기능으로 남긴다. 모델(fp16w 109 MB)은 `models-optional/trocr/`에만 보관하고 배포하지 않는다.
