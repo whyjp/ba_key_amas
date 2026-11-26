@@ -1,7 +1,7 @@
 //! Checks the Rust TrOCR path against the research reference: the 384x384 input must equal the reference image, and the
 //! label must be the best of all names. Prints the time per label.
 //!
-//!     cargo run -p baocr-ocr --release --example trocr_probe -- <research>/ref <model dir with encoder.onnx, decoder.onnx> [labels]
+//!     cargo run -p baocr-ocr --release --features trocr --example trocr_probe -- <research>/ref <model dir with encoder.onnx, decoder.onnx> [labels]
 use baocr_ocr::trocr::{pixel_values, square_input, TrOcr};
 use std::time::Instant;
 

@@ -3,7 +3,7 @@
 //!   cargo run --release -p baocr-ocr --example speed_lab -- [variant-name-substring ...]
 //! Env: BAOCR_MODELS (models dir), RUNS (timed runs per frame, default 3).
 //! Frames are `fixtures/screens/*.png` that have a sibling `*.boxes.txt`. No game, no desktop.
-use baocr_core::ocr_api::{Ocr, TextBox};
+use baocr_core::ocr_api::TextBox;
 use oar_ocr::core::config::{OrtGraphOptimizationLevel as Og, OrtSessionConfig};
 use oar_ocr::domain::tasks::TextDetectionConfig;
 use oar_ocr::oarocr::OAROCRBuilder;

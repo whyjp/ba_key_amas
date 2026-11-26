@@ -28,7 +28,7 @@ pub fn probe_changed_points(a: &[u8], b: &[u8], by: u32) -> usize {
     if a.len() != b.len() {
         return usize::MAX;
     }
-    a.chunks_exact(3).zip(b.chunks_exact(3)).filter(|(x, y)| (0..3).map(|i| (x[i] as i32 - y[i] as i32).unsigned_abs()).sum::<u32>() / 3 > by).count()
+    a.as_chunks::<3>().0.iter().zip(b.chunks_exact(3)).filter(|(x, y)| (0..3).map(|i| (x[i] as i32 - y[i] as i32).unsigned_abs()).sum::<u32>() / 3 > by).count()
 }
 
 #[cfg(windows)]
@@ -127,7 +127,7 @@ impl Prober {
                 return Err(anyhow!("GetDIBits gave {lines} of {PROBE_H} lines"));
             }
             let mut rgb = Vec::with_capacity(PROBE_LEN);
-            for p in bgra.chunks_exact(4) {
+            for p in bgra.as_chunks::<4>().0 {
                 rgb.extend_from_slice(&[p[2], p[1], p[0]]);
             }
             Ok(rgb)
@@ -181,7 +181,7 @@ pub fn grab_game_frame(prober: &Prober) -> Result<image::RgbImage> {
             bail!("the screen grab gave {lines} of {oh} lines");
         }
         let mut rgb = Vec::with_capacity((ow * oh * 3) as usize);
-        for p in bgra.chunks_exact(4) {
+        for p in bgra.as_chunks::<4>().0 {
             rgb.extend_from_slice(&[p[2], p[1], p[0]]);
         }
         image::RgbImage::from_raw(ow as u32, oh as u32, rgb).ok_or_else(|| anyhow!("bad frame size"))

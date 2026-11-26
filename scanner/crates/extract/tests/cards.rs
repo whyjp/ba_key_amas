@@ -131,7 +131,7 @@ fn cards_read_with_part_of_them_cached_and_only_the_rest_recognised_are_the_same
         assert_eq!(read_card_names_cached(&ocr, &img, &[], &mut full_cache.clone()), full, "{name}: all cached");
         // some cached: the first third, the last third, every other one
         let keys: Vec<u64> = full_cache.keys().copied().collect();
-        for keep in [|i: usize| i % 3 == 0, |i: usize| i % 2 == 0, |i: usize| i < 4, |i: usize| i >= 7] {
+        for keep in [|i: usize| i.is_multiple_of(3), |i: usize| i.is_multiple_of(2), |i: usize| i < 4, |i: usize| i >= 7] {
             let mut cache: LabelCache = full_cache.iter().filter(|(k, _)| keys.iter().position(|x| x == *k).is_some_and(keep)).map(|(k, v)| (*k, v.clone())).collect();
             let Some((x, y, w, h)) = unread_label_band(&img, &cache) else { continue };
             let part = image::imageops::crop_imm(&img, x, y, w, h).to_image();

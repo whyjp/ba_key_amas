@@ -92,7 +92,7 @@ fn main() -> anyhow::Result<()> {
             for bx in 0..32usize {
                 let px = &row[bx * bw as usize * 3..(bx + 1) * bw as usize * 3];
                 let s = &mut sums[(by * 32 + bx) * 3..(by * 32 + bx) * 3 + 3];
-                for p in px.chunks_exact(3) {
+                for p in px.as_chunks::<3>().0 {
                     s[0] += p[0] as u32;
                     s[1] += p[1] as u32;
                     s[2] += p[2] as u32;

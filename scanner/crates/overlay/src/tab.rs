@@ -67,7 +67,7 @@ fn body(img: &mut RgbaImage, cap: f32, s: f32) {
     for y in 0..img.height() {
         for x in 0..img.width() {
             let d = (w - cut + y as f32 + 0.5) - (x as f32 + 0.5);
-            let a = (0.5 + d * 0.7071).clamp(0.0, 1.0);
+            let a = (0.5 + d * std::f32::consts::FRAC_1_SQRT_2).clamp(0.0, 1.0);
             if a < 1.0 {
                 let p = img.get_pixel_mut(x, y);
                 p[3] = (p[3] as f32 * a).round() as u8;

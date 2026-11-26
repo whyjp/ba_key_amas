@@ -377,7 +377,7 @@ fn run_on<S: Surface>(surface: S, ocr: Arc<dyn Ocr>, session: &HcuSession, regio
         }
         let (key, moving) = prof.time("key", || {
             let key = fast_frame_key(&img);
-            let moving = prev.as_ref().map_or(true, |p| frame_distance(p, &key) >= STILL);
+            let moving = prev.as_ref().is_none_or(|p| frame_distance(p, &key) >= STILL);
             (key, moving)
         });
         // two probes in a row held still: the frame just captured is the settled one, there is no need to see it twice
@@ -390,7 +390,7 @@ fn run_on<S: Surface>(surface: S, ocr: Arc<dyn Ocr>, session: &HcuSession, regio
             // icons placed for the old view would sit on the wrong things until the new one is read
             prof.time("transition", || assistant.transition());
         }
-        let new_view = handled.as_ref().map_or(true, |h| frame_distance(h, &key) > STILL);
+        let new_view = handled.as_ref().is_none_or(|h| frame_distance(h, &key) > STILL);
         // inside the popup a grid whose labels hold still is read before the whole picture does (its portraits load for a second)
         let popup_frame = assistant.in_popup() && baocr_pixels::quick_tab_is_striker(&img).is_some();
         if new_view && (still >= 1 || popup_frame) {

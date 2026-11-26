@@ -668,7 +668,7 @@ mod win {
                     bail!("screen capture failed (BitBlt {ok}, {lines} of {h} lines)");
                 }
                 let mut rgb = Vec::with_capacity(w as usize * h as usize * 3);
-                for p in bgra.chunks_exact(4) {
+                for p in bgra.as_chunks::<4>().0 {
                     rgb.extend_from_slice(&[p[2], p[1], p[0]]);
                 }
                 RgbImage::from_raw(w, h, rgb).ok_or_else(|| anyhow!("capture buffer size"))

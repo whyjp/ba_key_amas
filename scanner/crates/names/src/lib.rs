@@ -145,7 +145,7 @@ pub fn edit_distance(a: &[char], b: &[char]) -> usize {
 /// Keeps only characters a student name can contain. `^` and full-width `＊`
 /// are normalised to ASCII `*`.
 pub fn clean_name(raw: &str) -> String {
-    let raw = raw.replace('^', "*").replace('＊', "*");
+    let raw = raw.replace(['^', '＊'], "*");
     let kept: String = raw
         .chars()
         .filter(|&c| {

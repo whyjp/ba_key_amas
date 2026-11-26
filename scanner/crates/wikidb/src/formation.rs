@@ -368,7 +368,7 @@ mod tests {
         let m = mission();
         let best = student(1, "Explosion", "LightArmor", 4);
         let worst = student(1, "Explosion", "LightArmor", 0);
-        let a = evaluate(&m, Some("Outdoor"), &[best.clone()], &pool(), &types()).unwrap();
+        let a = evaluate(&m, Some("Outdoor"), std::slice::from_ref(&best), &pool(), &types()).unwrap();
         let b = evaluate(&m, Some("Outdoor"), &[worst], &pool(), &types()).unwrap();
         assert!(a.terrain > 1.0 && b.terrain < 1.0 && a.attack > b.attack);
         // an unknown terrain leaves adaptation out

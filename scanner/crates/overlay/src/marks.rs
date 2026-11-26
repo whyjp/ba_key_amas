@@ -181,7 +181,7 @@ fn draw_icon(img: &mut RgbaImage, fonts: &Fonts, icon: &Icon, x: f32, y: f32, k:
             for i in 0..=steps {
                 let t = i as f32 / steps as f32 * 2.0 - 1.0; // -1..1
                 let px = mx + t * half;
-                let py = my + curve * size * 0.14 * (t * t - 1.0) * -1.0 - curve * size * 0.07;
+                let py = my + curve * size * 0.14 * (1.0 - t * t) - curve * size * 0.07;
                 let r = size * 0.05;
                 fill_rrect(img, px - r, py - r, r * 2.0, r * 2.0, r, |_, _| (ink, 1.0));
             }

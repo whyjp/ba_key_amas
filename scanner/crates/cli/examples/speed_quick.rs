@@ -60,7 +60,7 @@ fn main() -> anyhow::Result<()> {
     const GRID: [u32; 4] = [560, 300, 720, 360]; // x, y, w, h: the grid and its tabs
 
     println!("== 1. card reading with different free-text OCR (ms; cards equal to the full-frame reading?)");
-    println!("{:<28} {:>9} {:>9} {:>9} {:>9} {:>9} {:>9}  {}", "frame", "full ocr", "cards", "grid ocr", "cards", "no ocr", "cards", "same cards as full: grid-ocr / no-ocr");
+    println!("{:<28} {:>9} {:>9} {:>9} {:>9} {:>9} {:>9}  same cards as full: grid-ocr / no-ocr", "frame", "full ocr", "cards", "grid ocr", "cards", "no ocr", "cards");
     for (name, img) in &imgs {
         let full = ocr.boxes(img)?;
         let t_full = time(3, || ocr.boxes(img).unwrap());

@@ -384,13 +384,13 @@ fn run_learn(args: &Args, hcu: &Hcu, region: [f64; 4], dir: &std::path::Path) ->
             _ => 0,
         };
         prev = Some(key);
-        let new_view = saved.as_ref().map_or(true, |s| frame_distance(s, &key) > 5.0);
+        let new_view = saved.as_ref().is_none_or(|s| frame_distance(s, &key) > 5.0);
         if still >= 2 && new_view {
             n += 1;
             let stem = dir.join(format!("{n:03}"));
             img.save(stem.with_extension("png"))?;
             let mut boxes = ocr.boxes(&img)?;
-            boxes.sort_by(|a, b| (a.y0 as i32 / 20, a.x0 as i32).cmp(&(b.y0 as i32 / 20, b.x0 as i32)));
+            boxes.sort_by_key(|a| (a.y0 as i32 / 20, a.x0 as i32));
             let lines: Vec<String> = boxes.iter().map(|b| format!("{:.0},{:.0},{:.0},{:.0}	{}", b.x0, b.y0, b.x1, b.y1, b.text.trim())).collect();
             std::fs::write(stem.with_extension("txt"), lines.join("
 "))?;

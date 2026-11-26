@@ -108,7 +108,7 @@ pub fn asset_template(asset: &DynamicImage) -> Vec<u8> {
 fn normalised(pixels: &[u8]) -> Vec<f32> {
     let n = pixels.len() / 3;
     let mut mean = [0.0f32; 3];
-    for px in pixels.chunks_exact(3) {
+    for px in pixels.as_chunks::<3>().0 {
         for c in 0..3 {
             mean[c] += px[c] as f32;
         }
@@ -116,7 +116,7 @@ fn normalised(pixels: &[u8]) -> Vec<f32> {
     for m in &mut mean {
         *m /= n as f32;
     }
-    let mut out: Vec<f32> = pixels.chunks_exact(3).flat_map(|px| (0..3).map(move |c| px[c] as f32 - mean[c])).collect::<Vec<_>>();
+    let mut out: Vec<f32> = pixels.as_chunks::<3>().0.iter().flat_map(|px| (0..3).map(move |c| px[c] as f32 - mean[c])).collect::<Vec<_>>();
     let len = out.iter().map(|v| v * v).sum::<f32>().sqrt().max(1e-6);
     for v in &mut out {
         *v /= len;
@@ -240,7 +240,7 @@ impl Book {
     /// the margin is taken against the best score of anyone who is not.
     pub fn identify(&self, patches: &[Vec<f32>], allowed: &dyn Fn(i64) -> bool, same: &dyn Fn(i64, i64) -> bool) -> Option<Match> {
         let mut scores: Vec<(f32, i64)> = Vec::new();
-        for (row, id) in self.rows.chunks_exact(LEN).zip(&self.ids) {
+        for (row, id) in self.rows.as_chunks::<LEN>().0.iter().zip(&self.ids) {
             if !allowed(*id) {
                 continue;
             }

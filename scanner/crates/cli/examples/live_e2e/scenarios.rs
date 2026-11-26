@@ -221,8 +221,8 @@ fn recover(rig: &mut Rig) -> Result<()> {
         let sent = match scene.as_str() {
             HUB => return Ok(()),
             "메인 메뉴" | "메인 메뉴 (대기)" => {
-                let t = rig.click(1201, 917, "", "recover: lobby to 업무 hub")?;
-                t
+                
+                rig.click(1201, 917, "", "recover: lobby to 업무 hub")?
             }
             QUICK => rig.click(1243, 210, QUICK, "recover: close the quick formation popup")?,
             ROOM => rig.click(1138, 257, ROOM, "recover: close the room popup")?,

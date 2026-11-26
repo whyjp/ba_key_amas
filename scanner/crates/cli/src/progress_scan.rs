@@ -690,7 +690,7 @@ fn reread_plate(ocr: &dyn Ocr, img: &RgbImage, b: &TextBox) -> String {
         }
     }
     let mut best: Option<(usize, f32, &str)> = None;
-    for (text, conf) in &readings {
+    for (text, _) in &readings {
         let votes = readings.iter().filter(|(o, _)| o == text).count();
         let top = readings.iter().filter(|(o, _)| o == text).map(|(_, c)| *c).fold(0.0, f32::max);
         if best.is_none_or(|(v, c, _)| votes > v || (votes == v && top > c)) {
@@ -729,7 +729,7 @@ fn letters_by_width(width: f32) -> usize {
 /// the reading are the candidates; when several are as close, the recogniser scores each against the plate's picture and the
 /// best fitting one is taken. Anything else stays as read.
 fn by_width(ocr: &dyn Ocr, plate: &RgbImage, b: &TextBox, read: String) -> String {
-    if read.contains(['(', '*', ')']) || baocr_names::all_names().iter().any(|n| *n == read) {
+    if read.contains(['(', '*', ')']) || baocr_names::all_names().contains(&read) {
         return read;
     }
     let (have, want) = (read.chars().filter(|c| ('가'..='힣').contains(c)).count(), letters_by_width(b.x1 - b.x0));

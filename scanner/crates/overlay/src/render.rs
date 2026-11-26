@@ -27,7 +27,7 @@ pub(crate) fn card(img: &mut RgbaImage, w: f32, h: f32, s: f32, head: f32, cut: 
     fill_rrect(img, 0.0, 0.0, w, h, 5.0 * s, |x, y| {
         // inside the cut triangle: transparent, anti-aliased along the diagonal
         let d = (w - cut + y) - x;
-        let a = (0.5 + d * 0.7071).clamp(0.0, 1.0);
+        let a = (0.5 + d * std::f32::consts::FRAC_1_SQRT_2).clamp(0.0, 1.0);
         let rgb = if y < head {
             NAVY
         } else if x < b || x > w - b - 0.5 || y > h - b - 0.5 {
@@ -188,6 +188,7 @@ pub(crate) fn stroke_rrect(img: &mut RgbaImage, x: f32, y: f32, w: f32, h: f32, 
 
 /// The same ring visiting every pixel of the box: what the faster one must give exactly.
 #[cfg(test)]
+#[allow(clippy::too_many_arguments)] // the same arguments as the ring it checks
 pub(crate) fn stroke_rrect_all(img: &mut RgbaImage, x: f32, y: f32, w: f32, h: f32, r: f32, stroke: f32, rgb: [u8; 3], alpha: f32) {
     let (x0, y0) = ((x.floor() as i32 - 1).max(0), (y.floor() as i32 - 1).max(0));
     let (x1, y1) = (((x + w).ceil() as i32 + 1).min(img.width() as i32), ((y + h).ceil() as i32 + 1).min(img.height() as i32));
@@ -228,6 +229,7 @@ pub fn text_width(font: &FontVec, px: f32, s: &str) -> f32 {
 }
 
 /// Draw `s` with its top at `y` (so rows line up regardless of the glyphs).
+#[allow(clippy::too_many_arguments)] // position, colour and text of one draw call
 pub(crate) fn draw_text(img: &mut RgbaImage, font: &FontVec, px: f32, x: f32, y: f32, rgb: [u8; 3], alpha: f32, s: &str) {
     let scaled = font.as_scaled(PxScale::from(px));
     let mut caret = x;

@@ -269,10 +269,10 @@ impl<'a> Extractor<'a> {
         let (attack, armor) = px::attack_armor_types(img);
         Loadout {
             tactic_role: px::role_from_icon(img),
-            position: baocr_names::closest_word(&text_in(boxes, (35, 903, 160, 933)), &baocr_names::POSITION_VOCAB),
+            position: baocr_names::closest_word(&text_in(boxes, (35, 903, 160, 933)), baocr_names::POSITION_VOCAB),
             attack_type: attack,
             armor_type: armor,
-            weapon_class: baocr_names::closest_word(&text_in(boxes, (690, 610, 750, 640)), &baocr_names::WEAPON_VOCAB),
+            weapon_class: baocr_names::closest_word(&text_in(boxes, (690, 610, 750, 640)), baocr_names::WEAPON_VOCAB),
         }
     }
 }

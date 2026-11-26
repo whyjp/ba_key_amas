@@ -311,11 +311,10 @@ fn primary_work() -> Ltrb {
     }
 }
 
-/// A premultiplied-BGRA DIB the banner is rendered into.
 /// `img` as the premultiplied BGRA the layered window takes. Most of an overlay layer is transparent or opaque, which
 /// need no multiplication and no division (the three divisions per pixel were most of the time a layer took to hand over).
 fn premultiplied_bgra(dst: &mut [u8], img: &image::RgbaImage) {
-    for (d, p) in dst.chunks_exact_mut(4).zip(img.pixels()) {
+    for (d, p) in dst.as_chunks_mut::<4>().0.iter_mut().zip(img.pixels()) {
         match p[3] {
             0 => d.copy_from_slice(&[0, 0, 0, 0]),
             255 => d.copy_from_slice(&[p[2], p[1], p[0], 255]),
@@ -563,7 +562,7 @@ fn run(state: Arc<Mutex<Shown>>, events: Arc<Mutex<Vec<String>>>, wake: Arc<Wake
                 TranslateMessage(&msg);
                 DispatchMessageW(&msg);
             }
-            if tick % 8 == 0 {
+            if tick.is_multiple_of(8) {
                 rect = prof::time(prof::Part::Geometry, game_geometry); // follow the window if it moves
             }
             // clicks on the card's buttons

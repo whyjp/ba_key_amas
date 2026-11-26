@@ -81,11 +81,11 @@ fn run(c: Costs, p: Policy, m: (f64, f64), hints: &[(f64, bool)], rng: &mut Rng)
         }
         let sample = start + c.capture / 2.0;
         t = start + c.capture + p.key.unwrap_or(c.key);
-        let moving = prev.map_or(true, |q| differ(m, q, sample));
+        let moving = prev.is_none_or(|q| differ(m, q, sample));
         still = if moving { 0 } else { still + 1 };
-        let new_view = handled.map_or(true, |h| differ(m, h, sample));
+        let new_view = handled.is_none_or(|h| differ(m, h, sample));
         // speculative job on any unread view, one at a time
-        if p.speculative && new_view && job.map_or(true, |(_, ready)| ready <= t) && job.map_or(true, |(s, _)| differ(m, s, sample)) {
+        if p.speculative && new_view && job.is_none_or(|(_, ready)| ready <= t) && job.is_none_or(|(s, _)| differ(m, s, sample)) {
             job = Some((sample, t + ocr + c.observe));
         }
         let confirmed = still > p.pairs.saturating_sub(1) && still >= p.pairs.max(1);

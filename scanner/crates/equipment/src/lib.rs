@@ -116,7 +116,7 @@ pub fn icon_vividness(img: &RgbImage, i: i32) -> f64 {
         for x in x0..x0 + 64 {
             let [r, g, b] = px(img, x, y);
             let (mx, mn) = (r.max(g).max(b), r.min(g).min(b));
-            if mx > 114 && mx > 0 && (mx - mn) * 100 > 45 * mx {
+            if mx > 114 && (mx - mn) * 100 > 45 * mx {
                 vivid += 1;
             }
             n += 1;

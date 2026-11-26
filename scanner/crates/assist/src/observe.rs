@@ -100,7 +100,7 @@ pub struct Observer<'a> {
     /// click shakes the picture for a moment: the frame of that moment is a grid of its own, and the settled one that
     /// follows is the one from before.
     grids: Vec<KnownGrid>,
-    /// The fingerprint of the last grid that was not one of those, seen by `grid_settled`.
+    /// The fingerprint of the last grid that was not one of those, seen by `grid_state`.
     pending: Option<Vec<(i32, i32, u64)>>,
     /// The grid read last and when: a scroll slows down for a while after it has nearly stopped, moving the labels a pixel
     /// or two at a time, and each of those frames is a new grid to the fingerprints. The grid is read once the labels have

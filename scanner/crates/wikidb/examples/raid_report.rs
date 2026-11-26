@@ -30,7 +30,7 @@ fn main() -> Result<()> {
     let rows = |sql: &str| -> Result<Vec<Vec<String>>> {
         let mut st = conn.prepare(sql)?;
         let n = st.column_count();
-        let out = st.query_map([], |r| (0..n).map(|i| r.get::<_, rusqlite::types::Value>(i).map(|v| plain(v))).collect::<std::result::Result<Vec<_>, _>>())?;
+        let out = st.query_map([], |r| (0..n).map(|i| r.get::<_, rusqlite::types::Value>(i).map(plain)).collect::<std::result::Result<Vec<_>, _>>())?;
         Ok(out.collect::<std::result::Result<_, _>>()?)
     };
     let text = |sql: &str| -> Result<String> { Ok(rows(sql)?.iter().map(|r| r.join(" ")).collect::<Vec<_>>().join("\n  ")) };

@@ -593,7 +593,7 @@ pub fn unowned_banner(img: &RgbImage) -> Option<i32> {
             (true, None) => start = Some(y),
             (false, Some(s)) => {
                 let end = y - 1;
-                if end - s >= 20 && best.map_or(true, |(a, b)| end - s > b - a) {
+                if end - s >= 20 && best.is_none_or(|(a, b)| end - s > b - a) {
                     best = Some((s, end));
                 }
                 start = None;
@@ -962,7 +962,7 @@ pub fn fast_frame_key(img: &RgbImage) -> FrameKey {
             let (x0, x1) = (bx * w / 32, (bx + 1) * w / 32);
             let s = &mut sums[(by * 32 + bx) * 3..(by * 32 + bx) * 3 + 3];
             for y in y0..y1 {
-                for p in raw[(y * w + x0) * 3..(y * w + x1) * 3].chunks_exact(3) {
+                for p in raw[(y * w + x0) * 3..(y * w + x1) * 3].as_chunks::<3>().0 {
                     s[0] += p[0] as u32;
                     s[1] += p[1] as u32;
                     s[2] += p[2] as u32;

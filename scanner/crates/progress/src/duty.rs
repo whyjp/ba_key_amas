@@ -49,7 +49,7 @@ pub fn parse_duty(boxes: &[TextBox], img: &RgbImage) -> Read<DutyView> {
     for b in boxes {
         let t = squashed(b);
         let plate = b.y0 > header.y1 + 60.0
-            && bottom.map_or(true, |lim| b.y1 < lim)
+            && bottom.is_none_or(|lim| b.y1 < lim)
             && t.chars().any(|c| ('가'..='힣').contains(&c))
             && !t.chars().any(|c| c.is_ascii_digit())
             && !labels.contains(&t.as_str());

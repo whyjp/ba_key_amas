@@ -37,7 +37,7 @@ pub fn heart_ink_image(img: &RgbImage) -> GrayImage {
     let pink = |[cr, cg, cb]: [u8; 3]| {
         cr > 225 && cg > 150 && cg < 235 && cb > 180 && cr as i32 - cg as i32 > 15
     };
-    let (w, h) = ((r.2 - r.0) as i32, (r.3 - r.1) as i32);
+    let (w, h) = (r.2 - r.0, r.3 - r.1);
     let mut bw = white_gray(w as u32, h as u32);
     for y in 0..h {
         let (mut left, mut right) = (-1, -1);

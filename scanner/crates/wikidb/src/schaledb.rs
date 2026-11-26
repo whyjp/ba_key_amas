@@ -315,7 +315,10 @@ fn hp_stats(d: &Dataset) -> HashMap<i64, HpStats> {
 
 /// Weights of one encounter's enemies, in order. `levels`: what the encounter gives each rank.
 /// The enemy table is read here and nowhere else, so an enemy without HP stats weighs nothing (`no-hp`).
-fn weigh(stats: &HashMap<i64, HpStats>, ranks: &HashMap<i64, String>, enemies: &[i64], levels: Option<&RankedLevels>, raid: bool) -> Vec<(Option<(i64, i64)>, Option<i64>, Weight)> {
+/// One enemy of an encounter: its (hp, level) place in the table, its rank level, and its weight.
+type Weighted = (Option<(i64, i64)>, Option<i64>, Weight);
+
+fn weigh(stats: &HashMap<i64, HpStats>, ranks: &HashMap<i64, String>, enemies: &[i64], levels: Option<&RankedLevels>, raid: bool) -> Vec<Weighted> {
     let at: Vec<(Option<(i64, i64)>, Option<i64>)> = enemies
         .iter()
         .map(|id| {
@@ -457,7 +460,7 @@ fn str_list(r: &Value, key: &str) -> Vec<String> {
 /// difficulty, formations per level, enemy tiers per floor range); this is the only place
 /// that knows.
 fn raid_difficulties(kind: &str, r: &Value) -> Result<Vec<RaidDifficultyRow>> {
-    let released = r.get("IsReleased").map_or(true, |_| released_global(r));
+    let released = r.get("IsReleased").is_none_or(|_| released_global(r));
     // highest difficulty index open on Global
     let max_open = r.get("MaxDifficulty").and_then(|a| a.get(GLOBAL)).and_then(|x| x.as_i64());
     let levels = int_list(r, "Level")?;
@@ -492,7 +495,7 @@ fn raid_difficulties(kind: &str, r: &Value) -> Result<Vec<RaidDifficultyRow>> {
             battle_duration: durations.get(idx).copied(),
             levels: encounter_levels(kind, r, idx, levels.get(idx).copied(), floors.get(idx).copied(), formations),
             enemies,
-            released_global: released && max_open.map_or(true, |m| idx as i64 <= m),
+            released_global: released && max_open.is_none_or(|m| idx as i64 <= m),
         })
         .collect())
 }
