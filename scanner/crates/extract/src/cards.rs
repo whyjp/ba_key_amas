@@ -16,7 +16,7 @@
 use crate::{MIN_MARGIN, UNIQUE_NAMES};
 use baocr_core::ocr_api::{Ocr, TextBox};
 use baocr_names::{edit_distance, to_jamo};
-use baocr_ocr::ink_to_line;
+use baocr_pixels::ink_to_line;
 use baocr_pixels::{self as px, CardLabel};
 use image::{GrayImage, RgbImage};
 use std::collections::HashMap;

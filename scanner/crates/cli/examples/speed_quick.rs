@@ -8,7 +8,7 @@
 use baocr_core::ocr_api::{Ocr, TextBox};
 use baocr_extract::scene::classify;
 use baocr_extract::{read_card_names, CardName};
-use baocr_ocr::ink_to_line;
+use baocr_pixels::ink_to_line;
 use baocr_pixels::{quick_card_labels, quick_label_ink, quick_tab_is_striker};
 use image::{imageops, RgbImage};
 use std::collections::HashMap;

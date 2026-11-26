@@ -3,7 +3,7 @@ use crate::deep::capture_deep;
 use crate::hcu::{Exclusive, Hcu};
 use anyhow::{anyhow, bail, Result};
 use baocr_core::ocr_api::ScanSink;
-use baocr_extract::{FRAME_DETAIL, FRAME_LEVEL_UP, FRAME_MYSTIC, FRAME_POPUP_BOTTOM, FRAME_POPUP_TOP};
+use baocr_core::frames::{FRAME_DETAIL, FRAME_LEVEL_UP, FRAME_MYSTIC, FRAME_POPUP_BOTTOM, FRAME_POPUP_TOP};
 use baocr_pixels::{detail_distance, detail_key, frame_distance, frame_key, roster_visible_pixels, DetailKey};
 use image::RgbImage;
 use std::collections::BTreeMap;

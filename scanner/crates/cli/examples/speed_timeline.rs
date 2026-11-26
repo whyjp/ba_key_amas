@@ -63,7 +63,7 @@ fn main() -> anyhow::Result<()> {
     let n = baocr_extract::read_card_names(&ocr, &qf, &boxes).len();
     // the same label images the reader makes, timed through `line` (recogniser + greedy decode only)
     let labels = baocr_pixels::quick_card_labels(&qf);
-    let lines: Vec<RgbImage> = labels.iter().map(|l| baocr_ocr::ink_to_line(&baocr_pixels::quick_label_ink(&qf, l))).collect();
+    let lines: Vec<RgbImage> = labels.iter().map(|l| baocr_pixels::ink_to_line(&baocr_pixels::quick_label_ink(&qf, l))).collect();
     let t_rec = time(3, || lines.iter().map(|l| ocr.line(l).unwrap().1).sum::<f32>());
     println!("read_card_names on quick-formation: {t_cards:.0} ms for {n} named cards ({} labels); recogniser alone over the same labels: {t_rec:.0} ms", labels.len());
 

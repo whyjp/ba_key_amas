@@ -1009,5 +1009,51 @@ pub(crate) fn white_gray(w: u32, h: u32) -> GrayImage {
     GrayImage::from_pixel(w, h, Luma([255]))
 }
 
+/// Turn an ink-isolated image (black glyphs on white) into a tight text line:
+/// specks are removed and the page is cropped to the glyphs plus a margin, so
+/// the recogniser sees one clean line and every timestep is either text or blank.
+pub fn ink_to_line(g: &image::GrayImage) -> RgbImage {
+    const MIN_AREA: usize = 10;
+    const MARGIN: i64 = 8;
+    let (w, h) = (g.width() as i64, g.height() as i64);
+    let ink = |x: i64, y: i64| x >= 0 && y >= 0 && x < w && y < h && g.get_pixel(x as u32, y as u32)[0] < 128;
+    let mut seen = vec![false; (w * h) as usize];
+    let mut keep: Vec<(i64, i64)> = Vec::new();
+    for y0 in 0..h {
+        for x0 in 0..w {
+            if !ink(x0, y0) || seen[(y0 * w + x0) as usize] {
+                continue;
+            }
+            let (mut stack, mut comp) = (vec![(x0, y0)], Vec::new());
+            seen[(y0 * w + x0) as usize] = true;
+            while let Some((x, y)) = stack.pop() {
+                comp.push((x, y));
+                for dy in -1..=1 {
+                    for dx in -1..=1 {
+                        let (nx, ny) = (x + dx, y + dy);
+                        if ink(nx, ny) && !seen[(ny * w + nx) as usize] {
+                            seen[(ny * w + nx) as usize] = true;
+                            stack.push((nx, ny));
+                        }
+                    }
+                }
+            }
+            if comp.len() >= MIN_AREA {
+                keep.extend(comp);
+            }
+        }
+    }
+    if keep.is_empty() {
+        return RgbImage::from_pixel(32, 48, image::Rgb([255, 255, 255]));
+    }
+    let (x0, x1) = (keep.iter().map(|p| p.0).min().unwrap(), keep.iter().map(|p| p.0).max().unwrap());
+    let (y0, y1) = (keep.iter().map(|p| p.1).min().unwrap(), keep.iter().map(|p| p.1).max().unwrap());
+    let mut out = RgbImage::from_pixel((x1 - x0 + 1 + 2 * MARGIN) as u32, (y1 - y0 + 1 + 2 * MARGIN) as u32, image::Rgb([255, 255, 255]));
+    for (x, y) in keep {
+        out.put_pixel((x - x0 + MARGIN) as u32, (y - y0 + MARGIN) as u32, image::Rgb([0, 0, 0]));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests;

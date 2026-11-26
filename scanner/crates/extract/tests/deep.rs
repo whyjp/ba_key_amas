@@ -1,5 +1,6 @@
 use baocr_core::model::*;
-use baocr_extract::{DeepFrames, Extractor};
+use baocr_core::frames::DeepFrames;
+use baocr_extract::Extractor;
 use baocr_ocr::PpOcr;
 use image::RgbImage;
 use std::path::PathBuf;

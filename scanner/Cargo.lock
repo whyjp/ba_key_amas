@@ -325,7 +325,6 @@ version = "0.1.2"
 dependencies = [
  "anyhow",
  "baocr-core",
- "baocr-extract",
  "baocr-pixels",
  "image",
  "regex",

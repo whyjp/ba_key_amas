@@ -1,6 +1,6 @@
 //! Menu-pass parsing: 상세 stat popup (two frames), 레벨 업 tab, 신비 해방 tab.
 //! The frames come from the capture side (clicks); everything here is OCR + parsing.
-use crate::DeepFrames;
+use baocr_core::frames::DeepFrames;
 use anyhow::Result;
 use baocr_core::model::*;
 use baocr_core::ocr_api::{text_in, Ocr, TextBox};
@@ -142,7 +142,7 @@ fn stars_at(img: &RgbImage, centers: &[i32]) -> Int {
 /// so isolating green ink leaves exactly that number whether or not the arrow
 /// glyph is recognised.
 fn green_number(ocr: &dyn Ocr, img: &RgbImage, row: px::Rect) -> Option<Int> {
-    let line = baocr_ocr::ink_to_line(&px::ink_image(img, row, px::green_ink));
+    let line = px::ink_to_line(&px::ink_image(img, row, px::green_ink));
     let (text, _) = ocr.line(&line).ok()?;
     last_int(&text)
 }

@@ -8,11 +8,11 @@ baocr-core.workspace = true
 baocr-names = { path = "../names" }
 baocr-pixels = { path = "../pixels" }
 baocr-equipment = { path = "../equipment" }
-baocr-ocr = { path = "../ocr" }
 image.workspace = true
 anyhow.workspace = true
 regex.workspace = true
 once_cell.workspace = true
 
 [dev-dependencies]
+baocr-ocr = { path = "../ocr" }
 serde_json.workspace = true

@@ -1,0 +1,40 @@
+name: rust-ci
+
+# Clippy on the add-on workspace. Only the lints clippy denies by default fail the run
+# (a warning does not), so a real error such as a redundant comparison cannot pile up unseen.
+# No secrets are used and the workflow only reads the repository.
+
+on:
+  push:
+    branches: [main]
+    paths: ["scanner/**", ".github/workflows/rust-ci.yml"]
+  pull_request:
+    paths: ["scanner/**", ".github/workflows/rust-ci.yml"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  clippy:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: scanner
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy
+          rustup default stable
+
+      - name: Clippy (deny-level lints fail, warnings do not)
+        run: cargo clippy --workspace --all-targets --locked

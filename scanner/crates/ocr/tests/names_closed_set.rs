@@ -31,7 +31,7 @@ fn closed_set_reads_every_labelled_name() {
     ];
     let mut wrong = vec![];
     for (file, want) in gold {
-        let line = baocr_ocr::ink_to_line(&baocr_pixels::name_ink_image(&fixture(file)));
+        let line = baocr_pixels::ink_to_line(&baocr_pixels::name_ink_image(&fixture(file)));
         let (i, _) = e.choose(&line, &names).unwrap();
         if names[i] != want {
             wrong.push(format!("{file}: got {} want {want}", names[i]));

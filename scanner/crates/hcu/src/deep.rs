@@ -1,7 +1,7 @@
 use crate::capture::{game_capture, to_frame};
 use crate::hcu::{Exclusive, Hcu};
 use anyhow::{anyhow, bail, Context, Result};
-use baocr_extract::DeepFrames;
+use baocr_core::frames::DeepFrames;
 use baocr_pixels::panel_delta;
 use image::RgbImage;
 
